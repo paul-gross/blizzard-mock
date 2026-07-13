@@ -47,6 +47,8 @@ blizzard-mock-forge = "blizzard_mock.forge.cli:main"
 blizzard-mock-fixture = "blizzard_mock.fixture_workspace.cli:main"
 blizzard-mock-data = "blizzard_mock.mock_data.cli:cli"
 mock-claude-code = "blizzard_mock.harness.facades.claude_code:main"
+mock-codex = "blizzard_mock.harness.facades.codex:main"
+mock-opencode = "blizzard_mock.harness.facades.opencode:main"
 
 [dependency-groups]
 dev = [
