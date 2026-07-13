@@ -25,7 +25,10 @@ from blizzard_mock.forge.config import ForgeConfig
 @click.option("--port", envvar="BZ_FORGE_PORT", type=int, default=None, help="Bind port.")
 def main(repos_dir: str | None, host: str | None, port: int | None) -> None:
     """Serve the mock GitHub forge over a directory of bare git repos."""
-    config = ForgeConfig.from_env(repos_dir=repos_dir, host=host, port=port)
+    try:
+        config = ForgeConfig.from_env(repos_dir=repos_dir, host=host, port=port)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     app = create_app(config)
     uvicorn.run(app, host=config.host, port=config.port)
 
