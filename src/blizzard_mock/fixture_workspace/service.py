@@ -30,7 +30,7 @@ class IGit(Protocol):
         """Create a bare repository at ``path`` (the ``file://`` origin)."""
         ...
 
-    def seed_repo(self, bare: Path, files: Mapping[str, str], message: str, branch: str = "master") -> None:
+    def seed_repo(self, bare: Path, files: Mapping[str, str], message: str, branch: str = "main") -> None:
         """Commit ``files`` as the initial history of bare repo ``bare`` on ``branch``."""
         ...
 

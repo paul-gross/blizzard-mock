@@ -80,7 +80,7 @@ class GitBackend:
         try:
             ref = repo.git.symbolic_ref("HEAD")
         except GitCommandError:
-            return "master"
+            return "main"
         return ref.removeprefix("refs/heads/")
 
     # -- reads -------------------------------------------------------------

@@ -63,7 +63,7 @@ armed.
 | `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base`; 405 conflict, 409 stale-sha |
 | `GET /repos/{o}/{r}/pulls/{n}/merge` | Merged-check → 204 / 404 |
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
-| `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/master`) → sha |
+| `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `GET /healthz` | Liveness |
 
 ## Lever surface (`/_levers`)

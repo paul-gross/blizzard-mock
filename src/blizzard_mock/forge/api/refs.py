@@ -1,7 +1,7 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
 ``GET /repos/{o}/{r}/commits/{ref}`` and ``GET /repos/{o}/{r}/git/ref/{ref}``
-(e.g. ``heads/master``) let a delivery flow confirm a landed commit is reachable
+(e.g. ``heads/main``) let a delivery flow confirm a landed commit is reachable
 on the base branch.
 """
 
@@ -37,7 +37,7 @@ def get_ref(
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
 ) -> dict[str, Any]:
-    # GitHub addresses a ref as e.g. ``heads/master``; resolve its short name.
+    # GitHub addresses a ref as e.g. ``heads/main``; resolve its short name.
     short = ref.removeprefix("heads/")
     sha = service.resolve_ref(owner, repo, short)
     return ser.ref_json(f"{owner}/{repo}", f"refs/{ref}", sha, base_url)

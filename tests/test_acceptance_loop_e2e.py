@@ -23,7 +23,7 @@ and merges — with no in-process shortcuts:
    the program;
 6. **push** the branch to the ``file://`` origin;
 7. open a **PR** at the forge and **merge** it over the API — the delivery seam;
-8. assert the commit is **reachable from the bare repo's master** at both ends:
+8. assert the commit is **reachable from the bare repo's main** at both ends:
    git ancestry in the bare origin, and the forge's merged-check (``204``).
 
 Slow and environment-bound (a real ``winter ws init``, a real forge subprocess),
@@ -179,7 +179,7 @@ def test_acceptance_loop_lands_a_mock_commit_the_forge_merges(tmp_path: Path) ->
     layout: FixtureLayout = svc.mint("e2e")
 
     # 2. Create a feature env inside the fixture — the runner's acquire path. The
-    #    toy-api worktree lands on branch `work`, based on the origin's master.
+    #    toy-api worktree lands on branch `work`, based on the origin's main.
     SubprocessWinterCli().run(layout.workspace, ["ws", "init", FIXTURE_ENV])
     worktree = layout.workspace / FIXTURE_ENV / REPO_NAME
     assert worktree.is_dir(), "winter ws init did not create the fixture feature-env worktree"
@@ -195,10 +195,10 @@ def test_acceptance_loop_lands_a_mock_commit_the_forge_merges(tmp_path: Path) ->
 
     # 3. Start the real forge fronting the fixture's bare origins (single git truth).
     with _forge(layout.origins, port) as forge:
-        # Sanity: the forge sees the fixture's bare repo, default branch master.
+        # Sanity: the forge sees the fixture's bare repo, default branch main.
         repo = forge.get(f"/repos/{REPO}")
         assert repo.status_code == 200, repo.text
-        assert repo.json()["default_branch"] == "master"
+        assert repo.json()["default_branch"] == "main"
 
         # 4. File an issue over the HTTP API — the work-source seam.
         issue = forge.post(
@@ -225,7 +225,7 @@ def test_acceptance_loop_lands_a_mock_commit_the_forge_merges(tmp_path: Path) ->
         #    is computed against the real refs just pushed.
         pull = forge.post(
             f"/repos/{REPO}/pulls",
-            json={"title": "land a change", "head": FIXTURE_ENV, "base": "master", "body": f"closes #{issue_number}"},
+            json={"title": "land a change", "head": FIXTURE_ENV, "base": "main", "body": f"closes #{issue_number}"},
         )
         assert pull.status_code == 201, pull.text
         pull_view = pull.json()
@@ -239,9 +239,9 @@ def test_acceptance_loop_lands_a_mock_commit_the_forge_merges(tmp_path: Path) ->
         merge_sha = merged.json()["sha"]
 
         # 8. Assert the outcome at both ends: the forge reports the PR merged, and
-        #    the mock agent's commit is reachable from the bare repo's master.
+        #    the mock agent's commit is reachable from the bare repo's main.
         assert forge.get(f"/repos/{REPO}/pulls/{number}/merge").status_code == 204
         assert forge.get(f"/repos/{REPO}/pulls/{number}").json()["merged"] is True
 
-    assert _is_ancestor(origin_bare, head_sha, "refs/heads/master"), "mock commit not reachable from bare master"
-    assert _is_ancestor(origin_bare, merge_sha, "refs/heads/master"), "merge commit not on bare master"
+    assert _is_ancestor(origin_bare, head_sha, "refs/heads/main"), "mock commit not reachable from bare main"
+    assert _is_ancestor(origin_bare, merge_sha, "refs/heads/main"), "merge commit not on bare main"

@@ -34,11 +34,11 @@ def _git(*args: str, cwd: Path | None = None) -> None:
 
 
 def _build_bare_repos(root: Path) -> Path:
-    """Mint a bare repo with branches: ``master`` (advanced), ``feature`` /
-    ``feature2`` (clean merges into master), ``clash`` (real conflict)."""
+    """Mint a bare repo with branches: ``main`` (advanced), ``feature`` /
+    ``feature2`` (clean merges into main), ``clash`` (real conflict)."""
     work = root / "work"
     work.mkdir(parents=True)
-    _git("init", "-b", "master", str(work))
+    _git("init", "-b", "main", str(work))
     _git("-C", str(work), "config", "user.email", "seed@t")
     _git("-C", str(work), "config", "user.name", "seed")
     (work / "a.txt").write_text("hello\n")
@@ -48,16 +48,16 @@ def _build_bare_repos(root: Path) -> Path:
     (work / "feature.txt").write_text("feature\n")
     _git("-C", str(work), "add", "-A")
     _git("-C", str(work), "commit", "-m", "feat")
-    _git("-C", str(work), "checkout", "-b", "feature2", "master")
+    _git("-C", str(work), "checkout", "-b", "feature2", "main")
     (work / "feature2.txt").write_text("feature2\n")
     _git("-C", str(work), "add", "-A")
     _git("-C", str(work), "commit", "-m", "feat2")
-    _git("-C", str(work), "checkout", "-b", "clash", "master")
+    _git("-C", str(work), "checkout", "-b", "clash", "main")
     (work / "a.txt").write_text("clash\n")
     _git("-C", str(work), "commit", "-am", "clash")
-    _git("-C", str(work), "checkout", "master")
-    (work / "a.txt").write_text("master change\n")
-    _git("-C", str(work), "commit", "-am", "master change")
+    _git("-C", str(work), "checkout", "main")
+    (work / "a.txt").write_text("main change\n")
+    _git("-C", str(work), "commit", "-am", "main change")
     bare = root / BARE_REL
     bare.parent.mkdir(parents=True)
     _git("clone", "--bare", str(work), str(bare))
@@ -82,7 +82,7 @@ def client(repos_dir: Path) -> Iterator[TestClient]:
         yield test_client
 
 
-def _open_pull(client: TestClient, head: str, base: str = "master") -> dict[str, Any]:
+def _open_pull(client: TestClient, head: str, base: str = "main") -> dict[str, Any]:
     return client.post(f"/repos/{REPO}/pulls", json={"title": head, "head": head, "base": base}).json()
 
 
@@ -92,7 +92,7 @@ def _open_pull(client: TestClient, head: str, base: str = "master") -> dict[str,
 def test_get_repo_reads_default_branch(client: TestClient) -> None:
     body = client.get(f"/repos/{REPO}").json()
     assert body["full_name"] == REPO
-    assert body["default_branch"] == "master"
+    assert body["default_branch"] == "main"
     assert body["owner"]["login"] == "octocat"
 
 
@@ -151,7 +151,7 @@ def test_pull_mergeability_computed_against_real_refs(client: TestClient) -> Non
 
 
 def test_create_pull_unknown_branch_rejected(client: TestClient) -> None:
-    resp = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "ghost", "base": "master"})
+    resp = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "ghost", "base": "main"})
     assert resp.status_code == 422
 
 
@@ -171,9 +171,9 @@ def test_merge_lands_commit_reachable_from_bare_main(client: TestClient, repos_d
     assert after["state"] == "closed"
     assert client.get(f"/repos/{REPO}/pulls/{number}/merge").status_code == 204
 
-    # The real assertion: the head commit is now reachable from bare master.
-    assert _is_ancestor(repos_dir, head_sha, "refs/heads/master")
-    assert _is_ancestor(repos_dir, merge_sha, "refs/heads/master")
+    # The real assertion: the head commit is now reachable from bare main.
+    assert _is_ancestor(repos_dir, head_sha, "refs/heads/main")
+    assert _is_ancestor(repos_dir, merge_sha, "refs/heads/main")
 
 
 def test_real_conflict_merge_is_405(client: TestClient) -> None:
@@ -207,13 +207,13 @@ def test_close_without_merge_is_terminal(client: TestClient) -> None:
 
 
 def test_get_ref_and_commit(client: TestClient) -> None:
-    ref = client.get(f"/repos/{REPO}/git/ref/heads/master").json()
-    assert ref["ref"] == "refs/heads/master"
+    ref = client.get(f"/repos/{REPO}/git/ref/heads/main").json()
+    assert ref["ref"] == "refs/heads/main"
     sha = ref["object"]["sha"]
 
     commit = client.get(f"/repos/{REPO}/commits/{sha}").json()
     assert commit["sha"] == sha
-    assert commit["commit"]["message"].strip() == "master change"
+    assert commit["commit"]["message"].strip() == "main change"
 
 
 # -- levers: catalog -------------------------------------------------------
@@ -271,7 +271,7 @@ def test_externally_merged_lever_lands_and_is_detectable(client: TestClient, rep
     assert view["merged"] is True
     assert view["merged_by"]["login"] == "external"
     assert client.get(f"/repos/{REPO}/pulls/{number}/merge").status_code == 204
-    assert _is_ancestor(repos_dir, head_sha, "refs/heads/master")
+    assert _is_ancestor(repos_dir, head_sha, "refs/heads/main")
 
 
 def test_comment_midflight_lever(client: TestClient) -> None:

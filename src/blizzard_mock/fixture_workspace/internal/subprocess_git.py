@@ -29,10 +29,10 @@ class SubprocessGit:
 
     def init_bare(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._git(["init", "--bare", "--initial-branch=master", str(path)])
+        self._git(["init", "--bare", "--initial-branch=main", str(path)])
         log.debug("fixture.git.init_bare", path=str(path))
 
-    def seed_repo(self, bare: Path, files: Mapping[str, str], message: str, branch: str = "master") -> None:
+    def seed_repo(self, bare: Path, files: Mapping[str, str], message: str, branch: str = "main") -> None:
         with tempfile.TemporaryDirectory(prefix="blizzard-mock-seed-") as tmp:
             work = Path(tmp)
             self._git(["init", f"--initial-branch={branch}", str(work)])

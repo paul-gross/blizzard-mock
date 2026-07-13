@@ -42,7 +42,7 @@ uv run pytest
 `tests/test_acceptance_loop_e2e.py` (pytest marker `e2e`) is the fleet's standing
 end-to-end proof — the P4 exit criterion of `implementation/bootstrap.md`: a
 scripted prompt, run through the mock harness in a fixture-workspace env, lands a
-commit the mock forge merges to bare `master`, with no blizzard code involved. It
+commit the mock forge merges to bare `main`, with no blizzard code involved. It
 wires every component over its real seam (forge over HTTP, harness over its façade
 CLI, git over real `file://` pushes and merges). Run it with:
 

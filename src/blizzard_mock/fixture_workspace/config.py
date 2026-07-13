@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 
-def render_config_toml(repos: Sequence[tuple[str, str]], *, main_branch: str = "master") -> str:
+def render_config_toml(repos: Sequence[tuple[str, str]], *, main_branch: str = "main") -> str:
     """Render a minimal fixture ``.winter/config.toml``.
 
     ``repos`` is a sequence of ``(name, url)`` pairs; ``url`` is the ``file://``

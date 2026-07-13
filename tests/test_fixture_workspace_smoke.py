@@ -97,7 +97,7 @@ def test_scratch_layout_convention() -> None:
 
 def test_render_config_toml_declares_file_origins() -> None:
     text = render_config_toml([("toy-api", "file:///x/toy-api.git")])
-    assert 'main_branch = "master"' in text
+    assert 'main_branch = "main"' in text
     assert "[[project_repository]]" in text
     assert 'name = "toy-api"' in text
     assert 'url = "file:///x/toy-api.git"' in text

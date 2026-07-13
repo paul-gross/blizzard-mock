@@ -20,7 +20,7 @@ exactly the behavior that must be *seen* working — so the fixture workspace is
 **One git truth.** The bare origins this mints are the **same repos the mock
 forge fronts** (`blizzard_mock.forge`) — so a mock harness's real commit pushes
 to a `file://` origin, the forge mints a PR against that same repo, and the merge
-is a real merge into bare `master`. The origins directory is exposed by
+is a real merge into bare `main`. The origins directory is exposed by
 `blizzard-mock-fixture path --part origins` for exactly this wiring.
 
 **No network — a local winter framework.** The winter framework the fixture runs
