@@ -61,6 +61,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end acceptance proof that wires the whole mock fleet over real seams (slow; needs a local winter source). Run with `pytest -m e2e`.",
+]
 
 [tool.pyright]
 include = ["src", "tests"]
