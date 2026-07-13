@@ -1,27 +1,34 @@
 """Entrypoint for the mock GitHub forge service (``blizzard-mock-forge``).
 
-Stub: prints usage and exits 0. The Build step replaces this with a real
-uvicorn launch of the forge FastAPI app, bound to ``BZ_FORGE_PORT`` and backed
-by the bare-repo directory.
+Resolves config (``--repos-dir`` / ``BZ_FORGE_REPOS_DIR``, ``--host`` /
+``BZ_FORGE_HOST``, ``--port`` / ``BZ_FORGE_PORT``) and serves the forge FastAPI
+app with uvicorn, bound to the winter service band.
 """
 
 from __future__ import annotations
 
-_USAGE = """\
-blizzard-mock-forge — mock GitHub forge service (not yet implemented)
+import click
+import uvicorn
 
-Intended contract:
-  Serve the GitHub API subset blizzard touches (issues + comment threads;
-  PRs + merges) over a directory of bare git repos, with a lever surface for
-  edge states (external merge, conflict, rate-limit, unreachable, ...).
-
-  Mergeability and merges are computed/performed against REAL refs in the bare
-  repos the fixture-workspace pushes to — one git truth.
-
-See src/blizzard_mock/forge/README.md for the full contract.
-"""
+from blizzard_mock.forge.app import create_app
+from blizzard_mock.forge.config import ForgeConfig
 
 
-def main() -> None:
-    """Print usage and exit 0. Build step wires the real service."""
-    print(_USAGE)
+@click.command()
+@click.option(
+    "--repos-dir",
+    envvar="BZ_FORGE_REPOS_DIR",
+    default=None,
+    help="Directory of bare git repos the forge fronts.",
+)
+@click.option("--host", envvar="BZ_FORGE_HOST", default=None, help="Bind host.")
+@click.option("--port", envvar="BZ_FORGE_PORT", type=int, default=None, help="Bind port.")
+def main(repos_dir: str | None, host: str | None, port: int | None) -> None:
+    """Serve the mock GitHub forge over a directory of bare git repos."""
+    config = ForgeConfig.from_env(repos_dir=repos_dir, host=host, port=port)
+    app = create_app(config)
+    uvicorn.run(app, host=config.host, port=config.port)
+
+
+if __name__ == "__main__":
+    main()
