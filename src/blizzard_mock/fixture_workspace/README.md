@@ -9,30 +9,73 @@ exactly the behavior that must be *seen* working — so the fixture workspace is
 **generated but real**:
 
 - A directory of **bare git origin repos**, addressed as `file://` remotes (no
-  network, no real forge in the git path).
-- A **real winter workspace** initialized against them, with a small committed
-  history and a `.winter/config.toml` declaring them as project repos. It is a
-  real workspace root: the runner drives the real winter CLI against *it*.
-- Lives under a **per-env scratch path** keyed off the feature env (e.g.
-  `WINTER_ENV`), so two envs verifying at once never share a fixture.
+  network, no real forge in the git path), each with a small committed history.
+- A **real winter workspace** initialized against them, with a generated
+  `.winter/config.toml` declaring them as project repos. It is a real workspace
+  root: the runner drives the real `winter` CLI against *it* (`winter ws init`,
+  env creation, reset, commit, push).
+- Lives under a **per-env scratch path** keyed off the feature env (`WINTER_ENV`),
+  so two envs verifying at once never share a fixture.
 
 **One git truth.** The bare origins this mints are the **same repos the mock
 forge fronts** (`blizzard_mock.forge`) — so a mock harness's real commit pushes
-to a `file://` origin, the forge mints a PR against that same repo, and the
-merge is a real merge into bare `main`.
+to a `file://` origin, the forge mints a PR against that same repo, and the merge
+is a real merge into bare `master`. The origins directory is exposed by
+`blizzard-mock-fixture path --part origins` for exactly this wiring.
 
-## Binary
+**No network — a local winter framework.** The winter framework the fixture runs
+is cloned (`git clone --local`) from a **local winter source's committed master**
+(a workspace whose `tools/winter-cli/` ships the CLI, e.g. the blizzard
+workspace). Nothing is fetched from a remote forge.
 
-`blizzard-mock-fixture` → `blizzard_mock.fixture_workspace.cli:main`. Scaffolds
-(and tears down) a fixture workspace under the per-env scratch path.
+## Scratch-path convention & layout
 
-## Build-step plug points
+```
+<scratch_root>/<env>/            root — the whole disposable fixture
+├── origins/<repo>.git           bare git origins (the mock forge's git truth)
+├── workspace/                   the REAL winter workspace root
+│   ├── .winter/config.toml      declares the origins as file:// project repos
+│   └── tools/winter-cli/        the winter framework (from the local source)
+└── fixture.json                 provenance manifest (env, origins, source, repos)
+```
 
-- `blizzard_mock.fixture_workspace.cli:main` — the entrypoint. Currently a usage
-  stub; grows a `create` / `destroy` (and `path`) surface keyed off `WINTER_ENV`.
-- The bare-origin minting, the `winter ws init` invocation, the committed-seed
-  history, and the `.winter/config.toml` generation live under this package.
-- Coordinate the bare-repo directory layout with `blizzard_mock.forge` (shared
-  git truth) and the scenario seeding with `blizzard_mock.mock_data` (a named
-  fixture mints workspace git state + forge state + store rows together).
+`workspace/` holds both `.winter/config.toml` and `tools/winter-cli/`, so
+winter-cli's cwd-walk-up root resolution lands on the **fixture**, never the outer
+workspace the mock itself runs in — the isolation the runner-under-test needs.
+
+Resolution precedence:
+
+| Input | Flag | Env | Default |
+|-------|------|-----|---------|
+| env | `--env` | `$WINTER_ENV` | *(required)* |
+| scratch root | `--scratch-root` | `$BLIZZARD_MOCK_SCRATCH_ROOT` | `<tmpdir>/blizzard-mock/fixtures` |
+| winter source | `--winter-source` | `$BLIZZARD_MOCK_WINTER_SOURCE` | walk up from CWD for a winter workspace |
+
+The two toy project repos minted into every fixture are defined in `seed.py`
+(`toy-api`, `toy-web`).
+
+## Binary & verbs
+
+`blizzard-mock-fixture` → `blizzard_mock.fixture_workspace.cli:main` (a click group).
+
+| Verb | Effect |
+|------|--------|
+| `mint` | Mint a fresh fixture (bare origins + seed history + local winter clone + `winter ws init`). Refuses if one already exists. Prints the workspace root. |
+| `reset` | Re-mint from clean: destroy any existing fixture for the env, then mint. |
+| `destroy` | Remove the fixture directory for the env. |
+| `path [--part workspace\|origins\|root]` | Print a fixture path — the winter workspace root (default), the bare-origins dir (for the forge), or the fixture root. |
+
+## Architecture
+
+The domain core (`service.py`, `scratch.py`, `config.py`, `seed.py`) imports no
+`subprocess` / `click`: git and the winter CLI are inverted behind the `IGit` and
+`IWinterCli` Protocols (`bzh:dependency-inversion`), implemented under `internal/`
+and injected at the CLI composition root (`bzh:dependency-injection`). Unit tests
+substitute a fake winter CLI by type; the component test injects the real one.
+
+## Coordinates with
+
+- `blizzard_mock.forge` — point the forge at `path --part origins` (shared git truth).
+- `blizzard_mock.mock_data` — a named scenario fixture mints workspace git state
+  (here) alongside forge state and store rows for one consistent world.
 - Owns test file `tests/test_fixture_workspace_smoke.py`.

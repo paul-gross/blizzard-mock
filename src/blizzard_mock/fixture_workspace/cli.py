@@ -1,27 +1,141 @@
-"""Entrypoint for the fixture-workspace scaffold (``blizzard-mock-fixture``).
+"""``blizzard-mock-fixture`` — mint / destroy / reset / locate a fixture workspace.
 
-Stub: prints usage and exits 0. The Build step replaces this with the real
-scaffold — mint bare ``file://`` origins and a real winter workspace under a
-per-env scratch path, plus teardown.
+The composition root: resolves the scratch root, the target env, and the local
+winter source from flags / environment, wires the real git and winter adapters
+into :class:`FixtureWorkspaceService`, and dispatches the verb.
+
+Scratch-path convention (per-env, so two feature envs never share a fixture)::
+
+    <scratch_root>/<env>/{origins/, workspace/, fixture.json}
+
+resolved from, in precedence order:
+  * env    — ``--env`` > ``$WINTER_ENV``
+  * root   — ``--scratch-root`` > ``$BLIZZARD_MOCK_SCRATCH_ROOT`` > ``<tmp>/blizzard-mock/fixtures``
+  * winter — ``--winter-source`` > ``$BLIZZARD_MOCK_WINTER_SOURCE`` > walk up from CWD
 """
 
 from __future__ import annotations
 
-_USAGE = """\
-blizzard-mock-fixture — fixture-workspace scaffold (not yet implemented)
+import os
+import sys
+import tempfile
+from pathlib import Path
 
-Intended contract:
-  Mint a real, disposable winter workspace under a per-env scratch path
-  (keyed off WINTER_ENV): a directory of bare git origin repos as file://
-  remotes, plus a real winter workspace initialized against them with a small
-  committed history and a .winter/config.toml declaring them as project repos.
+import click
 
-  The bare origins are the SAME repos the mock forge fronts (one git truth).
+from blizzard_mock.fixture_workspace.errors import FixtureError
+from blizzard_mock.fixture_workspace.internal.subprocess_git import SubprocessGit
+from blizzard_mock.fixture_workspace.internal.subprocess_winter import SubprocessWinterCli
+from blizzard_mock.fixture_workspace.service import FixtureWorkspaceService
 
-See src/blizzard_mock/fixture_workspace/README.md for the full contract.
-"""
+_ENV_SCRATCH = "BLIZZARD_MOCK_SCRATCH_ROOT"
+_ENV_WINTER = "BLIZZARD_MOCK_WINTER_SOURCE"
+_ENV_WINTER_ENV = "WINTER_ENV"
 
 
+def _resolve_env(explicit: str | None) -> str:
+    env = explicit or os.environ.get(_ENV_WINTER_ENV)
+    if not env:
+        raise click.ClickException(f"no env: pass --env or set ${_ENV_WINTER_ENV}")
+    return env
+
+
+def _resolve_scratch_root(explicit: str | None) -> Path:
+    raw = explicit or os.environ.get(_ENV_SCRATCH)
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path(tempfile.gettempdir()) / "blizzard-mock" / "fixtures"
+
+
+def _resolve_winter_source(explicit: str | None) -> Path | None:
+    raw = explicit or os.environ.get(_ENV_WINTER)
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return _discover_winter_source(Path.cwd())
+
+
+def _discover_winter_source(start: Path) -> Path | None:
+    """Walk up from ``start`` for a local winter workspace (``.winter/config.toml`` + ``tools/winter-cli``)."""
+    for directory in [start, *start.parents]:
+        if (directory / ".winter" / "config.toml").is_file() and (directory / "tools" / "winter-cli").is_dir():
+            return directory
+    return None
+
+
+def _service(scratch_root: str | None, winter_source: str | None) -> FixtureWorkspaceService:
+    return FixtureWorkspaceService(
+        git=SubprocessGit(),
+        winter=SubprocessWinterCli(),
+        scratch_root=_resolve_scratch_root(scratch_root),
+        winter_source=_resolve_winter_source(winter_source),
+    )
+
+
+_env_opt = click.option("--env", "env_", default=None, help="Feature env keying the fixture (default $WINTER_ENV).")
+_scratch_opt = click.option("--scratch-root", default=None, help=f"Fixtures base dir (default ${_ENV_SCRATCH}).")
+_winter_opt = click.option(
+    "--winter-source", default=None, help=f"Local winter workspace to clone (default ${_ENV_WINTER})."
+)
+
+
+@click.group()
+@click.version_option(package_name="blizzard-mock")
 def main() -> None:
-    """Print usage and exit 0. Build step wires the real scaffold."""
-    print(_USAGE)
+    """Mint and manage disposable, real winter fixture workspaces."""
+
+
+@main.command()
+@_env_opt
+@_scratch_opt
+@_winter_opt
+def mint(env_: str | None, scratch_root: str | None, winter_source: str | None) -> None:
+    """Mint a fresh fixture workspace (bare origins + real winter workspace + ws init)."""
+    try:
+        layout = _service(scratch_root, winter_source).mint(_resolve_env(env_))
+    except FixtureError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(str(layout.workspace))
+
+
+@main.command()
+@_env_opt
+@_scratch_opt
+def destroy(env_: str | None, scratch_root: str | None) -> None:
+    """Remove the fixture workspace for the env."""
+    try:
+        removed = _service(scratch_root, None).destroy(_resolve_env(env_))
+    except FixtureError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("destroyed" if removed else "nothing to destroy")
+
+
+@main.command()
+@_env_opt
+@_scratch_opt
+@_winter_opt
+def reset(env_: str | None, scratch_root: str | None, winter_source: str | None) -> None:
+    """Re-mint the fixture from clean (destroy if present, then mint)."""
+    try:
+        layout = _service(scratch_root, winter_source).reset(_resolve_env(env_))
+    except FixtureError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(str(layout.workspace))
+
+
+@main.command()
+@_env_opt
+@_scratch_opt
+@click.option(
+    "--part",
+    type=click.Choice(["workspace", "origins", "root"]),
+    default="workspace",
+    help="Which path to print: the winter workspace root, the bare-origins dir, or the fixture root.",
+)
+def path(env_: str | None, scratch_root: str | None, part: str) -> None:
+    """Print a fixture path (workspace root by default; origins for the mock forge)."""
+    layout = _service(scratch_root, None).layout(_resolve_env(env_))
+    click.echo(str(getattr(layout, part)))
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
