@@ -1,0 +1,77 @@
+[project]
+name = "blizzard-mock"
+version = "0.1.0"
+description = "The blizzard mock fleet: mock GitHub forge, fixture-workspace scaffold, mock coding-harness engine + facades, and the mock-data CLI."
+requires-python = ">=3.12"
+# Every dependency the four components will need is declared up-front so
+# parallel component builders rarely have to touch this file (see
+# ORCHESTRATION.md, P4 parallel-build protocol). Add a dep only when a
+# component genuinely needs one that is missing here.
+dependencies = [
+    # HTTP surface — the mock GitHub forge (and any future mock hub/runner
+    # HTTP facade) is a FastAPI app served by uvicorn.
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # httpx backs FastAPI's TestClient and the in-process clients the
+    # component/service tiers use to drive the forge.
+    "httpx>=0.27.0",
+    # CLI surface — every entrypoint (forge, fixture, mock-data, facades).
+    "click>=8.1.0",
+    # Domain models and request/response schemas.
+    "pydantic>=2.0.0",
+    # Structured logging, per blizzard-harness standards/logging.md
+    # (bzh:structlog-logging).
+    "structlog>=24.0.0",
+    # Store access for the mock-data CLI — it resets/seeds the hub and runner
+    # stores, which are SQLAlchemy over sqlite or postgres (portable-SQL,
+    # bzh:sql-portable). psycopg is the postgres driver those stores use.
+    "sqlalchemy>=2.0,<3.0",
+    "psycopg[binary]>=3.2.0",
+    # Git plumbing — the forge's bare-repo backing model and the
+    # fixture-workspace scaffold both drive real git.
+    "gitpython>=3.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blizzard_mock"]
+
+# Entrypoints reserved for the four component binaries. The Build step fills
+# these in; the scaffolded stubs print usage and exit 0 (mock-data is a real
+# click group). See each package's README for its contract.
+[project.scripts]
+blizzard-mock-forge = "blizzard_mock.forge.cli:main"
+blizzard-mock-fixture = "blizzard_mock.fixture_workspace.cli:main"
+blizzard-mock-data = "blizzard_mock.mock_data.cli:cli"
+mock-claude-code = "blizzard_mock.harness.facades.claude_code:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.8.0",
+    "pyright>=1.1.380",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501", "B008"]
