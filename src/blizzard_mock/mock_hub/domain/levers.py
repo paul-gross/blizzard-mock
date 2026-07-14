@@ -1,0 +1,47 @@
+"""The mock hub's lever vocabulary — the edge states a runner-under-test must survive.
+
+The six levers named in ``implementation/mocking.md`` ("delay a response, drop a
+delivery/completion ack, return a conflicting fact, go unreachable mid-lease, replay a
+message, serve a stale envelope"), realised on the hub's side of the wire. Each steers
+the response a real runner (or the mock runner) receives so an edge case becomes "pull
+the lever that names the state" rather than "contrive the daemon into it".
+
+The store, arm/clear/find semantics, and the ``/_levers`` shape are the shared primitive
+(``blizzard_mock.levers``); this module supplies only the kind enum and the catalog.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class HubLever(StrEnum):
+    """The named states the mock hub can be steered into."""
+
+    #: Sleep ``payload.ms`` before answering a request (delay a response).
+    DELAY = "delay"
+    #: Apply a completion's write for real, then answer 503 — the ack is dropped though
+    #: the transition landed; the runner re-flushes and the re-apply is idempotent (D-090).
+    DROP_ACK = "drop_ack"
+    #: ``GET /chunks/{id}`` reports a route held by a *different* runner
+    #: (``payload.runner_id``) — a conflicting locator fact the runner detects.
+    CONFLICTING_FACT = "conflicting_fact"
+    #: Every request answers 503 (go unreachable). With ``remaining=N`` it heals after N
+    #: affected calls — the "unreachable *mid-lease*, then recover" window.
+    UNREACHABLE = "unreachable"
+    #: The next completion's apply-response is the *previous* one replayed — a duplicate
+    #: delivery the runner must absorb without double-acting.
+    REPLAY = "replay"
+    #: ``GET /chunks/{id}/envelope`` stamps a **stale** (``latest_epoch - 1``) fence, so a
+    #: completion built from it is rejected as a zombie (D-007) — stale-envelope handling.
+    STALE_ENVELOPE = "stale_envelope"
+
+
+CATALOG: dict[str, str] = {
+    HubLever.DELAY.value: "delay a response by payload.ms milliseconds",
+    HubLever.DROP_ACK.value: "apply the completion but drop the ack (503); re-apply is idempotent (D-090)",
+    HubLever.CONFLICTING_FACT.value: "GET chunk reports a route held by payload.runner_id (conflicting fact)",
+    HubLever.UNREACHABLE.value: "all requests 503; remaining=N heals after N calls (unreachable mid-lease)",
+    HubLever.REPLAY.value: "re-emit the previous completion apply-response (duplicate delivery)",
+    HubLever.STALE_ENVELOPE.value: "GET envelope stamps a stale (latest_epoch-1) fence (D-007)",
+}

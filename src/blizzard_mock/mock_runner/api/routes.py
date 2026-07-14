@@ -1,0 +1,106 @@
+"""The mock runner's control surface — its own HTTP API.
+
+Two families: the runner's thin **served surface** (``/api/health``, ``/api/ready``) that
+mirrors the real runner, and the **drive** plane (``/_drive/*``) a test POSTs to so the
+driver performs a runner-role call against the hub and reports what it observed. The
+``/_levers`` plane arms the runner-side distortions. Controllers hold only the
+``MockRunnerService`` (``bzh:controller-read-only``).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Request
+
+from blizzard_mock.levers import Lever, LeverParams
+from blizzard_mock.mock_runner.domain.levers import CATALOG, RunnerLever
+from blizzard_mock.mock_runner.domain.models import ChunkQueryBody, ClaimBody, CompleteBody
+from blizzard_mock.mock_runner.domain.service import MockRunnerService
+
+api_router = APIRouter(prefix="/api", tags=["runner"])
+drive_router = APIRouter(prefix="/_drive", tags=["control"])
+levers_router = APIRouter(prefix="/_levers", tags=["control"])
+
+
+def get_service(request: Request) -> MockRunnerService:
+    service: MockRunnerService = request.app.state.service
+    return service
+
+
+@api_router.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@api_router.get("/ready")
+def ready() -> dict[str, bool]:
+    return {"ready": True}
+
+
+@drive_router.post("/register")
+def drive_register(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.register()
+
+
+@drive_router.post("/peek")
+def drive_peek(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.peek()
+
+
+@drive_router.post("/claim")
+def drive_claim(body: ClaimBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.claim(body.chunk_id, body.environment_ids)
+
+
+@drive_router.post("/complete")
+def drive_complete(body: CompleteBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.complete(body.chunk_id, body.choice)
+
+
+@drive_router.post("/get-chunk")
+def drive_get_chunk(
+    body: ChunkQueryBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.get_chunk(body.chunk_id)
+
+
+@drive_router.post("/reset")
+def drive_reset(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, bool]:
+    service.reset()
+    return {"reset": True}
+
+
+@levers_router.get("")
+def list_levers(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return {
+        "catalog": CATALOG,
+        "levers": sorted(k.value for k in RunnerLever),
+        "active": [lever.model_dump() for lever in service.levers.active()],
+    }
+
+
+@levers_router.post("/reset")
+def reset_levers(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, bool]:
+    service.levers.clear_all()
+    return {"cleared": True}
+
+
+@levers_router.post("/{kind}")
+def arm_lever(
+    kind: str, params: LeverParams, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    valid = {k.value for k in RunnerLever}
+    if kind not in valid:
+        return {"error": f"unknown lever {kind!r}", "levers": sorted(valid)}
+    lever = Lever(kind=kind, chunk_id=params.chunk_id, remaining=params.remaining, payload=params.payload)
+    service.levers.arm(lever)
+    return {"armed": lever.model_dump()}
+
+
+@levers_router.delete("/{kind}")
+def clear_lever(
+    kind: str, service: Annotated[MockRunnerService, Depends(get_service)], chunk_id: str | None = None
+) -> dict[str, Any]:
+    service.levers.clear(kind, chunk_id)
+    return {"cleared": kind, "chunk_id": chunk_id}
