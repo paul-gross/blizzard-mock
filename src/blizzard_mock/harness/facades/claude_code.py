@@ -17,6 +17,8 @@ Surface mimicked (``design/harness-adapters.md``):
   adapter's ``verdict`` parses (``<Choice>{name}</Choice>`` rides ``result``).
 - ``--settings <path>`` (the runner-owned worker hook file) is accepted and
   ignored — the mock has no hooks to load.
+- ``--model <name>`` (the pinned worker model) is accepted and ignored — the mock
+  is model-agnostic.
 
 Fenced: the engine refuses to run unless test scaffolding marks the environment,
 so ``mock-claude-code`` can never pass as a real ``claude`` binding.
@@ -84,6 +86,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default=None)
     parser.add_argument("--resume", default=None, metavar="SESSION_ID")
     parser.add_argument("--settings", default=None, help="accepted and ignored (mock has no hooks)")
+    parser.add_argument("--model", default=None, help="accepted and ignored (mock is model-agnostic)")
     return parser
 
 
