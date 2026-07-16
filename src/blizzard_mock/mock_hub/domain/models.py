@@ -88,8 +88,11 @@ class NodeSpec(BaseModel):
 
 
 class PmPointerSpec(BaseModel):
-    provider: str
-    url: str
+    """One ``{source, ref}`` PM pointer (D-105) — mirrors the hub's own pointer wire
+    (``blizzard.wire.chunk.PmPointerModel``)."""
+
+    source: str
+    ref: str
 
 
 class ChunkSpec(BaseModel):

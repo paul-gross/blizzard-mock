@@ -33,7 +33,7 @@ _SPEC = {
         },
         "deliver": {"executor": "hub", "mode": "merge-to-main"},
     },
-    "pm_pointers": [{"provider": "github", "url": "o/r/issues/1"}],
+    "pm_pointers": [{"source": "o-r", "ref": "1"}],
 }
 
 
