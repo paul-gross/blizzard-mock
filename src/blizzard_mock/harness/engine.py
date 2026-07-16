@@ -51,6 +51,17 @@ STATE_DIR_ENV_VAR = "BLIZZARD_MOCK_HARNESS_STATE_DIR"
 #: Optional command the ``ask`` helper shells out to (the real runner ask path),
 #: e.g. ``"blizzard runner ask"``. Absent in unit tests — the ask is emit-only.
 ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
+#: The runner-injected, comma-separated workdirs of the environments the chunk holds.
+#: The runner spawns a worker at the *workspace root* and names its env(s) in the
+#: preamble prompt instead (blizzard issue #17), so cwd is no longer the worktree to
+#: work in. A real agent reads that prose and goes there; the mock reads this.
+ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
+
+#: Header of the machine-local facts table the runner prepends to every spawn prompt
+#: (``design/harness-adapters.md``: the delivered prompt is "the hub's node envelope
+#: plus the runner's machine-local preamble"). It is prose, not program — see
+#: :func:`split_worker_preamble`.
+PREAMBLE_TABLE_HEADER = "| Field | Value |"
 
 #: Structured markers the facade wire embeds so a dumb adapter can parse the two
 #: reply shapes out of the harness-native output (mirrors Claude Code's tagged
@@ -201,8 +212,57 @@ def fenced_env(base: Mapping[str, str] | None = None, **extra: str) -> dict[str,
 
 
 # --------------------------------------------------------------------------- #
-# State location & ask dispatch
+# Worktree resolution, state location & ask dispatch
 # --------------------------------------------------------------------------- #
+
+
+def split_worker_preamble(prompt: str) -> tuple[str, str]:
+    """Split a spawn prompt into ``(preamble, behavior_script)``.
+
+    The prompt is the program — but only the *envelope* half of it. The runner prepends a
+    machine-local preamble to every spawn: the operator's workspace prose, then a facts
+    table naming the held environments (blizzard issue #17, ``design/harness-adapters.md``).
+    That preamble is addressed to an agent's judgement, not to ``exec`` — feeding it to the
+    interpreter is a ``SyntaxError`` on the table's first pipe, which would fail the turn
+    before the script it precedes ever runs.
+
+    The preamble always ends with its facts table, and the table's rows are contiguous, so
+    the script is whatever follows the last row of the table opened by
+    :data:`PREAMBLE_TABLE_HEADER`. Returns ``("", prompt)`` when no preamble is present —
+    a resume message and every direct engine caller pass a bare script.
+    """
+    lines = prompt.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == PREAMBLE_TABLE_HEADER)
+    except StopIteration:
+        return "", prompt
+    end = start
+    while end + 1 < len(lines) and lines[end + 1].lstrip().startswith("|"):
+        end += 1
+    return "\n".join(lines[: end + 1]), "\n".join(lines[end + 1 :]).lstrip("\n")
+
+
+def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
+    """The worktree a behavior-script runs in: the first held env's workdir, else ``cwd``.
+
+    The runner spawns a worker at the **workspace root** and names the environments it
+    holds in the preamble prompt (blizzard issue #17) — so the process cwd is the
+    workspace, not the worktree the node is supposed to touch. A real agent reads the
+    preamble and works in the named env; this is the mock's equivalent of obeying it,
+    reading the same fact off :data:`ENV_WORKDIRS_ENV_VAR` (which the adapter injects
+    alongside the prompt). The first workdir is the one chosen, matching the adapter's
+    own single-env fallback.
+
+    Falls back to ``cwd`` when the variable is absent or empty — direct engine callers
+    (the mock's own tests, ``blizzard-mock:e2e``, manual runs) drive it from inside the
+    worktree and never set it. A named workdir that does not exist is ignored rather
+    than trusted, so a stale value degrades to today's behavior instead of erroring.
+    """
+    raw = env.get(ENV_WORKDIRS_ENV_VAR, "")
+    for candidate in (part.strip() for part in raw.split(",")):
+        if candidate and Path(candidate).is_dir():
+            return Path(candidate)
+    return cwd
 
 
 def _state_root(env: Mapping[str, str], cwd: Path) -> Path:
@@ -285,8 +345,10 @@ def run_prompt(
 
     from blizzard_mock.harness.facades._text import PlainTextWire
 
-    cwd = Path(cwd) if cwd is not None else Path.cwd()
     env = env if env is not None else os.environ
+    # An explicit cwd wins; otherwise work in the env the runner handed us, which is not
+    # the process cwd once the worker is spawned at the workspace root (issue #17).
+    cwd = Path(cwd) if cwd is not None else acquired_worktree(env, Path.cwd())
     wire = wire if wire is not None else PlainTextWire()
     stream: IO[str] = out if out is not None else sys.stdout
 
@@ -314,12 +376,21 @@ def run_prompt(
         ask_cmd=_ask_cmd(env),
     )
 
-    _log.info("mock harness run", session_id=session_id, resume=is_resume, cwd=str(cwd))
+    # The runner's preamble rides ahead of the envelope on a spawn; it is prose for an
+    # agent to read, not code to run, so only the script half reaches the interpreter.
+    preamble, script = split_worker_preamble(prompt)
+    _log.info(
+        "mock harness run",
+        session_id=session_id,
+        resume=is_resume,
+        cwd=str(cwd),
+        preamble_stripped=bool(preamble),
+    )
     token = _CURRENT.set(ctx)
     started = time.monotonic()
     try:
         with _chdir(cwd):
-            exec(compile(prompt, "<behavior-script>", "exec"), _script_globals(ctx))
+            exec(compile(script, "<behavior-script>", "exec"), _script_globals(ctx))
         result = ctx.result or RunResult(session_id=session_id, subtype="success")
     except _AskExit as exc:
         result = ctx.result or RunResult(session_id=session_id, subtype="ask", ask=exc.ask, text=exc.ask.question)

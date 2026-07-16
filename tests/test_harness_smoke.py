@@ -282,3 +282,101 @@ def test_plain_text_wire_renders_ask() -> None:
 
     result = engine.RunResult(session_id="s", subtype="ask", ask=Ask("q?", ["a", "b"]))
     assert PlainTextWire().render(result) == '<Ask options="a|b">q?</Ask>\n'
+
+
+# --------------------------------------------------------------------------- #
+# The runner's spawn preamble (blizzard issue #17)
+# --------------------------------------------------------------------------- #
+
+
+def test_split_worker_preamble_returns_the_script_half() -> None:
+    prompt = (
+        "You are a fleet worker in this winter workspace.\n\n"
+        "| Field | Value |\n"
+        "|-------|-------|\n"
+        "| runner id | `runner-local` |\n"
+        "| environment workdir | `/w/e1` |\n\n"
+        "verdict('pass')\n"
+    )
+    preamble, script = engine.split_worker_preamble(prompt)
+
+    assert "| environment workdir | `/w/e1` |" in preamble
+    assert script == "verdict('pass')"
+
+
+def test_split_worker_preamble_passes_a_bare_script_through() -> None:
+    # A resume message and every direct engine caller send no preamble.
+    assert engine.split_worker_preamble("verdict('pass')\n") == ("", "verdict('pass')\n")
+
+
+def test_preamble_prefixed_prompt_still_runs_its_script(fenced_repo) -> None:
+    """The runner prepends a facts table to every spawn prompt; exec'ing it is a
+    SyntaxError, which would fail the turn before the script ever runs."""
+    cwd, _ = fenced_repo
+    prompt = f"| Field | Value |\n|-------|-------|\n| environment workdir | `{cwd}` |\n\nverdict('pass', 'ran')\n"
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
+
+
+# --------------------------------------------------------------------------- #
+# The acquired worktree (blizzard issue #17: cwd is the workspace root)
+# --------------------------------------------------------------------------- #
+
+
+def test_acquired_worktree_prefers_the_named_env_workdir(tmp_path: Path) -> None:
+    workspace, workdir = tmp_path / "ws", tmp_path / "ws" / "e1"
+    workdir.mkdir(parents=True)
+    env = {engine.ENV_WORKDIRS_ENV_VAR: str(workdir)}
+
+    assert engine.acquired_worktree(env, workspace) == workdir
+
+
+def test_acquired_worktree_takes_the_first_of_several(tmp_path: Path) -> None:
+    first, second = tmp_path / "e1", tmp_path / "e2"
+    first.mkdir()
+    second.mkdir()
+    env = {engine.ENV_WORKDIRS_ENV_VAR: f"{first},{second}"}
+
+    assert engine.acquired_worktree(env, tmp_path) == first
+
+
+def test_acquired_worktree_falls_back_to_cwd(tmp_path: Path) -> None:
+    # Absent (direct engine callers), empty, and stale-path values all degrade to cwd.
+    assert engine.acquired_worktree({}, tmp_path) == tmp_path
+    assert engine.acquired_worktree({engine.ENV_WORKDIRS_ENV_VAR: ""}, tmp_path) == tmp_path
+    assert engine.acquired_worktree({engine.ENV_WORKDIRS_ENV_VAR: "/nonexistent/e9"}, tmp_path) == tmp_path
+
+
+def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_path: Path) -> None:
+    """A spawned worker's cwd is the workspace root; the script must still touch its env."""
+    repo, env = fenced_repo
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    env = {**env, engine.ENV_WORKDIRS_ENV_VAR: str(repo)}
+    captured: list[engine.RunResult] = []
+
+    class _Wire:
+        def render(self, result: engine.RunResult) -> str:
+            captured.append(result)
+            return ""
+
+    import os
+
+    prior = os.getcwd()
+    os.chdir(workspace)  # stand where the runner spawns the worker
+    try:
+        engine.run_prompt(
+            "import pathlib; pathlib.Path('made-here.txt').write_text('x')\n",
+            wire=_Wire(),
+            env=env,
+            out=sys.stdout,
+        )
+    finally:
+        os.chdir(prior)
+
+    assert (repo / "made-here.txt").is_file(), "the script ran in the workspace root, not its env"
+    assert not (workspace / "made-here.txt").exists()

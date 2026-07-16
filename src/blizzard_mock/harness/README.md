@@ -14,6 +14,19 @@ environment. A test mints a workflow graph whose node prompts are behavior
 scripts, and the code rides the real pipeline (hub envelope → runner → adapter →
 spawn), including per-attempt variation via judgement `prompt_addendum` (D-071).
 
+**…but only the envelope half of it.** The runner spawns a worker at the winter
+**workspace root** and prepends a machine-local preamble — the operator's
+workspace prose plus a facts table naming the environments the chunk holds
+(blizzard issue #17, `design/harness-adapters.md`). That preamble is addressed to
+an agent's judgement, not to `exec`, and the cwd it arrives with is the
+workspace, not the worktree the node must touch. A real agent reads the prose and
+goes to its env; the mock does the analogous thing without an LLM:
+`engine.split_worker_preamble()` drops the preamble so only the script runs, and
+`engine.acquired_worktree()` reads the env's workdir off `BLIZZARD_ENV_WORKDIRS`
+(injected alongside the prompt) so the script still runs *in the acquired
+worktree*. Both no-op for a direct caller: a bare script with no preamble, and no
+`BLIZZARD_ENV_WORKDIRS`, runs in cwd as before.
+
 A script can do anything an agent can: apply a diff and `git commit` (**real
 commits** — everything downstream of the harness seam runs for real), fire the
 ask/answer protocol by invoking `blizzard ask` and exiting (park + resume, the
