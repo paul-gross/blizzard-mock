@@ -96,7 +96,11 @@ class RunnerView(BaseModel):
     registered_at: str
     last_seen_at: str
     online: bool
-    paused: bool
+    # Two brakes, mirroring the real hub's contract (blizzard#43): the fleet's, which the
+    # runner pulls down and adheres to, and the runner's own, which it reports up. The mock
+    # only models the first — it stands in for the hub, and the hub never sets the second.
+    hub_paused: bool
+    locally_paused: bool = False
 
 
 class RunnerFactAck(BaseModel):
