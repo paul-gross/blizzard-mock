@@ -250,7 +250,7 @@ class MockHubService:
             registered_at=row.registered_at.isoformat(),
             last_seen_at=row.last_seen_at.isoformat(),
             online=True,
-            paused=row.paused,
+            hub_paused=row.paused,
         )
 
     def set_paused(self, runner_id: str, paused: bool) -> None:
