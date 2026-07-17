@@ -118,7 +118,9 @@ def test_registry_register_and_pause_readback(client: TestClient) -> None:
         client.post("/api/runners", json={"runner_id": "r1", "workspace_id": "ws"}).json()["first_registration"]
         is False
     )
-    assert client.get("/api/runners/r1").json()["paused"] is False
+    readback = client.get("/api/runners/r1").json()
+    assert readback["hub_paused"] is False
+    assert readback["locally_paused"] is False
 
 
 # --- levers -----------------------------------------------------------------
