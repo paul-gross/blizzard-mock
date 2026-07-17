@@ -24,6 +24,7 @@ from blizzard_mock.harness.engine import (
     CHOICE_CLOSE,
     CHOICE_OPEN,
     HarnessCrash,
+    RunContext,
     RunResult,
     _AskExit,
     current_context,
@@ -58,12 +59,30 @@ def apply_diff(diff: str) -> None:
     """Apply a unified ``diff`` to the acquired worktree (real ``git apply``)."""
     ctx = current_context()
     git.apply_diff(diff, cwd=ctx.cwd, env=ctx.env)
+    _record_tool_turn(ctx, "Edit", {"diff": diff}, output="diff applied")
 
 
 def commit(message: str) -> str:
     """Make a real ``git commit`` in the acquired worktree; return the commit sha."""
     ctx = current_context()
-    return git.commit(message, cwd=ctx.cwd, env=ctx.env)
+    sha = git.commit(message, cwd=ctx.cwd, env=ctx.env)
+    _record_tool_turn(ctx, "Bash", {"command": f"git commit -am {message!r}"}, output=f"[main {sha[:7]}] {message}")
+    return sha
+
+
+def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object], *, output: str) -> None:
+    """Mint a matched ``tool_use``/``tool_result`` pair on the transcript, if one is wired.
+
+    ``apply_diff`` and ``commit`` are the two real "tool calls" a mock script
+    performs, so pairing them is the fidelity worth having: a mocked conversation
+    shows real-looking tool turns with output, with no extra work from the
+    behavior-script author. No-op when no transcript writer is bound (every facade
+    but claude_code, and any direct engine caller that passes none).
+    """
+    if ctx.transcript is None:
+        return
+    tool_use_id = ctx.transcript.record_tool_call(name, tool_input)
+    ctx.transcript.record_tool_result(tool_use_id, output)
 
 
 def verdict(choice: str, assessment: str = "") -> None:

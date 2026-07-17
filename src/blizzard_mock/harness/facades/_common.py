@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from blizzard_mock.harness.engine import FenceError, IHarnessWire, run_prompt
+from blizzard_mock.harness.engine import FenceError, IHarnessWire, ITranscriptWriter, run_prompt
 
 #: Exit code a facade returns when the engine's fence refuses the run. Distinct
 #: from a behavior-script error (1) so callers can tell "refused" from "ran and
@@ -41,10 +41,15 @@ def dispatch(
     script: str,
     session_id: str | None,
     is_resume: bool,
+    transcript: ITranscriptWriter | None = None,
 ) -> int:
-    """Run ``script`` through the engine, mapping a fence refusal to an error exit."""
+    """Run ``script`` through the engine, mapping a fence refusal to an error exit.
+
+    ``transcript`` rides straight through to :func:`~blizzard_mock.harness.engine.
+    run_prompt`; only the claude_code facade ever supplies one.
+    """
     try:
-        return run_prompt(script, wire=wire, session_id=session_id, is_resume=is_resume)
+        return run_prompt(script, wire=wire, session_id=session_id, is_resume=is_resume, transcript=transcript)
     except FenceError as exc:
         print(str(exc), file=sys.stderr)
         return FENCE_EXIT_CODE

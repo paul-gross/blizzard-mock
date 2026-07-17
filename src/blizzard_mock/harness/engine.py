@@ -69,6 +69,13 @@ PREAMBLE_TABLE_HEADER = "| Field | Value |"
 CHOICE_OPEN = "<Choice>"
 CHOICE_CLOSE = "</Choice>"
 
+#: The transcript's user-turn text when no preamble prose is available to show. A
+#: transcript reader must never see the raw exec'd Python as "what the user said"
+#: (it would misrepresent the script as prose an agent read) — these stand in for
+#: both the received prompt and a resume message, which also arrives as code.
+_TRANSCRIPT_SPAWN_TEXT = "(mock harness spawn — the behavior script it executed is not shown here)"
+_TRANSCRIPT_RESUME_TEXT = "(mock harness resume — the behavior script it executed is not shown here)"
+
 
 class FenceError(RuntimeError):
     """The engine refused to run because the environment is not test-marked."""
@@ -118,6 +125,37 @@ class IHarnessWire(Protocol):
         ...
 
 
+class ITranscriptWriter(Protocol):
+    """A facade's optional conversation-transcript sink — mirrors :class:`IHarnessWire`.
+
+    Only the claude_code facade constructs one (only Claude Code has a transcript
+    reader today — ``blizzard/runner/transcripts/parser.py``); every other facade
+    passes ``None`` and the engine no-ops. The engine calls into it at two defined
+    points — the spawn/resume user turn and the final result — and never renders
+    anything itself; :func:`~blizzard_mock.harness.helpers.apply_diff` and
+    :func:`~blizzard_mock.harness.helpers.commit` call ``record_tool_call`` /
+    ``record_tool_result`` directly off the run context to mint a matched
+    ``tool_use``/``tool_result`` pair for the two real "tool calls" a mock script
+    performs.
+    """
+
+    def record_user(self, text: str) -> None:
+        """Append a user turn (the spawn envelope text or a resume message)."""
+        ...
+
+    def record_result(self, result: RunResult) -> None:
+        """Append the assistant turn carrying the run's final rendered text."""
+        ...
+
+    def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
+        """Append a ``tool_use`` turn; return its id for the matching result."""
+        ...
+
+    def record_tool_result(self, tool_use_id: str, output: str) -> None:
+        """Append the ``tool_result`` turn matching a prior ``record_tool_call``."""
+        ...
+
+
 @dataclass
 class RunContext:
     """Ambient state for the currently-executing behavior script.
@@ -136,6 +174,7 @@ class RunContext:
     resume_message: str | None = None
     ask_cmd: Sequence[str] | None = None
     result: RunResult | None = None
+    transcript: ITranscriptWriter | None = None
 
 
 _CURRENT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar("blizzard_mock_run_context", default=None)
@@ -265,14 +304,24 @@ def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
     return cwd
 
 
+def fence_base_dir(cwd: Path) -> Path:
+    """The directory session/transcript state is rooted under.
+
+    The fence marker's parent, else ``cwd`` when no marker is found in the tree —
+    the same fallback :func:`_state_root` has always used, pulled out so the
+    transcript writer's own fenced fallback (``facades/_transcript.py``) shares it
+    rather than re-deriving the rule.
+    """
+    marker = find_fence_marker(cwd)
+    return marker.parent if marker is not None else cwd
+
+
 def _state_root(env: Mapping[str, str], cwd: Path) -> Path:
     """Where session files live: the override env var, else beside the fence marker."""
     override = env.get(STATE_DIR_ENV_VAR)
     if override:
         return Path(override)
-    marker = find_fence_marker(cwd)
-    base = marker.parent if marker is not None else cwd
-    return base / ".blizzard-mock-harness" / "sessions"
+    return fence_base_dir(cwd) / ".blizzard-mock-harness" / "sessions"
 
 
 def _ask_cmd(env: Mapping[str, str]) -> Sequence[str] | None:
@@ -328,6 +377,7 @@ def run_prompt(
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
     out: IO[str] | None = None,
+    transcript: ITranscriptWriter | None = None,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
@@ -340,6 +390,12 @@ def run_prompt(
     Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
     :class:`RunResult` through ``wire`` to ``out`` exactly once (a ``hang`` never
     reaches that line; a ``crash`` renders an error result).
+
+    ``transcript``, when supplied (only the claude_code facade constructs one — a
+    genuine Claude-shaped conversation is only useful where a reader exists), mints
+    the user turn for this run and the assistant turn for its result; it is also
+    bound onto the run context so ``apply_diff``/``commit`` can mint matched tool
+    turns mid-script. ``None`` (every other facade) is a total no-op.
     """
     import sys
 
@@ -374,11 +430,17 @@ def run_prompt(
         is_resume=is_resume,
         resume_message=prompt if is_resume else None,
         ask_cmd=_ask_cmd(env),
+        transcript=transcript,
     )
 
     # The runner's preamble rides ahead of the envelope on a spawn; it is prose for an
     # agent to read, not code to run, so only the script half reaches the interpreter.
     preamble, script = split_worker_preamble(prompt)
+    if transcript is not None:
+        # Never the raw script (it would misrepresent code as "what the user said");
+        # the real preamble prose when present, else a short synthetic line.
+        user_text = preamble if preamble else (_TRANSCRIPT_RESUME_TEXT if is_resume else _TRANSCRIPT_SPAWN_TEXT)
+        transcript.record_user(user_text)
     _log.info(
         "mock harness run",
         session_id=session_id,
@@ -415,6 +477,8 @@ def run_prompt(
     result.session_id = session_id
     result.num_turns = state.turns
     result.duration_ms = int((time.monotonic() - started) * 1000)
+    if transcript is not None:
+        transcript.record_result(result)
     stream.write(wire.render(result))
     stream.flush()
     return result.exit_code

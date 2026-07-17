@@ -380,3 +380,196 @@ def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_
 
     assert (repo / "made-here.txt").is_file(), "the script ran in the workspace root, not its env"
     assert not (workspace / "made-here.txt").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Conversation transcripts: the claude_code-only ITranscriptWriter (blizzard#29)
+# --------------------------------------------------------------------------- #
+
+
+def test_transcripts_root_never_defaults_to_the_real_home_claude_projects(tmp_path: Path) -> None:
+    """No ``BZ_TRANSCRIPTS_ROOT`` override must fall back to a path *under the
+    fence*, never the runner-side default (``~/.claude/projects``) — that is the
+    developer's real Claude Code session store."""
+    from blizzard_mock.harness.facades._transcript import transcripts_root
+
+    root = transcripts_root({}, fence_dir=tmp_path)
+    assert root == tmp_path / ".blizzard-mock-harness" / "transcripts"
+    assert str(Path.home() / ".claude" / "projects") not in str(root)
+
+
+def test_transcripts_root_respects_the_override(tmp_path: Path) -> None:
+    from blizzard_mock.harness.facades._transcript import TRANSCRIPTS_ROOT_ENV_VAR, transcripts_root
+
+    override = tmp_path / "elsewhere"
+    root = transcripts_root({TRANSCRIPTS_ROOT_ENV_VAR: str(override)}, fence_dir=tmp_path)
+    assert root == override
+
+
+def _real_home_claude_projects_mtime() -> float | None:
+    path = Path.home() / ".claude" / "projects"
+    return path.stat().st_mtime if path.exists() else None
+
+
+def test_claude_facade_mints_a_transcript_with_matched_tool_turns(fenced_repo, tmp_path: Path) -> None:
+    """A real spawn + apply_diff + commit + verdict, driven through the actual
+    ``mock-claude-code`` binary, mints Claude-shaped JSONL: one spawn ``user``
+    record, a matched ``tool_use``/``tool_result`` pair per ``apply_diff``/
+    ``commit`` call, and a final ``assistant`` text record — with nothing landing
+    in the developer's real ``~/.claude/projects``."""
+    cwd, env = fenced_repo
+    transcripts_dir = tmp_path / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
+    before = _real_home_claude_projects_mtime()
+
+    diff = (
+        "diff --git a/new.txt b/new.txt\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/new.txt\n"
+        "@@ -0,0 +1 @@\n"
+        "+hello from the mock\n"
+    )
+    script = f"apply_diff({diff!r})\ncommit('feat: add new.txt')\nverdict('approve', 'looks good')"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            "sess-transcript-1",
+            script,
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    assert _real_home_claude_projects_mtime() == before, "must never write to the real ~/.claude/projects"
+
+    matches = list(transcripts_dir.glob("*/sess-transcript-1.jsonl"))
+    assert len(matches) == 1
+    records = [json.loads(line) for line in matches[0].read_text().splitlines() if line.strip()]
+
+    # One spawn user turn — never the raw exec'd Python.
+    user_records = [r for r in records if r["type"] == "user" and isinstance(r["message"]["content"], str)]
+    assert len(user_records) == 1
+    assert "apply_diff(" not in user_records[0]["message"]["content"]
+    assert user_records[0]["sessionId"] == "sess-transcript-1"
+
+    # A matched tool_use/tool_result pair per apply_diff/commit call.
+    tool_use_records = [
+        r
+        for r in records
+        if r["type"] == "assistant" and any(b.get("type") == "tool_use" for b in r["message"]["content"])
+    ]
+    tool_result_records = [
+        r
+        for r in records
+        if r["type"] == "user"
+        and isinstance(r["message"]["content"], list)
+        and any(b.get("type") == "tool_result" for b in r["message"]["content"])
+    ]
+    assert len(tool_use_records) == 2  # apply_diff, commit
+    assert len(tool_result_records) == 2
+    tool_use_ids = {r["message"]["content"][0]["id"] for r in tool_use_records}
+    tool_result_ids = {r["message"]["content"][0]["tool_use_id"] for r in tool_result_records}
+    assert tool_use_ids == tool_result_ids  # every tool_use has its matching tool_result
+
+    # The final assistant text record carries the rendered verdict.
+    text_records = [
+        r for r in records if r["type"] == "assistant" and any(b.get("type") == "text" for b in r["message"]["content"])
+    ]
+    assert len(text_records) == 1
+    assert "<Choice>approve</Choice>" in text_records[0]["message"]["content"][0]["text"]
+    assert "looks good" in text_records[0]["message"]["content"][0]["text"]
+
+
+def test_claude_facade_resume_mints_another_user_and_assistant_turn(fenced_repo, tmp_path: Path) -> None:
+    cwd, env = fenced_repo
+    transcripts_dir = tmp_path / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
+    sid = "sess-transcript-resume"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--session-id",
+            sid,
+            "ask('proceed?', ['yes', 'no'])",
+        ],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--resume",
+            sid,
+            "verdict('resumed')",
+        ],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    matches = list(transcripts_dir.glob(f"*/{sid}.jsonl"))
+    assert len(matches) == 1
+    records = [json.loads(line) for line in matches[0].read_text().splitlines() if line.strip()]
+    user_text_records = [r for r in records if r["type"] == "user" and isinstance(r["message"]["content"], str)]
+    assistant_text_records = [
+        r for r in records if r["type"] == "assistant" and any(b.get("type") == "text" for b in r["message"]["content"])
+    ]
+    assert len(user_text_records) == 2  # spawn + resume
+    assert len(assistant_text_records) == 2  # the ask + the resumed verdict
+
+
+def test_claude_facade_without_session_id_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
+    """No ``--session-id``/``--resume`` means no session id is known up front, so
+    the facade skips transcript writing rather than guessing at a file name."""
+    cwd, env = fenced_repo
+    transcripts_dir = tmp_path / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "verdict('x')"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert not transcripts_dir.exists()
+
+
+def test_codex_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
+    """Only claude_code constructs a transcript writer; codex/opencode are a no-op."""
+    cwd, env = fenced_repo
+    transcripts_dir = tmp_path / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.codex", "exec", "verdict('x')"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert not transcripts_dir.exists()

@@ -1,0 +1,114 @@
+"""Claude-Code-shaped JSONL transcript writer — only the ``claude_code`` facade uses it.
+
+Mints the same record shapes the real runner's transcript parser
+(``blizzard/runner/transcripts/parser.py``) reads, so a chunk that runs through the
+mock fleet produces a conversation the runner panel can open. Only Claude Code has a
+reader today (codex/opencode have none), so only :mod:`~blizzard_mock.harness.
+facades.claude_code` constructs one; the engine's ``transcript`` parameter
+(:class:`~blizzard_mock.harness.engine.ITranscriptWriter`) is left ``None``
+everywhere else and the shared engine no-ops.
+
+Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`: the engine
+calls into it at two defined points (the spawn/resume user turn, the final
+assistant result) and never renders anything itself; ``apply_diff``/``commit``
+(``harness/helpers.py``) call ``record_tool_call``/``record_tool_result`` directly
+off the run context to mint a matched ``tool_use``/``tool_result`` pair.
+
+Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
+for a human reading the file, even though the parser does not read them (it reads
+only ``type`` and ``message.content`` in file order — no ``uuid``/``parentUuid``
+traversal). Left out entirely, matching the parser's actual needs: the
+``uuid``/``parentUuid`` DAG, ``isSidechain`` subagent sidecar files, the
+``<persisted-output>`` large-result offload wrapper, and byte-exact ANSI fidelity.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+
+from blizzard_mock.harness.engine import ITranscriptWriter, RunResult
+from blizzard_mock.harness.facades._text import render_ask_text
+
+#: Env var the runner also reads (``blizzard.runner.config.ENV_TRANSCRIPTS_ROOT``) —
+#: writer and reader must agree on this name for a mock-minted transcript to be
+#: found. **The runner-side default when this is unset is the developer's real
+#: ``~/.claude/projects`` — the mock must never fall back to that** (see
+#: :func:`transcripts_root`).
+TRANSCRIPTS_ROOT_ENV_VAR = "BZ_TRANSCRIPTS_ROOT"
+
+#: The subdirectory every session file is grouped under. The real reader locates a
+#: transcript by globbing ``<root>/*/<session_id>.jsonl`` and only consults the
+#: directory name as a multi-match tie-break — which a UUID4 session id never
+#: triggers (``internal/jsonl_transcript_repository.py``) — so one stable name is
+#: enough; replicating Claude Code's mangled-cwd directory naming buys nothing.
+PROJECT_DIR_NAME = "mock-claude-code"
+
+
+def transcripts_root(env: Mapping[str, str], *, fence_dir: Path) -> Path:
+    """Where transcript files are written for this run.
+
+    Reads the explicit :data:`TRANSCRIPTS_ROOT_ENV_VAR` override; when unset, falls
+    back to a path **under the fence** (beside the session-state directory,
+    ``engine.fence_base_dir``) rather than any real home directory. The runner
+    resolves its own unset case to ``~/.claude/projects`` — the developer's actual
+    Claude Code session store — and the mock must never write there, silently or
+    otherwise.
+    """
+    override = env.get(TRANSCRIPTS_ROOT_ENV_VAR)
+    if override:
+        return Path(override)
+    return fence_dir / ".blizzard-mock-harness" / "transcripts"
+
+
+class ClaudeTranscriptWriter:
+    """Appends Claude-Code-shaped JSONL records for one session.
+
+    One file per session at ``<root>/<PROJECT_DIR_NAME>/<session_id>.jsonl``,
+    opened in append mode per record so spawn and a later ``--resume`` (two
+    separate processes) accumulate the same conversation, exactly as session
+    state does (``harness/session.py``).
+    """
+
+    def __init__(self, *, session_id: str, root: Path, cwd: Path) -> None:
+        self._session_id = session_id
+        self._cwd = cwd
+        self._path = root / PROJECT_DIR_NAME / f"{session_id}.jsonl"
+
+    def record_user(self, text: str) -> None:
+        self._append("user", {"role": "user", "content": text})
+
+    def record_result(self, result: RunResult) -> None:
+        text = render_ask_text(result) if result.subtype == "ask" else result.text
+        self._append("assistant", {"role": "assistant", "content": [{"type": "text", "text": text}]})
+
+    def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
+        tool_use_id = f"toolu_{uuid.uuid4().hex}"
+        content = [{"type": "tool_use", "id": tool_use_id, "name": name, "input": dict(tool_input)}]
+        self._append("assistant", {"role": "assistant", "content": content})
+        return tool_use_id
+
+    def record_tool_result(self, tool_use_id: str, output: str) -> None:
+        content = [{"type": "tool_result", "tool_use_id": tool_use_id, "content": output}]
+        self._append("user", {"role": "user", "content": content})
+
+    def _append(self, record_type: str, message: dict[str, object]) -> None:
+        record = {
+            "type": record_type,
+            "sessionId": self._session_id,
+            "cwd": str(self._cwd),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "message": message,
+        }
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+
+# Typecheck-time Protocol conformance sentinel, matching the pattern
+# ``blizzard-harness:/exemplars/python/repo_pattern.py`` documents.
+def _conforms_transcript_writer(x: ClaudeTranscriptWriter) -> ITranscriptWriter:
+    return x

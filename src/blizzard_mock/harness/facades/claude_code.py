@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
-from blizzard_mock.harness.engine import RunResult
+from blizzard_mock.harness.engine import RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._text import render_ask_text
+from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter, transcripts_root
 
 _USAGE = """\
 mock-claude-code — mock Claude Code coding-harness facade
@@ -90,6 +93,24 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_transcript_writer(session_id: str | None) -> ClaudeTranscriptWriter | None:
+    """The Claude-shaped transcript writer for this run, else ``None``.
+
+    Only constructed when a session id is already known: the real runner always
+    pre-assigns one at spawn and honors it, and a resume always names one, so this
+    covers the fleet-driven path in full. A bare direct invocation that lets the
+    engine self-assign a uuid (no ``--session-id``/``--resume``) skips transcript
+    writing — that path has no session id to key the file on until the engine
+    mints one, and it is not how the runner drives this facade.
+    """
+    if not session_id:
+        return None
+    env = os.environ
+    cwd = acquired_worktree(env, Path.cwd())
+    root = transcripts_root(env, fence_dir=fence_base_dir(cwd))
+    return ClaudeTranscriptWriter(session_id=session_id, root=root, cwd=cwd)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-claude-code`` binary."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
@@ -99,10 +120,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(0)
 
     wire = ClaudeCodeWire(args.output_format)
-    if args.resume is not None:
-        code = _common.dispatch(wire=wire, script=script, session_id=args.resume, is_resume=True)
-    else:
-        code = _common.dispatch(wire=wire, script=script, session_id=args.session_id, is_resume=False)
+    is_resume = args.resume is not None
+    session_id = args.resume if is_resume else args.session_id
+    transcript = _build_transcript_writer(session_id)
+    code = _common.dispatch(wire=wire, script=script, session_id=session_id, is_resume=is_resume, transcript=transcript)
     raise SystemExit(code)
 
 

@@ -42,22 +42,67 @@ harness binding.
 
 The engine/facade split is what lets a new harness be added without touching the
 engine: the engine owns *what* is emitted (a `RunResult`), a facade's
-`IHarnessWire` owns *how* it is rendered.
+`IHarnessWire` owns *how* it is rendered. A second, optional facade seam follows
+the same shape: `ITranscriptWriter` owns *whether and how a conversation is
+recorded* — see "Conversation transcripts" below.
 
 - `engine.py` — the shared `exec()` engine, the fence, and `run_prompt()`; owns
-  the `RunResult`, the `IHarnessWire` protocol facades implement, and the
-  `RunContext` the helpers read. Framework-free.
+  the `RunResult`, the `IHarnessWire` and `ITranscriptWriter` protocols facades
+  implement, and the `RunContext` the helpers read. Framework-free.
 - `session.py` — `SessionState` / `SessionStore`: the per-session JSON file
   (keyed by session id) that lets a resumed script read what it asked.
 - `helpers.py` — the terse helper library bound into every behavior script's
   namespace (no import needed): `ask`, `apply_diff`, `commit`, `verdict`,
   `hang`, `crash`, plus `state()` / `answer()` for reading session state. Raw
-  Python is available underneath for the weird cases.
+  Python is available underneath for the weird cases. `apply_diff`/`commit` each
+  also mint a matched tool-call turn on the transcript, if one is wired.
 - `internal/` — real git plumbing (`git.py`) and stderr-routed structlog
   (`logging.py`); kept out of the framework-free core and the script surface.
 - `facades/` — one module per harness, each a thin CLI + wire over the engine:
   `claude_code.py`, `codex.py`, `opencode.py`. They share the engine and differ
   only in invocation shape / output format / exit + resume semantics.
+  `facades/_transcript.py` is the claude_code-only `ITranscriptWriter`
+  implementation (below); `codex.py`/`opencode.py` never construct one.
+
+## Conversation transcripts
+
+`mock-claude-code` mints a genuine Claude-Code-shaped JSONL transcript for every
+run that has a known session id — the same record shapes the real runner's
+transcript parser (`blizzard/runner/transcripts/parser.py`) reads, so a chunk
+run through the fleet produces a conversation the runner panel can open. This is
+**claude_code-only**: only Claude Code has a reader today, so `codex.py` and
+`opencode.py` never construct a writer and the engine no-ops for them.
+
+- `engine.ITranscriptWriter` — the protocol, mirroring `IHarnessWire`:
+  `record_user` (the spawn/resume turn), `record_result` (the final assistant
+  turn), and `record_tool_call` / `record_tool_result` (a matched pair, called by
+  `helpers.apply_diff` / `helpers.commit`). `engine.run_prompt` takes an optional
+  `transcript` parameter and calls into it at those points; `None` (every facade
+  but claude_code) is a total no-op.
+- `facades/_transcript.ClaudeTranscriptWriter` — the one implementation. Appends
+  JSONL records to `<root>/mock-claude-code/<session_id>.jsonl`. The directory
+  name is a fixed constant, not a mangled-cwd replica of real Claude Code's
+  naming: the real reader locates a transcript by globbing
+  `<root>/*/<session_id>.jsonl` and only falls back to the directory name as a
+  multi-match tie-break, which a UUID4 session id never triggers.
+- `facades/_transcript.transcripts_root` resolves `BZ_TRANSCRIPTS_ROOT` — the
+  same env var the runner reads (`blizzard.runner.config.ENV_TRANSCRIPTS_ROOT`),
+  so writer and reader agree on where files live. **When unset it falls back to a
+  path under the fence** (beside the session-state directory,
+  `engine.fence_base_dir`) — never the runner-side default of
+  `~/.claude/projects`, which is the developer's real Claude Code session store.
+- `claude_code.py` only constructs a writer when a session id is already known
+  (`--session-id` on spawn, or `--resume`) — the runner always pre-assigns one at
+  spawn and honors it, so this covers the fleet-driven path in full; a bare
+  direct invocation that lets the engine self-assign a uuid skips transcript
+  writing.
+- Minted deliberately narrow for realism a human reading the file benefits from
+  (`sessionId`/`cwd`/`timestamp` per record) without cost the parser doesn't
+  need: no `uuid`/`parentUuid` DAG, no `isSidechain` subagent sidecars, no
+  `<persisted-output>` offload wrapper, no byte-exact ANSI fidelity. The user
+  turn's text is never the raw exec'd Python — that would misrepresent code as
+  "what the user said" — it is the real preamble prose when the spawn carried
+  one (`split_worker_preamble`), else a short synthetic line.
 
 ## The fence
 
@@ -78,6 +123,17 @@ directory beside the marker, overridable via `BLIZZARD_MOCK_HARNESS_STATE_DIR`.
 ## Script helper API
 
 A behavior-script is Python; these names are pre-bound in its namespace:
+
+`apply_diff`/`commit` act on `current_context().cwd`, which `run_prompt` sets
+to `engine.acquired_worktree()` — the **environment's** directory, not any
+one repo's. In the single-repo fixtures most tests use, that directory *is*
+the repo, so this is invisible; in a real multi-repo winter env it holds
+every acquired repo as a child and is **not itself a git repo**, so `git
+apply`/`git commit` fail there. A fleet-tier script targeting one repo must
+repoint the ambient context first — `ctx = current_context(); ctx.cwd =
+pathlib.Path(ctx.cwd) / "<repo-name>"` — before calling either helper (see
+the `blizzard` repo's `tests/service/test_runner_service.py`,
+`_TRANSCRIPT_BUILD_SCRIPT`, for the pattern and the why in full).
 
 | Helper | Effect |
 |--------|--------|
