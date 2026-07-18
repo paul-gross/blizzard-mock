@@ -82,6 +82,7 @@ class MockHubService:
         chunk = ChunkState(
             chunk_id=chunk_id,
             graph_id=spec.graph_id,
+            model=spec.model,
             entry=spec.entry,
             nodes=spec.nodes,
             pm_pointers=spec.pm_pointers,
@@ -155,6 +156,7 @@ class MockHubService:
             current_node_id=chunk.current_node_id,
             latest_epoch=chunk.latest_epoch or None,
             pm_pointers=[p.model_dump() for p in chunk.pm_pointers],
+            model=chunk.model,
             route=route,
         )
 

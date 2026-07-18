@@ -76,6 +76,10 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     pm_pointers: list[dict[str, str]] = Field(default_factory=list)
+    # The chunk's model selection (issue #27) — the store column is non-nullable and
+    # every mint carries the real hub's DEFAULT_MODEL; mirrored here so a real runner's
+    # required-field wire model deserializes the mock's replies unchanged.
+    model: str
     route: RouteView | None = None
 
 

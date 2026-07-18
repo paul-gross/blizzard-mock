@@ -50,6 +50,10 @@ class ChunkStatus(StrEnum):
 #: The reserved terminal node id a choice may point at (mirrors ``graph.RESERVED_TERMINAL``).
 TERMINAL = "done"
 
+#: Mirrors the real hub's ``blizzard.hub.domain.work.DEFAULT_MODEL`` (issue #27) — every
+#: mint sets it, and the store column is non-nullable.
+DEFAULT_MODEL = "claude-opus-4-8"
+
 
 class ApplyOutcome(StrEnum):
     """Mirrors ``blizzard.wire.envelope.ApplyOutcome`` (value-identical)."""
@@ -100,6 +104,7 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
+    model: str = DEFAULT_MODEL
     entry: str
     nodes: dict[str, NodeSpec]
     pm_pointers: list[PmPointerSpec] = Field(default_factory=list)
@@ -113,6 +118,7 @@ class ChunkState(BaseModel):
 
     chunk_id: str
     graph_id: str
+    model: str = DEFAULT_MODEL
     entry: str
     nodes: dict[str, NodeSpec]
     pm_pointers: list[PmPointerSpec] = Field(default_factory=list)
