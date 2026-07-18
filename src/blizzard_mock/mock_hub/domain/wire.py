@@ -49,6 +49,12 @@ class RouteClaimResponse(BaseModel):
     workspace_id: str
     environment_ids: list[str]
     envelope: NodeEnvelope
+    route_token: str
+
+
+class RouteTokenRekeyResponse(BaseModel):
+    chunk_id: str
+    route_token: str
 
 
 class RouteClaimConflict(BaseModel):
@@ -113,3 +119,25 @@ class RunnerFactAck(BaseModel):
     applied: list[int] = Field(default_factory=list)
     already_applied: list[int] = Field(default_factory=list)
     rejected: list[int] = Field(default_factory=list)
+
+
+class PmItemEntry(BaseModel):
+    """One pointer's pass-through PM item — mirrors ``blizzard.wire.chunk.PmItemEntry``.
+
+    The mock carries no forge integration, so ``title``/``body`` are canned rather than
+    vendor-fetched — the point of this route existing in the mock is the wire shape and
+    the auth-header capture (issue #86b/#87), not PM-content fidelity."""
+
+    source: str
+    ref: str
+    label: str | None = None
+    web_url: str | None = None
+    fetched_at: str
+    title: str | None = None
+    body: str | None = None
+    comments: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class PmItemsView(BaseModel):
+    items: list[PmItemEntry] = Field(default_factory=list)

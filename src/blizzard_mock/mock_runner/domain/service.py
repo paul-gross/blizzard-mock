@@ -76,7 +76,8 @@ class MockRunnerService:
         envelope = body.get("envelope", {})
         node_id = envelope.get("node", {}).get("node_id", "")
         held_epoch = int(envelope.get("epoch", 0)) + 1  # the real runner mints latest+1
-        self._held[chunk_id] = Held(chunk_id=chunk_id, epoch=held_epoch, from_node_id=node_id)
+        route_token = body.get("route_token")
+        self._held[chunk_id] = Held(chunk_id=chunk_id, epoch=held_epoch, from_node_id=node_id, route_token=route_token)
         self._report_lease(chunk_id, held_epoch)
         return {"claimed": True, "status": status, "from_node_id": node_id, "epoch": held_epoch, "response": body}
 
@@ -98,7 +99,16 @@ class MockRunnerService:
         if self._pull(RunnerLever.CONFLICTING_FACT, chunk_id):
             from_node = "conflicting-node"  # a fact that does not match the hub's current node
 
-        submission = {
+        # Route capability token (issue #84b): stamp the held claim's own plaintext by
+        # default (mirroring the real runner's stash-and-stamp), unless a lever overrides
+        # it for this one call — a wrong token, or none at all.
+        route_token = held.route_token
+        if self._pull(RunnerLever.OMIT_ROUTE_TOKEN, chunk_id):
+            route_token = None
+        if self._pull(RunnerLever.STALE_ROUTE_TOKEN, chunk_id):
+            route_token = "mock-stale-route-token-does-not-match-any-live-route"
+
+        submission: dict[str, Any] = {
             "choice": choice,
             "epoch": epoch,
             "runner_id": self._runner_id,
@@ -106,6 +116,8 @@ class MockRunnerService:
             "check_results": [],
             "artifacts": [],
         }
+        if route_token is not None:
+            submission["route_token"] = route_token
         held.last_submission = submission
         status, body = self._gw.submit_completion(chunk_id, submission)
 
@@ -150,12 +162,18 @@ class MockRunnerService:
         seq = (held.seq + 1) if held is not None else 1
         if held is not None:
             held.seq = seq
+        payload: dict[str, Any] = {"chunk_id": chunk_id, "epoch": epoch}
+        # Stamp the held claim's own route token (issue #84b) — always, not
+        # lever-controlled: this is the genuine fence-advancing report a completion
+        # test's own setup depends on, so it must keep landing under
+        # ``route_token_mode=enforce`` exactly as the real runner's does. The
+        # route-token drive levers (above) distort only the driven ``/_drive/complete``
+        # call, the surface a service test actually exercises.
+        if held is not None and held.route_token is not None:
+            payload["route_token"] = held.route_token
         self._gw.report_lease(
             chunk_id,
-            {
-                "runner_id": self._runner_id,
-                "facts": [{"seq": seq, "kind": LEASE_MINTED, "payload": {"chunk_id": chunk_id, "epoch": epoch}}],
-            },
+            {"runner_id": self._runner_id, "facts": [{"seq": seq, "kind": LEASE_MINTED, "payload": payload}]},
         )
 
     def _apply_delay(self, chunk_id: str | None) -> None:

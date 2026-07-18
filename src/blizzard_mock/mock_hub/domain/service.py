@@ -35,9 +35,12 @@ from blizzard_mock.mock_hub.domain.wire import (
     EnvelopeChoice,
     NodeConfig,
     NodeEnvelope,
+    PmItemEntry,
+    PmItemsView,
     QueuePeekEntry,
     QueuePeekResponse,
     RouteClaimResponse,
+    RouteTokenRekeyResponse,
     RouteView,
     RunnerFactAck,
     RunnerView,
@@ -131,6 +134,25 @@ class MockHubService:
             workspace_id=workspace_id,
             environment_ids=list(environment_ids),
             envelope=self._envelope(chunk, chunk.entry, epoch=chunk.latest_epoch),
+            # A per-claim capability token, per blizzard's RouteClaimResponse
+            # (issue paul-gross/blizzard#84a). Deterministic on purpose — a
+            # scenario can predict it; realism of the secret is not the point.
+            route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}",
+        )
+
+    def rekey_route_token(self, chunk_id: str) -> RouteTokenRekeyResponse:
+        """Rotate the chunk's live route capability token (issue paul-gross/blizzard#84b) —
+        the lost-plaintext recovery mirror of the real hub's
+        ``POST /api/fleet/chunks/{id}/route-token``. Deterministic, like the claim's own
+        token, but a counter folded in so a re-key never echoes the claim's token back."""
+        chunk = self._require(chunk_id)
+        if not chunk.claimed:
+            raise ChunkNotFound(f"chunk {chunk_id} has no live route")
+        chunk.route_token_rekey_count += 1
+        self._state.put_chunk(chunk)
+        return RouteTokenRekeyResponse(
+            chunk_id=chunk_id,
+            route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}-rekey{chunk.route_token_rekey_count}",
         )
 
     # -- reads -------------------------------------------------------------
@@ -158,6 +180,22 @@ class MockHubService:
             pm_pointers=[p.model_dump() for p in chunk.pm_pointers],
             model=chunk.model,
             route=route,
+        )
+
+    def pm_items(self, chunk_id: str) -> PmItemsView:
+        """A chunk's pass-through PM items — one canned entry per pointer.
+
+        The mock carries no forge integration (D-012's vendor-native fidelity stops at
+        the wire shape here); this exists so the fleet-side pm-items route is reachable
+        at all, for the runner-local proxy's forward and the wire-shape/auth-capture
+        assertions it backs (issue #86b/#87), not for PM-content behavior."""
+        chunk = self._require(chunk_id)
+        now = self._clock.now().isoformat()
+        return PmItemsView(
+            items=[
+                PmItemEntry(source=p.source, ref=p.ref, fetched_at=now, title=f"mock item {p.source}#{p.ref}")
+                for p in chunk.pm_pointers
+            ]
         )
 
     def envelope(self, chunk_id: str) -> NodeEnvelope:

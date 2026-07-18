@@ -16,12 +16,18 @@ from pydantic import BaseModel, Field
 
 @dataclass
 class Held:
-    """A claimed chunk the driver is working: the fence epoch and the current node."""
+    """A claimed chunk the driver is working: the fence epoch and the current node.
+
+    ``route_token`` (issue #84b) is the plaintext the claim response returned once —
+    stamped onto every subsequent chunk-scoped outbound call, mirroring the real
+    runner's stash-and-stamp (``route_tokens`` table), unless a route-token lever
+    overrides it for that one call."""
 
     chunk_id: str
     epoch: int
     from_node_id: str
     seq: int = 0
+    route_token: str | None = None
     last_submission: dict[str, Any] = field(default_factory=dict)
 
 

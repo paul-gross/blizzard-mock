@@ -1,9 +1,12 @@
-"""The mock hub's control plane — ``/_seed`` (state) and ``/_levers`` (edge states).
+"""The mock hub's control plane — ``/_seed`` (state), ``/_levers`` (edge states), and
+``/_captured`` (received-request capture, issue #86b).
 
 Namespaced outside the ``/api`` surface and exempt from the transport-edge levers so a
-test can always seed a chunk and arm/clear a lever, even while the API is "unreachable".
-``/_seed/chunk`` installs a scripted graph; ``/_levers`` is the first-class lever surface
-(catalog + active, arm, clear, reset) — the same shape the forge established.
+test can always seed a chunk, arm/clear a lever, or read a capture, even while the API
+is "unreachable". ``/_seed/chunk`` installs a scripted graph; ``/_levers`` is the
+first-class lever surface (catalog + active, arm, clear, reset) — the same shape the
+forge established; ``/_captured`` is the header-inspection lever — every ``/api/*``
+request's method/path/headers, in arrival order.
 """
 
 from __future__ import annotations
@@ -13,13 +16,15 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from blizzard_mock.levers import Lever, LeverParams
-from blizzard_mock.mock_hub.api.deps import get_service
+from blizzard_mock.mock_hub.api.deps import get_captured, get_service
+from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
 from blizzard_mock.mock_hub.domain.models import ChunkSpec
 from blizzard_mock.mock_hub.domain.service import MockHubService
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
 levers_router = APIRouter(prefix="/_levers", tags=["control"])
+captured_router = APIRouter(prefix="/_captured", tags=["control"])
 
 
 @seed_router.post("/chunk", status_code=201)
@@ -67,3 +72,14 @@ def clear_lever(
 ) -> dict[str, Any]:
     service.levers.clear(kind, chunk_id)
     return {"cleared": kind, "chunk_id": chunk_id}
+
+
+@captured_router.get("")
+def list_captured(captured: Annotated[ICaptureStore, Depends(get_captured)]) -> dict[str, Any]:
+    return {"requests": captured.all()}
+
+
+@captured_router.post("/reset")
+def reset_captured(captured: Annotated[ICaptureStore, Depends(get_captured)]) -> dict[str, bool]:
+    captured.clear()
+    return {"cleared": True}

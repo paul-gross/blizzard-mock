@@ -131,6 +131,11 @@ class ChunkState(BaseModel):
     route_runner_id: str | None = None
     route_workspace_id: str | None = None
     route_environment_ids: list[str] = Field(default_factory=list)
+    #: How many times the live route's capability token has been re-keyed
+    #: (``POST /api/fleet/chunks/{id}/route-token``, issue paul-gross/blizzard#84b) —
+    #: folded into the deterministic token string so a re-key never echoes the claim's
+    #: own token back.
+    route_token_rekey_count: int = 0
     #: ``(from_node_id, epoch)`` -> the apply-response already produced, for idempotent
     #: re-apply (D-090): a replayed completion returns its original outcome, no re-advance.
     applied: dict[str, ApplyOutcome] = Field(default_factory=dict)

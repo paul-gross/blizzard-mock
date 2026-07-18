@@ -11,12 +11,18 @@ from __future__ import annotations
 from fastapi import Request
 from pydantic import BaseModel, Field
 
+from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.service import MockHubService
 
 
 def get_service(request: Request) -> MockHubService:
     service: MockHubService = request.app.state.service
     return service
+
+
+def get_captured(request: Request) -> ICaptureStore:
+    captured: ICaptureStore = request.app.state.captured
+    return captured
 
 
 class RouteClaimBody(BaseModel):

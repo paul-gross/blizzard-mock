@@ -2,8 +2,20 @@
 
 Vendor-native paths and JSON identical to the real hub OpenAPI subset the reconciliation
 loop calls: queue peek, route claim, chunk detail, envelope re-read, completion + decision
-apply, the fact-intake push, and the runner registry. Controllers hold only the
-``MockHubService`` (``bzh:controller-read-only``); every rule lives in the service.
+apply, the fact-intake push, the PM-items pass-through, and the runner registry.
+Controllers hold only the ``MockHubService`` (``bzh:controller-read-only``); every rule
+lives in the service.
+
+Two routers, mirroring the real hub's own partition (blizzard issue #87): ``router``
+(``/api/health``, ``/api/ready``) is unauthenticated liveness, exempt from every lever and
+from request capture exactly as it is on the real hub; ``fleet_router`` (``/api/fleet``)
+is everything else — this mock never simulates the board/operator surface at all, so its
+entire hub-mirror API is runner-originating traffic, all of which moved under the fleet
+prefix in one block rather than splitting operator/fleet the way the real hub's routers
+did. The mock stays warn-tolerant by construction: it carries no ``require_runner_principal``
+check at all (a mock is not an enforcer) — a tokenless call is served exactly like a
+enrolled one; the header-inspection lever (``blizzard_mock.mock_hub.api.control``,
+issue #86b) is what makes a presented ``Authorization`` header assertable, not a gate.
 
 The ``drop_ack`` lever is realised *here* on the completions route: the service advances
 the real transition, then — the ack being "dropped" — the route answers 503, so the
@@ -27,7 +39,15 @@ from blizzard_mock.mock_hub.api.deps import (
 )
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService
 
+#: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
+#: hub (``/api/health``, ``/api/ready`` sit outside both `chunks_router` and `fleet`
+#: there too).
 router = APIRouter(prefix="/api", tags=["hub"])
+
+#: The runner-facing hub mirror (issue #87) — this mock carries no board/operator
+#: surface (no ingest, no queue-reorder, no pause/resume, no spend), so every route
+#: below is runner-originating traffic and moved under ``/api/fleet`` as a block.
+fleet_router = APIRouter(prefix="/api/fleet", tags=["hub"])
 
 
 @router.get("/health")
@@ -40,12 +60,12 @@ def ready() -> dict[str, bool]:
     return {"ready": True}
 
 
-@router.get("/queue/peek")
+@fleet_router.get("/queue/peek")
 def peek_queue(service: Annotated[MockHubService, Depends(get_service)]) -> object:
     return service.peek()
 
 
-@router.post("/routes", status_code=201)
+@fleet_router.post("/routes", status_code=201)
 def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:
         return service.claim(
@@ -67,7 +87,15 @@ def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-@router.get("/chunks/{chunk_id}")
+@fleet_router.post("/chunks/{chunk_id}/route-token")
+def rekey_route_token(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    try:
+        return service.rekey_route_token(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunks/{chunk_id}")
 def get_chunk(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:
         return service.chunk_detail(chunk_id)
@@ -75,7 +103,7 @@ def get_chunk(chunk_id: str, service: Annotated[MockHubService, Depends(get_serv
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-@router.get("/chunks/{chunk_id}/envelope")
+@fleet_router.get("/chunks/{chunk_id}/envelope")
 def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:
         return service.envelope(chunk_id)
@@ -83,7 +111,15 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-@router.post("/chunks/{chunk_id}/completions")
+@fleet_router.get("/chunks/{chunk_id}/pm-items")
+def get_pm_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    try:
+        return service.pm_items(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/completions")
 def submit_completion(
     chunk_id: str, body: CompletionBody, service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
@@ -99,7 +135,7 @@ def submit_completion(
     return response
 
 
-@router.post("/chunks/{chunk_id}/decisions")
+@fleet_router.post("/chunks/{chunk_id}/decisions")
 def submit_decision(
     chunk_id: str, body: DecisionBody, service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
@@ -109,18 +145,18 @@ def submit_decision(
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-@router.post("/events")
+@fleet_router.post("/events")
 def push_facts(body: RunnerFactBatchBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     return service.ingest_facts(body.runner_id, [f.model_dump() for f in body.facts])
 
 
-@router.post("/runners", status_code=201)
+@fleet_router.post("/runners", status_code=201)
 def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     first = service.register(body.runner_id, body.workspace_id)
     return {"runner_id": body.runner_id, "first_registration": first}
 
 
-@router.get("/runners/{runner_id}")
+@fleet_router.get("/runners/{runner_id}")
 def get_runner(runner_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     view = service.runner_view(runner_id)
     if view is None:

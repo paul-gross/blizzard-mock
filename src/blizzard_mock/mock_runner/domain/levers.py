@@ -7,7 +7,9 @@ against this mock (``implementation/mocking.md``, "the hub → run it against th
 runner") means arming a lever that names the misbehaviour the hub must reject or absorb —
 a stale-epoch completion, a duplicate delivery, a runner that vanishes mid-lease.
 
-The six levers mirror the shared menu, realised on the runner's side of the wire.
+Six of the eight levers mirror the shared menu, realised on the runner's side of the
+wire; ``stale_route_token``/``omit_route_token`` (issue #84b) are runner-only — driving
+the route capability token's presentation is a mock-runner lever, not a hub distortion.
 """
 
 from __future__ import annotations
@@ -35,6 +37,14 @@ class RunnerLever(StrEnum):
     #: Submit a completion carrying a **stale** (held-epoch minus 1) fence — the zombie the
     #: hub fences out over the wire (D-007).
     STALE_EPOCH = "stale_epoch"
+    #: Submit the completion carrying a **wrong** route capability token (issue #84b) —
+    #: neither the held claim's own token nor any token the hub minted for this chunk —
+    #: so a service test can drive the hub's route-token check without a real runner.
+    STALE_ROUTE_TOKEN = "stale_route_token"
+    #: Submit the completion carrying **no** route capability token at all (issue #84b) —
+    #: the pre-#84a-runner / dropped-field case ``route_token_mode=warn`` must absorb and
+    #: ``enforce`` must reject.
+    OMIT_ROUTE_TOKEN = "omit_route_token"
 
 
 CATALOG: dict[str, str] = {
@@ -44,4 +54,6 @@ CATALOG: dict[str, str] = {
     RunnerLever.UNREACHABLE.value: "claim then never complete — vanish mid-lease",
     RunnerLever.REPLAY.value: "submit the same completion twice (duplicate delivery)",
     RunnerLever.STALE_EPOCH.value: "submit a completion with a stale (held-epoch - 1) fence (D-007)",
+    RunnerLever.STALE_ROUTE_TOKEN.value: "submit a completion with a wrong route capability token (issue #84b)",
+    RunnerLever.OMIT_ROUTE_TOKEN.value: "submit a completion with no route capability token (issue #84b)",
 }

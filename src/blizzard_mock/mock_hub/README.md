@@ -31,19 +31,26 @@ A service-tier test points the real runner's `BZ_HUB_URL` at `http://{host}:{por
 
 ## Hub API surface (the subset a runner calls)
 
-Vendor-native paths + JSON, byte-compatible with the hub's wire models.
+Vendor-native paths + JSON, byte-compatible with the hub's wire models. Liveness stays
+unauthenticated at `/api/*`; every other route lives under `/api/fleet/*` — this mock
+simulates only runner-originating traffic (no board/operator surface at all), so its
+whole hub mirror sits under the fleet prefix. The mock stays warn-tolerant by
+construction — no `require_runner_principal` check, a tokenless call is served exactly
+like an enrolled one — but every received header is still recorded (`GET /_captured`)
+so a test can assert a real runner presented its bearer token.
 
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
-| `GET /api/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
-| `POST /api/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
-| `GET /api/chunks/{id}` | Chunk detail — derived status, current node, route |
-| `GET /api/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
-| `POST /api/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
-| `POST /api/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
-| `POST /api/events` | Batched runner-fact push; `lease.minted` advances the fence (D-044) |
-| `POST /api/runners`, `GET /api/runners/{id}` | Register / read the pause brake (D-070/D-043) |
+| `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
+| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
+| `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route |
+| `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
+| `GET /api/fleet/chunks/{id}/pm-items` | Pass-through PM items — canned per pointer, no forge integration |
+| `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
+| `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
+| `POST /api/fleet/events` | Batched runner-fact push; `lease.minted` advances the fence (D-044) |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register / read the pause brake (D-070/D-043) |
 
 ## Control plane
 
@@ -52,6 +59,13 @@ Vendor-native paths + JSON, byte-compatible with the hub's wire models.
   envelope, `choices` naming the `to` node). `POST /_seed/reset` clears all state.
 - `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm), `DELETE
   /_levers/{kind}?chunk_id=` (clear), `POST /_levers/reset`.
+- `GET /_captured` — the header-inspection lever: every fleet-facing
+  `/api/*` request received so far (liveness — `/api/health`, `/api/ready` — excluded,
+  same as the lever exemptions), `{requests: [{method, path, headers}, ...]}`, in
+  arrival order. `POST /_captured/reset` clears it. A service test uses this to assert
+  a real runner's
+  outbound `Authorization` header actually reached the hub, on every runner→hub call
+  including the pm-items proxy forward.
 
 ## Lever surface (`/_levers`)
 
@@ -72,11 +86,12 @@ transport-edge levers so a test can always steer and gate on startup.
 
 - `domain/` — dependency-free core (`bzh:domain-core`): the seed vocabulary
   (`ChunkSpec`/`NodeSpec`), the state machine (`ChunkState`), the wire-mirror response
-  models, the lever vocabulary, and `MockHubService` (the rules).
+  models, the lever vocabulary, the received-request capture store, and `MockHubService`
+  (the rules).
 - `internal/` — the in-memory state store (`bzh:dependency-inversion`).
-- `api/` — the hub-mirror routes + the `/_seed` and `/_levers` control routers +
-  the transport-edge lever middleware (controllers hold only the service,
-  `bzh:controller-read-only`).
+- `api/` — the hub-mirror routes + the `/_seed`, `/_levers`, and `/_captured` control
+  routers + the transport-edge lever middleware and the request-capture middleware
+  (controllers hold only the service, `bzh:controller-read-only`).
 - `app.py` — the composition root (`bzh:dependency-injection`).
 
 The lever store and clock are the package-shared `blizzard_mock.levers` /

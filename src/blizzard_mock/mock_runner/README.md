@@ -31,11 +31,11 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
 
   | Route | Effect |
   |-------|--------|
-  | `POST /_drive/register` | `POST {hub}/api/runners` — join the fleet |
-  | `POST /_drive/peek` | `GET {hub}/api/queue/peek` |
-  | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) |
+  | `POST /_drive/register` | `POST {hub}/api/fleet/runners` — join the fleet |
+  | `POST /_drive/peek` | `GET {hub}/api/fleet/queue/peek` |
+  | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) |
   | `POST /_drive/complete` `{chunk_id, choice}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next` |
-  | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/chunks/{id}` |
+  | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/fleet/chunks/{id}` |
   | `POST /_drive/reset` | Drop held leases + clear levers |
 
 - **Levers** (`/_levers`): the same catalog/arm/clear/reset shape as the mock hub.
@@ -50,6 +50,8 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
 | `unreachable` | Claim then never complete — vanish *mid-lease*, leaving the hub a claimed-but-unfinished chunk to reap |
 | `replay` | Submit the same completion twice — the hub must apply it once (epoch-idempotent, D-090) |
 | `stale_epoch` | Submit a completion with a stale (held-epoch − 1) fence — the zombie the hub fences out over the wire (D-007) |
+| `stale_route_token` | Submit a completion carrying a wrong route capability token — neither the held claim's own token nor any token the hub minted for this chunk — driving the hub's route-token check without a real runner |
+| `omit_route_token` | Submit a completion carrying no route capability token at all — the pre-route-token-runner / dropped-field case `route_token_mode=warn` must absorb and `enforce` must reject |
 
 ## Architecture
 
