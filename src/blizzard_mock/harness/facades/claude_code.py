@@ -36,6 +36,7 @@ from blizzard_mock.harness.engine import RunResult, acquired_worktree, fence_bas
 from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._text import render_ask_text
 from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter, transcripts_root
+from blizzard_mock.harness.facades._usage import MOCK_MODEL, synthesize_cost_usd, synthesize_usage_tokens
 
 _USAGE = """\
 mock-claude-code — mock Claude Code coding-harness facade
@@ -69,6 +70,10 @@ class ClaudeCodeWire:
         # Claude Code has no "ask" result subtype; a parked worker simply ends its
         # turn successfully, the ask riding the result text for the adapter.
         subtype = "success" if result.subtype == "ask" else result.subtype
+        # A realistic `usage` + `total_cost_usd` (blizzard epic #57): deterministic,
+        # not tied to any real pricing (`_usage.py`) — proves the wire carries both
+        # fields for the runner adapter's `parse_usage` to read back.
+        usage = synthesize_usage_tokens(text)
         envelope = {
             "type": "result",
             "subtype": subtype,
@@ -77,6 +82,9 @@ class ClaudeCodeWire:
             "session_id": result.session_id,
             "num_turns": result.num_turns,
             "duration_ms": result.duration_ms,
+            "model": MOCK_MODEL,
+            "usage": usage,
+            "total_cost_usd": synthesize_cost_usd(usage),
         }
         return json.dumps(envelope) + "\n"
 

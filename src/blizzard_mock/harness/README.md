@@ -103,6 +103,14 @@ run through the fleet produces a conversation the runner panel can open. This is
   turn's text is never the raw exec'd Python — that would misrepresent code as
   "what the user said" — it is the real preamble prose when the spawn carried
   one (`split_worker_preamble`), else a short synthetic line.
+- Every **assistant** record carries `message.model` + `message.usage` (tokens by
+  class), and the final result envelope additionally carries top-level `usage` +
+  `total_cost_usd` — the same fields the real harness reports, so the runner's
+  cost-telemetry capture path has something to parse: `parse_usage` reads the
+  envelope, and `sum_transcript_usage` sums the per-message `usage` on the
+  envelope-less fallback. The figures are synthesized deterministically by output
+  length in `facades/_usage.py` and are **illustrative, not a pricing table** —
+  blizzard never derives cost from one; `total_cost_usd` is the harness's own number.
 
 ## The fence
 

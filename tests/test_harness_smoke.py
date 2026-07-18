@@ -237,6 +237,92 @@ def test_claude_facade_json_envelope(fenced_repo, capsys) -> None:
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
+def test_claude_facade_json_envelope_carries_usage_and_cost(fenced_repo) -> None:
+    """The result envelope must carry a realistic ``usage`` object + ``total_cost_usd``
+    (blizzard epic #57) — what the runner adapter's ``parse_usage`` reads back."""
+    cwd, env = fenced_repo
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            "usage-1",
+            "verdict('approve')",
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    envelope = json.loads(proc.stdout)
+    assert envelope["model"]
+    usage = envelope["usage"]
+    assert usage["input_tokens"] > 0
+    assert usage["output_tokens"] > 0
+    assert usage["cache_read_input_tokens"] > 0
+    assert usage["cache_creation_input_tokens"] > 0
+    assert isinstance(envelope["total_cost_usd"], float)
+    assert envelope["total_cost_usd"] > 0
+
+
+def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo) -> None:
+    """A resume invocation with ``--output-format json`` renders the same result
+    envelope (``usage`` + ``total_cost_usd``) as a spawn (blizzard runner adapter
+    ``resume_with_message``, epic #57) — the mock's resume path must not degrade
+    to plain text just because it's a resume."""
+    cwd, env = fenced_repo
+    sid = "sess-resume-usage"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            sid,
+            "ask('proceed?', ['yes', 'no'])",
+        ],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--resume",
+            sid,
+            "verdict('resumed')",
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    envelope = json.loads(proc.stdout)
+    assert envelope["type"] == "result"
+    assert envelope["session_id"] == sid
+    usage = envelope["usage"]
+    assert usage["input_tokens"] > 0
+    assert usage["output_tokens"] > 0
+    assert isinstance(envelope["total_cost_usd"], float)
+    assert envelope["total_cost_usd"] > 0
+
+
 def test_claude_facade_fence_refusal_exit_code(tmp_path: Path) -> None:
     proc = subprocess.run(
         [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "verdict('x')"],
@@ -489,6 +575,19 @@ def test_claude_facade_mints_a_transcript_with_matched_tool_turns(fenced_repo, t
     assert "<Choice>approve</Choice>" in text_records[0]["message"]["content"][0]["text"]
     assert "looks good" in text_records[0]["message"]["content"][0]["text"]
 
+    # Every assistant-type record — the two tool-call turns and the final text
+    # turn — carries `model` + `usage` (blizzard epic #57): what the runner
+    # adapter's transcript-summation fallback sums (``sum_transcript_usage``).
+    assistant_records = tool_use_records + text_records
+    assert len(assistant_records) == 3
+    for record in assistant_records:
+        assert record["message"]["model"]
+        usage = record["message"]["usage"]
+        assert usage["input_tokens"] > 0
+        assert usage["output_tokens"] > 0
+        assert usage["cache_read_input_tokens"] > 0
+        assert usage["cache_creation_input_tokens"] > 0
+
 
 def test_claude_facade_resume_mints_another_user_and_assistant_turn(fenced_repo, tmp_path: Path) -> None:
     cwd, env = fenced_repo
@@ -573,3 +672,52 @@ def test_codex_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
     )
     assert proc.returncode == 0
     assert not transcripts_dir.exists()
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic usage/cost synthesis (blizzard epic #57, phase 1 of #58)
+# --------------------------------------------------------------------------- #
+
+
+def test_synthesize_usage_tokens_scales_with_text_length() -> None:
+    from blizzard_mock.harness.facades._usage import synthesize_usage_tokens
+
+    short = synthesize_usage_tokens("hi")
+    long = synthesize_usage_tokens("x" * 1000)
+    assert long["input_tokens"] > short["input_tokens"]
+    assert long["output_tokens"] > short["output_tokens"]
+    # The cache footprint is fixed, not scaled by text length.
+    assert long["cache_read_input_tokens"] == short["cache_read_input_tokens"]
+    assert long["cache_creation_input_tokens"] == short["cache_creation_input_tokens"]
+
+
+def test_synthesize_usage_tokens_is_deterministic() -> None:
+    from blizzard_mock.harness.facades._usage import synthesize_usage_tokens
+
+    assert synthesize_usage_tokens("same text") == synthesize_usage_tokens("same text")
+
+
+def test_synthesize_usage_tokens_respects_lower_bases_for_tool_calls() -> None:
+    from blizzard_mock.harness.facades._usage import synthesize_usage_tokens
+
+    default_bases = synthesize_usage_tokens("x")
+    lower_bases = synthesize_usage_tokens("x", base_input=50, base_output=10)
+    assert lower_bases["input_tokens"] < default_bases["input_tokens"]
+    assert lower_bases["output_tokens"] < default_bases["output_tokens"]
+
+
+def test_synthesize_cost_usd_is_positive_and_deterministic() -> None:
+    from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
+
+    usage = synthesize_usage_tokens("a realistic assistant reply")
+    cost = synthesize_cost_usd(usage)
+    assert cost > 0
+    assert cost == synthesize_cost_usd(usage)
+
+
+def test_synthesize_cost_usd_grows_with_token_counts() -> None:
+    from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
+
+    small = synthesize_cost_usd(synthesize_usage_tokens("hi"))
+    large = synthesize_cost_usd(synthesize_usage_tokens("x" * 5000))
+    assert large > small

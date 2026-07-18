@@ -20,6 +20,15 @@ only ``type`` and ``message.content`` in file order — no ``uuid``/``parentUuid
 traversal). Left out entirely, matching the parser's actual needs: the
 ``uuid``/``parentUuid`` DAG, ``isSidechain`` subagent sidecar files, the
 ``<persisted-output>`` large-result offload wrapper, and byte-exact ANSI fidelity.
+
+Every assistant-type record also carries ``model`` + ``usage`` (blizzard epic #57)
+— the runner adapter's transcript-summation fallback
+(``blizzard.runner.harness.internal.claude_code_adapter.ClaudeCodeAdapter.
+sum_transcript_usage``) reads exactly these two keys off each ``type: "assistant"``
+record's ``message``, so both the final result turn (:meth:`ClaudeTranscriptWriter.
+record_result`) and each mid-turn tool-call turn (:meth:`ClaudeTranscriptWriter.
+record_tool_call`) mint them. Figures are :mod:`._usage`'s deterministic synthesis,
+not a real token count.
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ from pathlib import Path
 
 from blizzard_mock.harness.engine import ITranscriptWriter, RunResult
 from blizzard_mock.harness.facades._text import render_ask_text
+from blizzard_mock.harness.facades._usage import MOCK_MODEL, synthesize_usage_tokens
 
 #: Env var the runner also reads (``blizzard.runner.config.ENV_TRANSCRIPTS_ROOT``) —
 #: writer and reader must agree on this name for a mock-minted transcript to be
@@ -83,12 +93,19 @@ class ClaudeTranscriptWriter:
 
     def record_result(self, result: RunResult) -> None:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
-        self._append("assistant", {"role": "assistant", "content": [{"type": "text", "text": text}]})
+        usage = synthesize_usage_tokens(text)
+        content = [{"type": "text", "text": text}]
+        message = {"role": "assistant", "model": MOCK_MODEL, "usage": usage, "content": content}
+        self._append("assistant", message)
 
     def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
         tool_use_id = f"toolu_{uuid.uuid4().hex}"
         content = [{"type": "tool_use", "id": tool_use_id, "name": name, "input": dict(tool_input)}]
-        self._append("assistant", {"role": "assistant", "content": content})
+        # A smaller mid-turn usage figure than the closing text turn (`_usage.py`'s
+        # lower bases) — a real tool-call turn's completion is shorter than the
+        # turn's final message.
+        usage = synthesize_usage_tokens(name, base_input=50, base_output=10)
+        self._append("assistant", {"role": "assistant", "model": MOCK_MODEL, "usage": usage, "content": content})
         return tool_use_id
 
     def record_tool_result(self, tool_use_id: str, output: str) -> None:
