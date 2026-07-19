@@ -53,3 +53,7 @@ class MergeBody(BaseModel):
 
 class UpdatePullBody(BaseModel):
     state: str
+
+
+class UpdateBranchBody(BaseModel):
+    expected_head_sha: str | None = None

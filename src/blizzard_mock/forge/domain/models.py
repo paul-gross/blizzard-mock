@@ -28,6 +28,13 @@ class MergeableState(StrEnum):
     CLEAN = "clean"
     DIRTY = "dirty"
     UNKNOWN = "unknown"
+    #: Base advanced with no conflict — the branch is merely out of date. GitHub
+    #: clears it via ``PUT .../update-branch``; a *conflicting* stale branch is
+    #: ``DIRTY``, never ``BEHIND``.
+    BEHIND = "behind"
+    #: Content-mergeable but held by branch protection — required checks/reviews
+    #: not yet green (the "CI isn't green yet" wait state).
+    BLOCKED = "blocked"
 
 
 class MergeMethod(StrEnum):

@@ -61,6 +61,7 @@ armed.
 | `GET /repos/{o}/{r}/pulls/{n}` | Get PR — live `mergeable`/`mergeable_state`, `merged` |
 | `PATCH /repos/{o}/{r}/pulls/{n}` | Close a PR without merge (D-065 terminal) |
 | `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base`; 405 conflict, 409 stale-sha |
+| `PUT /repos/{o}/{r}/pulls/{n}/update-branch` | Merge `base` into head (advances `head.sha`), clears `stale_branch` → 202; 409 stale `expected_head_sha` |
 | `GET /repos/{o}/{r}/pulls/{n}/merge` | Merged-check → 204 / 404 |
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
@@ -79,6 +80,8 @@ clear one it armed.
 | `comment_midflight` | action (repo, number, body) | Appends a comment to a live thread (D-074) |
 | `merge_conflict` | state (per PR) | `mergeable=false`/`dirty`; merge → 405 |
 | `merge_rejected` | state (per PR) | Merge → 405 with an optional `message` (branch policy) |
+| `stale_branch` | state (per PR) | `mergeable_state=behind` — base moved, no conflict; `PUT .../update-branch` clears it and advances the head → `clean` (the self-heal path) |
+| `checks_pending` | state (per PR) | `mergeable_state=blocked` — content-mergeable but required checks/reviews not green yet; cleared to stand in for "CI went green" |
 | `rate_limited` | state (global/repo) | 403 + `X-RateLimit-*` headers; optional `remaining` self-expiry |
 | `token_rejected` | state (global/repo) | 401 `Bad credentials` |
 | `unreachable` | state (global/repo) | 503 |

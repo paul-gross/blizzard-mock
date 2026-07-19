@@ -212,6 +212,28 @@ class ForgeService:
         repo = self.get_repo(owner, name)
         return self._require_pull(repo, number).merged
 
+    def update_branch(self, owner: str, name: str, number: int, *, expected_head_sha: str | None = None) -> str:
+        """Merge base into the PR's head branch (GitHub's ``PUT .../update-branch``).
+
+        The self-heal a ``behind`` PR needs: advances the head with the latest base
+        (a real merge commit, so ``head.sha`` moves — mirroring GitHub) and clears any
+        ``stale_branch`` lever so the PR next reads ``clean``. Guarded on
+        ``expected_head_sha`` like the real API — a mismatch is a 409 (``HeadMismatch``),
+        so a caller that stacked reads never double-updates a moved head. ``behind``
+        implies mergeable, so the update itself never conflicts in the mock."""
+        repo = self.get_repo(owner, name)
+        pull = self._require_pull(repo, number)
+        if pull.merged or pull.state is State.CLOSED:
+            raise NotMergeable(f"pull request #{number} is not mergeable")
+        head_sha = self._git.resolve_ref(repo, pull.head)
+        if expected_head_sha is not None and expected_head_sha != head_sha:
+            raise HeadMismatch("Head branch was modified. Review and try the merge again.")
+        self._git.merge(repo, pull.head, pull.base, f"Merge branch '{pull.base}' into {pull.head}")
+        lever = self._levers.find(LeverKind.STALE_BRANCH, repo.full_name, number)
+        if lever is not None:
+            self._levers.clear(lever.kind, lever.repo, lever.number)
+        return "Updating pull request branch."
+
     def set_pull_state(self, owner: str, name: str, number: int, *, state: State) -> PullView:
         """Support ``PATCH .../pulls/{n}`` closing a PR without merge — the
         close-without-merge terminal disposition a delivery flow treats as
@@ -309,6 +331,12 @@ class ForgeService:
             return None, MergeableState.UNKNOWN
         if self._levers.find(LeverKind.MERGE_CONFLICT, repo.full_name, pull.number) is not None:
             return False, MergeableState.DIRTY
+        if self._levers.find(LeverKind.STALE_BRANCH, repo.full_name, pull.number) is not None:
+            # Behind, not conflicted: mergeable once the branch is updated.
+            return True, MergeableState.BEHIND
+        if self._levers.find(LeverKind.CHECKS_PENDING, repo.full_name, pull.number) is not None:
+            # Content-mergeable but blocked by required checks/reviews.
+            return True, MergeableState.BLOCKED
         if self._git.is_mergeable(repo, pull.base, pull.head):
             return True, MergeableState.CLEAN
         return False, MergeableState.DIRTY

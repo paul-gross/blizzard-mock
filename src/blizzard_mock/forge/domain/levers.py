@@ -35,6 +35,13 @@ class LeverKind(StrEnum):
     RATE_LIMITED = "rate_limited"
     TOKEN_REJECTED = "token_rejected"
     UNREACHABLE = "unreachable"
+    #: Forces a PR to read ``mergeable_state: behind`` — base moved, no conflict.
+    #: ``PUT .../update-branch`` clears it (and advances the head), so the PR then
+    #: reads ``clean``: the self-heal path.
+    STALE_BRANCH = "stale_branch"
+    #: Forces ``mergeable_state: blocked`` — required checks/reviews not green yet;
+    #: cleared explicitly to stand in for "CI went green".
+    CHECKS_PENDING = "checks_pending"
 
 
 #: Levers that persist as request-bending state until explicitly cleared.
@@ -45,6 +52,8 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.RATE_LIMITED,
         LeverKind.TOKEN_REJECTED,
         LeverKind.UNREACHABLE,
+        LeverKind.STALE_BRANCH,
+        LeverKind.CHECKS_PENDING,
     }
 )
 

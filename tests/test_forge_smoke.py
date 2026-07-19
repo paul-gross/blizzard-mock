@@ -230,6 +230,8 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "rate_limited",
         "token_rejected",
         "unreachable",
+        "stale_branch",
+        "checks_pending",
     }
 
 
@@ -255,6 +257,44 @@ def test_merge_rejected_lever(client: TestClient) -> None:
     resp = client.put(f"/repos/{REPO}/pulls/{number}/merge", json={})
     assert resp.status_code == 405
     assert "required checks" in resp.json()["message"]
+
+
+def test_checks_pending_lever_reads_blocked(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/checks_pending", json={"repo": REPO, "number": number})
+
+    assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "blocked"
+
+    # clearing the lever stands in for "CI went green" — the PR reads clean again
+    client.delete(f"/_levers/checks_pending?repo={REPO}&number={number}")
+    assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "clean"
+
+
+def test_stale_branch_lever_reads_behind_and_update_branch_self_heals(client: TestClient) -> None:
+    pull = _open_pull(client, "feature")
+    number = pull["number"]
+    original_head = pull["head"]["sha"]
+    client.post("/_levers/stale_branch", json={"repo": REPO, "number": number})
+
+    behind = client.get(f"/repos/{REPO}/pulls/{number}").json()
+    assert behind["mergeable_state"] == "behind"
+
+    # update-branch: 202, advances the head (new sha), clears the behind state → clean
+    resp = client.put(f"/repos/{REPO}/pulls/{number}/update-branch", json={"expected_head_sha": original_head})
+    assert resp.status_code == 202
+    healed = client.get(f"/repos/{REPO}/pulls/{number}").json()
+    assert healed["mergeable_state"] == "clean"
+    assert healed["head"]["sha"] != original_head, "update-branch must advance the head sha"
+
+    # the moved head merges cleanly by its new sha
+    assert client.put(f"/repos/{REPO}/pulls/{number}/merge", json={"sha": healed["head"]["sha"]}).status_code == 200
+
+
+def test_update_branch_stale_expected_head_is_409(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/stale_branch", json={"repo": REPO, "number": number})
+    resp = client.put(f"/repos/{REPO}/pulls/{number}/update-branch", json={"expected_head_sha": "deadbeef"})
+    assert resp.status_code == 409
 
 
 def test_externally_merged_lever_lands_and_is_detectable(client: TestClient, repos_dir: Path) -> None:

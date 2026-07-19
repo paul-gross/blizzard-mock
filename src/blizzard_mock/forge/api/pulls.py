@@ -15,6 +15,7 @@ from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.deps import (
     CreatePullBody,
     MergeBody,
+    UpdateBranchBody,
     UpdatePullBody,
     get_base_url,
     get_service,
@@ -95,6 +96,18 @@ def merge_pull(
         user=body.user,
     )
     return ser.merge_result_json(result)
+
+
+@router.put("/repos/{owner}/{repo}/pulls/{number}/update-branch", status_code=202)
+def update_branch(
+    owner: str,
+    repo: str,
+    number: int,
+    body: UpdateBranchBody,
+    service: Annotated[ForgeService, Depends(get_service)],
+) -> JSONResponse:
+    message = service.update_branch(owner, repo, number, expected_head_sha=body.expected_head_sha)
+    return JSONResponse(status_code=202, content={"message": message})
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/merge")
