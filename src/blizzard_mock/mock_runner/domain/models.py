@@ -39,10 +39,20 @@ class ClaimBody(BaseModel):
 
 
 class CompleteBody(BaseModel):
-    """POST /_drive/complete — complete the held node-step with a judgement choice."""
+    """POST /_drive/complete — complete the held node-step with a judgement choice.
+
+    ``artifacts`` are the submission's ``produces:`` artifacts, each a wire
+    ``SubmittedArtifact`` dict (``{name, kind, content, attached}``). A real runner's
+    completion assembly (``_collect_asset_artifacts``) fills this from explicit
+    ``blizzard runner attach`` writes (``attached=True``) and assessment fallbacks
+    (``attached=False``); the mock lets a service test set them directly, so the hub's
+    ``produces_mode=enforce`` backstop (issue #113 phase 5) can be driven over the wire —
+    the produces analogue of the ``stale_route_token``/``omit_route_token`` levers. Default
+    empty: every existing driver keeps submitting a completion with no artifacts."""
 
     chunk_id: str
     choice: str
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChunkQueryBody(BaseModel):

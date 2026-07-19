@@ -81,8 +81,12 @@ class MockRunnerService:
         self._report_lease(chunk_id, held_epoch)
         return {"claimed": True, "status": status, "from_node_id": node_id, "epoch": held_epoch, "response": body}
 
-    def complete(self, chunk_id: str, choice: str) -> dict[str, Any]:
-        """Submit the held node-step's completion, distorted by any armed lever."""
+    def complete(self, chunk_id: str, choice: str, artifacts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Submit the held node-step's completion, distorted by any armed lever.
+
+        ``artifacts`` (the submission's ``produces:`` artifacts, ``SubmittedArtifact``
+        dicts) default empty — the historical behaviour — so only a produces-aware
+        service test passes them, to drive the hub's ``produces_mode`` backstop."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -114,7 +118,7 @@ class MockRunnerService:
             "runner_id": self._runner_id,
             "from_node_id": from_node,
             "check_results": [],
-            "artifacts": [],
+            "artifacts": artifacts or [],
         }
         if route_token is not None:
             submission["route_token"] = route_token

@@ -34,7 +34,7 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   | `POST /_drive/register` | `POST {hub}/api/fleet/runners` — join the fleet |
   | `POST /_drive/peek` | `GET {hub}/api/fleet/queue/peek` |
   | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) |
-  | `POST /_drive/complete` `{chunk_id, choice}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next` |
+  | `POST /_drive/complete` `{chunk_id, choice, artifacts?}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next`. `artifacts` (optional, default `[]`) are the submission's `produces:` artifacts (`SubmittedArtifact` dicts — `{name, kind, content, attached}`), letting a service test drive the hub's `produces_mode=enforce` backstop (issue #113) over the wire |
   | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/fleet/chunks/{id}` |
   | `POST /_drive/reset` | Drop held leases + clear levers |
 
