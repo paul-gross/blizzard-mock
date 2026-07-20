@@ -57,3 +57,8 @@ class UpdatePullBody(BaseModel):
 
 class UpdateBranchBody(BaseModel):
     expected_head_sha: str | None = None
+
+
+class UpdateRefBody(BaseModel):
+    sha: str
+    force: bool = False

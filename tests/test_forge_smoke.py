@@ -35,7 +35,9 @@ def _git(*args: str, cwd: Path | None = None) -> None:
 
 def _build_bare_repos(root: Path) -> Path:
     """Mint a bare repo with branches: ``main`` (advanced), ``feature`` /
-    ``feature2`` (clean merges into main), ``clash`` (real conflict)."""
+    ``feature2`` (clean merges into main), ``clash`` (real conflict),
+    ``old-main`` (a snapshot of ``main`` before it advanced — a true ancestor
+    of current ``main``, for fast-forward ref-update tests)."""
     work = root / "work"
     work.mkdir(parents=True)
     _git("init", "-b", "main", str(work))
@@ -44,6 +46,7 @@ def _build_bare_repos(root: Path) -> Path:
     (work / "a.txt").write_text("hello\n")
     _git("-C", str(work), "add", "-A")
     _git("-C", str(work), "commit", "-m", "initial")
+    _git("-C", str(work), "branch", "old-main")
     _git("-C", str(work), "checkout", "-b", "feature")
     (work / "feature.txt").write_text("feature\n")
     _git("-C", str(work), "add", "-A")
@@ -214,6 +217,58 @@ def test_get_ref_and_commit(client: TestClient) -> None:
     commit = client.get(f"/repos/{REPO}/commits/{sha}").json()
     assert commit["sha"] == sha
     assert commit["commit"]["message"].strip() == "main change"
+
+
+# -- git data: ref write (PR-free, fast-forward delivery) ------------------
+
+
+def test_update_ref_fast_forward_moves_the_ref(client: TestClient) -> None:
+    # ``old-main`` is a true ancestor of ``main``'s current tip.
+    before = client.get(f"/repos/{REPO}/git/ref/heads/old-main").json()["object"]["sha"]
+    target = client.get(f"/repos/{REPO}/git/ref/heads/main").json()["object"]["sha"]
+    assert target != before
+
+    resp = client.patch(f"/repos/{REPO}/git/refs/heads/old-main", json={"sha": target})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ref"] == "refs/heads/old-main"
+    assert body["object"]["sha"] == target
+
+    after = client.get(f"/repos/{REPO}/git/ref/heads/old-main").json()["object"]["sha"]
+    assert after == target
+
+
+def test_update_ref_non_fast_forward_rejected_and_ref_unchanged(client: TestClient) -> None:
+    before = client.get(f"/repos/{REPO}/git/ref/heads/main").json()["object"]["sha"]
+    other = client.get(f"/repos/{REPO}/git/ref/heads/feature2").json()["object"]["sha"]
+
+    resp = client.patch(f"/repos/{REPO}/git/refs/heads/main", json={"sha": other})
+    assert resp.status_code == 422
+
+    after = client.get(f"/repos/{REPO}/git/ref/heads/main").json()["object"]["sha"]
+    assert after == before
+
+
+def test_update_ref_force_performs_non_fast_forward_update(client: TestClient) -> None:
+    other = client.get(f"/repos/{REPO}/git/ref/heads/feature2").json()["object"]["sha"]
+
+    resp = client.patch(f"/repos/{REPO}/git/refs/heads/main", json={"sha": other, "force": True})
+    assert resp.status_code == 200
+    assert resp.json()["object"]["sha"] == other
+
+    after = client.get(f"/repos/{REPO}/git/ref/heads/main").json()["object"]["sha"]
+    assert after == other
+
+
+def test_update_ref_unknown_ref_is_422(client: TestClient) -> None:
+    sha = client.get(f"/repos/{REPO}/git/ref/heads/main").json()["object"]["sha"]
+    resp = client.patch(f"/repos/{REPO}/git/refs/heads/ghost", json={"sha": sha})
+    assert resp.status_code == 422
+
+
+def test_update_ref_unknown_sha_is_422(client: TestClient) -> None:
+    resp = client.patch(f"/repos/{REPO}/git/refs/heads/feature2", json={"sha": "0" * 40})
+    assert resp.status_code == 422
 
 
 # -- levers: catalog -------------------------------------------------------

@@ -15,6 +15,7 @@ from blizzard_mock.forge.domain.errors import (
     HeadMismatch,
     IssueNotFound,
     MergeRejected,
+    NotFastForward,
     NotMergeable,
     PullNotFound,
     ValidationError,
@@ -348,6 +349,20 @@ class ForgeService:
     def resolve_ref(self, owner: str, name: str, ref: str) -> str:
         repo = self.get_repo(owner, name)
         return self._git.resolve_ref(repo, ref)
+
+    def update_ref(self, owner: str, name: str, ref: str, *, sha: str, force: bool) -> str:
+        """Update a ref's target sha (GitHub's ``PATCH .../git/refs/{ref}``).
+
+        Unless ``force`` is set, this is an atomic compare-and-swap: the
+        update is rejected (``NotFastForward``) unless the ref's current sha
+        is an ancestor of ``sha`` — the fast-forward, PR-free delivery path."""
+        repo = self.get_repo(owner, name)
+        current_sha = self._git.resolve_ref(repo, ref)
+        target_sha = self._git.resolve_ref(repo, sha)
+        if not force and not self._git.is_ancestor(repo, current_sha, target_sha):
+            raise NotFastForward(f"Update is not a fast forward: refs/heads/{ref}")
+        self._git.update_ref(repo, ref, target_sha)
+        return target_sha
 
 
 def _split_full_name(full_name: str) -> tuple[str, str]:

@@ -43,6 +43,14 @@ class BranchNotFound(ForgeError):
     status = 422
 
 
+class NotFastForward(ForgeError):
+    """A non-force ref update was not a fast-forward — the current ref sha is
+    not an ancestor of the target sha (GitHub 422, ``Update is not a fast
+    forward``)."""
+
+    status = 422
+
+
 class ValidationError(ForgeError):
     """A malformed create request — missing head/base, bad state (GitHub 422)."""
 

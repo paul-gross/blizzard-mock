@@ -74,3 +74,8 @@ class IWriteGitBackend(IReadGitBackend, Protocol):
         """Really merge ``head`` into ``base`` in the bare repo and return the
         new commit sha on ``base``. Raises ``NotMergeable`` on real conflict."""
         ...
+
+    def update_ref(self, repo: Repo, ref: str, sha: str) -> None:
+        """Set ``refs/heads/<ref>`` to point at ``sha`` unconditionally — the
+        raw ref write behind the domain's fast-forward compare-and-swap."""
+        ...

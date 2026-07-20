@@ -160,6 +160,10 @@ class GitBackend:
                 git.git.worktree("remove", "--force", str(tmp))
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def update_ref(self, repo: RepoModel, ref: str, sha: str) -> None:
+        git = self._open(repo.owner, repo.name)
+        git.git.update_ref(f"refs/heads/{ref}", sha)
+
     def _raise_merge_error(self, exc: GitCommandError, work: Repo, repo: RepoModel, base: str, head: str) -> None:
         text = f"{exc.stdout}\n{exc.stderr}\n{exc}"
         with contextlib.suppress(GitCommandError):
