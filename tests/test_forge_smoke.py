@@ -158,6 +158,42 @@ def test_create_pull_unknown_branch_rejected(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+def test_duplicate_open_pull_is_422(client: TestClient) -> None:
+    first = _open_pull(client, "feature")
+    before = client.get(f"/repos/{REPO}/pulls").json()
+
+    dup = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "feature", "base": "main"})
+    assert dup.status_code == 422
+    assert dup.json()["message"] == "A pull request already exists for octocat:feature."
+
+    after = client.get(f"/repos/{REPO}/pulls").json()
+    assert len(after) == len(before)
+    assert first["number"] in [p["number"] for p in after]
+
+
+def test_duplicate_pull_allowed_once_prior_is_closed(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    closed = client.patch(f"/repos/{REPO}/pulls/{number}", json={"state": "closed"}).json()
+    assert closed["state"] == "closed"
+
+    reopened = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "feature", "base": "main"})
+    assert reopened.status_code == 201
+
+
+def test_duplicate_pull_allowed_once_prior_is_merged(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    assert client.put(f"/repos/{REPO}/pulls/{number}/merge", json={}).status_code == 200
+
+    reopened = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "feature", "base": "main"})
+    assert reopened.status_code == 201
+
+
+def test_same_head_different_base_not_rejected(client: TestClient) -> None:
+    _open_pull(client, "feature", base="main")
+    other_base = client.post(f"/repos/{REPO}/pulls", json={"title": "x", "head": "feature", "base": "old-main"})
+    assert other_base.status_code == 201
+
+
 def test_merge_lands_commit_reachable_from_bare_main(client: TestClient, repos_dir: Path) -> None:
     pull = _open_pull(client, "feature")
     head_sha = pull["head"]["sha"]

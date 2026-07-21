@@ -57,7 +57,7 @@ armed.
 | `GET /repos/{o}/{r}/issues/{n}/comments` | List the comment thread |
 | `POST /repos/{o}/{r}/issues/{n}/comments` | Add a comment (issue or PR) |
 | `GET /repos/{o}/{r}/pulls?state=` | List PRs |
-| `POST /repos/{o}/{r}/pulls` | Create PR (`head`/`base` branches) |
+| `POST /repos/{o}/{r}/pulls` | Create PR (`head`/`base` branches); 422 if an open PR already exists for the same `head`/`base` |
 | `GET /repos/{o}/{r}/pulls/{n}` | Get PR — live `mergeable`/`mergeable_state`, `merged` |
 | `PATCH /repos/{o}/{r}/pulls/{n}` | Close a PR without merge (D-065 terminal) |
 | `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base`; 405 conflict, 409 stale-sha |

@@ -166,6 +166,9 @@ class ForgeService:
             raise ValidationError(f"head ref does not exist: {head}")
         if not self._git.branch_exists(repo, base):
             raise ValidationError(f"base ref does not exist: {base}")
+        for existing in self._state.list_pulls(repo.full_name, "open"):
+            if existing.head == head and existing.base == base:
+                raise ValidationError(f"A pull request already exists for {owner}:{head}.")
         now = self._clock.now()
         pull = PullRequest(
             number=self._state.next_number(repo.full_name),
