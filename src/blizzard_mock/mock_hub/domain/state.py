@@ -11,11 +11,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from blizzard_mock.mock_hub.domain.models import ChunkState
+from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 
 
 class RunnerRow:
-    """A registered runner's mutable registry row (liveness + pause brake)."""
+    """A registered runner's mutable registry row (liveness + pause brakes)."""
 
     def __init__(self, runner_id: str, workspace_id: str, at: datetime) -> None:
         self.runner_id = runner_id
@@ -23,10 +23,17 @@ class RunnerRow:
         self.registered_at = at
         self.last_seen_at = at
         self.paused = False
+        # The runner's own locally-reported pause brake (``runner.locally_paused`` /
+        # ``runner.locally_resumed``) — distinct from ``paused``, the fleet's brake the
+        # runner pulls down (blizzard#43/#44). The mock only enforces the fleet's own
+        # brake; this trio is reported-up state, mirrored read-only via ``RunnerView``.
+        self.locally_paused = False
+        self.locally_paused_by: str | None = None
+        self.locally_paused_reason: str | None = None
 
 
 class IHubState(Protocol):
-    """The mock hub's write-through state: chunks and the runner registry."""
+    """The mock hub's write-through state: chunks, questions, and the runner registry."""
 
     def put_chunk(self, chunk: ChunkState) -> None: ...
     def get_chunk(self, chunk_id: str) -> ChunkState | None: ...
@@ -37,4 +44,7 @@ class IHubState(Protocol):
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...
     def list_runners(self) -> list[RunnerRow]: ...
+    def put_question(self, question: QuestionState) -> None: ...
+    def get_question(self, question_id: str) -> QuestionState | None: ...
+    def list_questions(self) -> list[QuestionState]: ...
     def clear(self) -> None: ...

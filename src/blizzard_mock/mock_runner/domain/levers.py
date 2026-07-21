@@ -7,9 +7,10 @@ against this mock (``implementation/mocking.md``, "the hub → run it against th
 runner") means arming a lever that names the misbehaviour the hub must reject or absorb —
 a stale-epoch completion, a duplicate delivery, a runner that vanishes mid-lease.
 
-Six of the eight levers mirror the shared menu, realised on the runner's side of the
-wire; ``stale_route_token``/``omit_route_token`` (issue #84b) are runner-only — driving
-the route capability token's presentation is a mock-runner lever, not a hub distortion.
+Six of the nine levers mirror the shared menu, realised on the runner's side of the
+wire; ``stale_route_token``/``omit_route_token`` (issue #84b) and ``lease_via_events``
+are runner-only — driving the route capability token's presentation, and the transport
+path a fence-advancing lease rides, are mock-runner concerns, not hub distortions.
 """
 
 from __future__ import annotations
@@ -45,6 +46,10 @@ class RunnerLever(StrEnum):
     #: the pre-#84a-runner / dropped-field case ``route_token_mode=warn`` must absorb and
     #: ``enforce`` must reject.
     OMIT_ROUTE_TOKEN = "omit_route_token"
+    #: Report the fence-advancing lease through the batched ``/events`` fact-push
+    #: instead of the dedicated ``/chunks/{id}/leases`` route the driver uses by
+    #: default — a transport-path selection, not a correctness distortion.
+    LEASE_VIA_EVENTS = "lease_via_events"
 
 
 CATALOG: dict[str, str] = {
@@ -56,4 +61,5 @@ CATALOG: dict[str, str] = {
     RunnerLever.STALE_EPOCH.value: "submit a completion with a stale (held-epoch - 1) fence (D-007)",
     RunnerLever.STALE_ROUTE_TOKEN.value: "submit a completion with a wrong route capability token (issue #84b)",
     RunnerLever.OMIT_ROUTE_TOKEN.value: "submit a completion with no route capability token (issue #84b)",
+    RunnerLever.LEASE_VIA_EVENTS.value: "report lease.minted via /events instead of the dedicated /leases route",
 }

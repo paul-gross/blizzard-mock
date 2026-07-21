@@ -2,9 +2,12 @@
 
 The six levers named in ``implementation/mocking.md`` ("delay a response, drop a
 delivery/completion ack, return a conflicting fact, go unreachable mid-lease, replay a
-message, serve a stale envelope"), realised on the hub's side of the wire. Each steers
-the response a real runner (or the mock runner) receives so an edge case becomes "pull
-the lever that names the state" rather than "contrive the daemon into it".
+message, serve a stale envelope"), realised on the hub's side of the wire, plus a
+seventh (``chunk_unknown``, blizzard-mock#4) that reports a chunk-scoped read as
+unknown — the runner's env-release trigger (commit ``68238d0``) — without deleting the
+chunk's actual state. Each steers the response a real runner (or the mock runner)
+receives so an edge case becomes "pull the lever that names the state" rather than
+"contrive the daemon into it".
 
 The store, arm/clear/find semantics, and the ``/_levers`` shape are the shared primitive
 (``blizzard_mock.levers``); this module supplies only the kind enum and the catalog.
@@ -35,6 +38,10 @@ class HubLever(StrEnum):
     #: ``GET /chunks/{id}/envelope`` stamps a **stale** (``latest_epoch - 1``) fence, so a
     #: completion built from it is rejected as a zombie (D-007) — stale-envelope handling.
     STALE_ENVELOPE = "stale_envelope"
+    #: ``GET /chunks/{id}`` and ``GET /chunks/{id}/envelope`` report a genuine 404 —
+    #: an unknown-chunk read the runner must release its held environments over
+    #: (commit ``68238d0``) — without actually deleting the chunk's seeded state.
+    CHUNK_UNKNOWN = "chunk_unknown"
 
 
 CATALOG: dict[str, str] = {
@@ -44,4 +51,5 @@ CATALOG: dict[str, str] = {
     HubLever.UNREACHABLE.value: "all requests 503; remaining=N heals after N calls (unreachable mid-lease)",
     HubLever.REPLAY.value: "re-emit the previous completion apply-response (duplicate delivery)",
     HubLever.STALE_ENVELOPE.value: "GET envelope stamps a stale (latest_epoch-1) fence (D-007)",
+    HubLever.CHUNK_UNKNOWN.value: "GET chunk/envelope 404s as an unknown chunk — the runner's env-release trigger",
 }

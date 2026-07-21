@@ -91,6 +91,33 @@ class NodeSpec(BaseModel):
     mode: str | None = None  # hub node: merge-to-main | open-pr
 
 
+class EscalationState(BaseModel):
+    """Retries exhausted (``escalation.recorded``) — mirrors ``blizzard.wire.chunk.EscalationView``."""
+
+    epoch: int
+    takeover_command: str = ""
+
+
+class QuestionState(BaseModel):
+    """A pending or answered ask/answer rendezvous question (``question.asked``) —
+    mirrors ``blizzard.wire.question.QuestionView``. Held in ``IHubState``, not on the
+    chunk row, since a question is addressed by its own id (``GET /questions/{id}``)."""
+
+    question_id: str
+    chunk_id: str
+    node_id: str | None = None
+    session_id: str | None = None
+    runner_id: str
+    epoch: int
+    question: str
+    options: list[str] = Field(default_factory=list)
+    asked_at: str
+    answered: bool = False
+    answer: str | None = None
+    answered_by: str | None = None
+    answered_at: str | None = None
+
+
 class PmPointerSpec(BaseModel):
     """One ``{source, ref}`` PM pointer (D-105) — mirrors the hub's own pointer wire
     (``blizzard.wire.chunk.PmPointerModel``)."""
@@ -142,6 +169,9 @@ class ChunkState(BaseModel):
     #: The last apply-response produced, replayed verbatim by the ``replay`` lever
     #: (a duplicate delivery). Held as ``Any`` to avoid a cycle with ``domain.wire``.
     last_response: Any = None
+    #: Retries exhausted (``escalation.recorded`` / ``POST .../escalations``) — surfaced
+    #: read-only via ``ChunkDetail.escalation``.
+    escalation: EscalationState | None = None
 
     def node(self, node_id: str) -> NodeSpec | None:
         return self.nodes.get(node_id)

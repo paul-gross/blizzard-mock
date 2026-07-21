@@ -25,18 +25,23 @@ from blizzard_mock.mock_hub.domain.models import (
     ChunkSpec,
     ChunkState,
     ChunkStatus,
+    EscalationState,
     Executor,
     NodeSpec,
+    QuestionState,
 )
 from blizzard_mock.mock_hub.domain.state import IHubState
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     ChunkDetail,
     EnvelopeChoice,
+    EscalationView,
+    HubAdvanceResponse,
     NodeConfig,
     NodeEnvelope,
     PmItemEntry,
     PmItemsView,
+    QuestionView,
     QueuePeekEntry,
     QueuePeekResponse,
     RouteClaimResponse,
@@ -46,12 +51,23 @@ from blizzard_mock.mock_hub.domain.wire import (
     RunnerView,
 )
 
-#: The runner-fact kind that advances the mock's fence (``blizzard.wire.facts.LEASE_MINTED``).
+#: The runner-fact vocabulary (``blizzard.wire.facts``) the batched ``/events`` push
+#: dispatches by kind — mirrors ``blizzard.hub.domain.facts.FactIngestService.ingest``.
 LEASE_MINTED = "lease.minted"
+ESCALATION_RECORDED = "escalation.recorded"
+QUESTION_ASKED = "question.asked"
+ANSWER_DELIVERED = "answer.delivered"
+RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
+RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
+USAGE_RECORDED = "usage.recorded"
 
 
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
+
+
+class QuestionNotFound(Exception):
+    """No question with that id."""
 
 
 class ClaimConflict(Exception):
@@ -69,6 +85,11 @@ class MockHubService:
         self._state = state
         self._levers = levers
         self._clock = clock
+        #: Per-runner fact high-water mark (``blizzard.hub.domain.facts``'s
+        #: ``runner_high_water``) — a seq at/under this mark is re-acked as
+        #: ``already_applied`` rather than re-applied. Process-lifetime, like the rest
+        #: of this mock's state; cleared by ``reset()``.
+        self._fact_high_water: dict[str, int] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -96,6 +117,7 @@ class MockHubService:
     def reset(self) -> None:
         self._state.clear()
         self._levers.clear_all()
+        self._fact_high_water.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -158,6 +180,7 @@ class MockHubService:
     # -- reads -------------------------------------------------------------
 
     def chunk_detail(self, chunk_id: str) -> ChunkDetail:
+        self._consult_chunk_unknown(chunk_id)
         chunk = self._require(chunk_id)
         route = None
         if chunk.claimed:
@@ -171,6 +194,12 @@ class MockHubService:
                 workspace_id=chunk.route_workspace_id or "",
                 environment_ids=chunk.route_environment_ids,
             )
+        escalation = None
+        if chunk.escalation is not None:
+            escalation = EscalationView(
+                epoch=chunk.escalation.epoch, takeover_command=chunk.escalation.takeover_command
+            )
+        questions = [self._question_view(q) for q in self._state.list_questions() if q.chunk_id == chunk_id]
         return ChunkDetail(
             chunk_id=chunk.chunk_id,
             graph_id=chunk.graph_id,
@@ -180,6 +209,8 @@ class MockHubService:
             pm_pointers=[p.model_dump() for p in chunk.pm_pointers],
             model=chunk.model,
             route=route,
+            escalation=escalation,
+            questions=questions,
         )
 
     def pm_items(self, chunk_id: str) -> PmItemsView:
@@ -203,6 +234,7 @@ class MockHubService:
 
         The ``stale_envelope`` lever stamps ``latest_epoch - 1`` so a completion built
         from it is fenced out as a zombie — the runner's stale-envelope path (D-007)."""
+        self._consult_chunk_unknown(chunk_id)
         chunk = self._require(chunk_id)
         node_id = chunk.current_node_id or chunk.entry
         epoch = chunk.latest_epoch
@@ -212,26 +244,107 @@ class MockHubService:
             epoch = max(chunk.latest_epoch - 1, 0)
         return self._envelope(chunk, node_id, epoch=epoch)
 
-    # -- fact intake (fence) ----------------------------------------------
+    # -- fact intake (fence + full vocabulary) ------------------------------
 
     def ingest_facts(self, runner_id: str, facts: list[dict[str, Any]]) -> RunnerFactAck:
-        """Apply a batched ``POST /events`` push; ``lease.minted`` advances the fence (D-044)."""
+        """Apply a batched ``POST /events`` push — the runner's full fact vocabulary
+        (``blizzard.wire.facts``), partitioned into ``applied``/``already_applied``/
+        ``rejected`` against a per-runner high-water mark (mirrors
+        ``blizzard.hub.domain.facts.FactIngestService.ingest``). A seq at or under the
+        mark is re-acked without re-applying (idempotent replay); an unrecognized
+        ``kind`` is rejected, not silently applied, and the mark only advances past a
+        seq that was genuinely applied."""
+        mark = self._fact_high_water.get(runner_id, 0)
         applied: list[int] = []
-        high_water = 0
-        for fact in facts:
+        already_applied: list[int] = []
+        rejected: list[int] = []
+        for fact in sorted(facts, key=lambda f: int(f.get("seq", 0))):
             seq = int(fact.get("seq", 0))
-            high_water = max(high_water, seq)
+            if seq <= mark:
+                already_applied.append(seq)
+                continue
             kind = str(fact.get("kind", ""))
-            payload = fact.get("payload") or {}
-            if kind == LEASE_MINTED and isinstance(payload, dict):
-                chunk_id = str(payload.get("chunk_id", ""))
-                epoch = int(payload.get("epoch", 0))
-                chunk = self._state.get_chunk(chunk_id)
-                if chunk is not None:
-                    chunk.latest_epoch = max(chunk.latest_epoch, epoch)
-                    self._state.put_chunk(chunk)
-            applied.append(seq)
-        return RunnerFactAck(runner_id=runner_id, high_water=high_water, applied=applied)
+            payload = fact.get("payload")
+            if not isinstance(payload, dict):
+                payload = {}
+            if self._apply_fact(runner_id, kind, payload):
+                applied.append(seq)
+                mark = max(mark, seq)
+            else:
+                rejected.append(seq)
+        self._fact_high_water[runner_id] = mark
+        return RunnerFactAck(
+            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
+        )
+
+    def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
+        """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected —
+        mirrors ``blizzard.hub.domain.facts._apply``'s bool contract, including its
+        fallthrough for an unrecognized kind. Unlike the direct routes, the real hub's
+        batched ``_apply`` (``blizzard.hub.domain.facts:133-163``) carries no
+        chunk-existence check — a known kind naming an unknown chunk still counts
+        applied (the mark advances), the mutation is just a no-op."""
+        if kind == LEASE_MINTED:
+            chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
+            if chunk is not None:
+                self._advance_fence(chunk, int(payload.get("epoch", 0)))
+            return True
+        if kind == ESCALATION_RECORDED:
+            chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
+            if chunk is not None:
+                self._record_escalation(
+                    chunk,
+                    epoch=int(payload.get("epoch", 0)),
+                    takeover_command=str(payload.get("takeover_command", "")),
+                )
+            return True
+        if kind == QUESTION_ASKED:
+            question_id = str(payload.get("question_id", ""))
+            chunk_id = str(payload.get("chunk_id", ""))
+            if not question_id or not chunk_id:
+                return False
+            self._state.put_question(
+                QuestionState(
+                    question_id=question_id,
+                    chunk_id=chunk_id,
+                    node_id=payload.get("node_id"),
+                    session_id=payload.get("session_id"),
+                    runner_id=runner_id,
+                    epoch=int(payload.get("epoch", 0)),
+                    question=str(payload.get("question", "")),
+                    options=list(payload.get("options") or []),
+                    asked_at=str(payload.get("asked_at", "")),
+                )
+            )
+            return True
+        if kind == ANSWER_DELIVERED:
+            question = self._state.get_question(str(payload.get("question_id", "")))
+            if question is None:
+                return False
+            question.answered = True
+            self._state.put_question(question)
+            return True
+        if kind == RUNNER_LOCALLY_PAUSED:
+            row = self._state.get_runner(runner_id)
+            if row is None:
+                return False
+            row.locally_paused = True
+            row.locally_paused_by = str(payload.get("by", "operator"))
+            row.locally_paused_reason = payload.get("reason")
+            return True
+        if kind == RUNNER_LOCALLY_RESUMED:
+            row = self._state.get_runner(runner_id)
+            if row is None:
+                return False
+            row.locally_paused = False
+            row.locally_paused_by = None
+            row.locally_paused_reason = None
+            return True
+        # usage.recorded: no fence, no route-token gate at the real hub either
+        # (deliberate); the mock has no per-node-step usage ledger to post to, so
+        # accepting without modeling further is the honest minimum (issue #4). Any
+        # other kind is unrecognized — rejected, mirroring the real hub's fallthrough.
+        return kind == USAGE_RECORDED
 
     # -- completion apply --------------------------------------------------
 
@@ -275,6 +388,72 @@ class MockHubService:
         self._state.put_chunk(chunk)
         return ApplyResponse(outcome=ApplyOutcome.PARKED_AT_GATE, detail="parked at gate")
 
+    # -- direct fact routes (non-buffered counterparts of /events) ----------
+
+    def report_lease(self, chunk_id: str, *, epoch: int, runner_id: str) -> dict[str, Any]:
+        """``POST /chunks/{id}/leases`` — the direct, non-buffered ``lease.minted``
+        report; advances the fence exactly as the batched ``/events`` path does (the
+        shared ``_advance_fence`` helper), 404 on an unknown chunk (unlike the batched
+        path, which no-ops on an unknown chunk so an unrelated fact in the same push
+        still lands). Mirrors the real hub's 202 ``{"chunk_id"}`` body
+        (``blizzard.hub.api.fleet:415``) — no ``epoch`` in the response."""
+        chunk = self._require(chunk_id)
+        self._advance_fence(chunk, epoch)
+        return {"chunk_id": chunk_id}
+
+    def report_escalation(self, chunk_id: str, *, epoch: int, runner_id: str, takeover_command: str) -> dict[str, Any]:
+        """``POST /chunks/{id}/escalations`` — the direct, non-buffered
+        ``escalation.recorded`` report; records the escalation exactly as the batched
+        ``/events`` path does (the shared ``_record_escalation`` helper). Mirrors the
+        real hub's 202 ``{"chunk_id"}`` body (``blizzard.hub.api.fleet:431``) — no
+        ``epoch`` in the response."""
+        chunk = self._require(chunk_id)
+        self._record_escalation(chunk, epoch=epoch, takeover_command=takeover_command)
+        return {"chunk_id": chunk_id}
+
+    def hub_advance(self, chunk_id: str) -> HubAdvanceResponse:
+        """``POST /chunks/{id}/hub-advance`` — drive a chunk parked at a hub-executor
+        node one step (#65/#66). The mock's hub nodes only "park" (stay non-terminal)
+        when the *entry* node itself is a hub executor — a completion's own transition
+        into a hub node still derives ``done`` synchronously (``_advance``'s existing
+        behavior, unchanged so the mock-runner's driven happy path keeps working
+        without a hub-advance call). A chunk not parked at a hub-executor node is a
+        no-op, ``ran=False``, mirroring the real hub's own "not parked" detail string."""
+        chunk = self._require(chunk_id)
+        node = chunk.node(chunk.current_node_id) if chunk.current_node_id is not None else None
+        parked = node is not None and node.executor is Executor.HUB and chunk.status is not ChunkStatus.DONE
+        if not parked:
+            return HubAdvanceResponse(
+                chunk_id=chunk_id, status=chunk.status.value, ran=False, detail="not parked at a hub command node"
+            )
+        chunk.status = ChunkStatus.DONE
+        self._state.put_chunk(chunk)
+        return HubAdvanceResponse(
+            chunk_id=chunk_id, status=chunk.status.value, ran=True, detail="hub node advanced to done"
+        )
+
+    # -- questions (ask/answer rendezvous) ----------------------------------
+
+    def question_view(self, question_id: str) -> QuestionView:
+        question = self._state.get_question(question_id)
+        if question is None:
+            raise QuestionNotFound(f"unknown question {question_id}")
+        return self._question_view(question)
+
+    def answer_question(self, question_id: str, *, answer: str, answered_by: str = "operator") -> None:
+        """Test-control only (``POST /_seed/answer``) — plays the operator's own
+        ``POST /questions/{id}/answer`` (board-only on the real hub, out of scope for
+        the fleet mirror) so a scenario can make the runner's poll return
+        ``answered=True`` without a real operator surface."""
+        question = self._state.get_question(question_id)
+        if question is None:
+            raise QuestionNotFound(f"unknown question {question_id}")
+        question.answered = True
+        question.answer = answer
+        question.answered_by = answered_by
+        question.answered_at = self._clock.now().isoformat()
+        self._state.put_question(question)
+
     # -- registry ----------------------------------------------------------
 
     def register(self, runner_id: str, workspace_id: str) -> bool:
@@ -291,6 +470,9 @@ class MockHubService:
             last_seen_at=row.last_seen_at.isoformat(),
             online=True,
             hub_paused=row.paused,
+            locally_paused=row.locally_paused,
+            locally_paused_by=row.locally_paused_by,
+            locally_paused_reason=row.locally_paused_reason,
         )
 
     def set_paused(self, runner_id: str, paused: bool) -> None:
@@ -311,6 +493,44 @@ class MockHubService:
         return True
 
     # -- internals ---------------------------------------------------------
+
+    def _advance_fence(self, chunk: ChunkState, epoch: int) -> None:
+        """The ``lease.minted`` fence advance (D-044), shared by the batched ``/events``
+        dispatch and the direct ``POST /chunks/{id}/leases`` route."""
+        chunk.latest_epoch = max(chunk.latest_epoch, epoch)
+        self._state.put_chunk(chunk)
+
+    def _record_escalation(self, chunk: ChunkState, *, epoch: int, takeover_command: str) -> None:
+        """The ``escalation.recorded`` write, shared by the batched ``/events`` dispatch
+        and the direct ``POST /chunks/{id}/escalations`` route."""
+        chunk.escalation = EscalationState(epoch=epoch, takeover_command=takeover_command)
+        self._state.put_chunk(chunk)
+
+    def _consult_chunk_unknown(self, chunk_id: str) -> None:
+        """The ``chunk_unknown`` lever: a chunk-scoped read reports a genuine 404
+        without deleting the chunk's actual seeded state — the runner's env-release
+        trigger (commit ``68238d0``)."""
+        unknown = self._levers.find(HubLever.CHUNK_UNKNOWN.value, chunk_id)
+        if unknown is not None:
+            self._levers.consume(unknown)
+            raise ChunkNotFound(f"unknown chunk {chunk_id}")
+
+    def _question_view(self, question: QuestionState) -> QuestionView:
+        return QuestionView(
+            question_id=question.question_id,
+            chunk_id=question.chunk_id,
+            node_id=question.node_id,
+            session_id=question.session_id,
+            runner_id=question.runner_id,
+            epoch=question.epoch,
+            question=question.question,
+            options=list(question.options),
+            asked_at=question.asked_at,
+            answered=question.answered,
+            answer=question.answer,
+            answered_by=question.answered_by,
+            answered_at=question.answered_at,
+        )
 
     def _advance(self, chunk: ChunkState, target: str) -> ApplyResponse:
         if target == TERMINAL:

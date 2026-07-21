@@ -75,6 +75,36 @@ class RouteView(BaseModel):
     environment_ids: list[str] = Field(default_factory=list)
 
 
+class EscalationView(BaseModel):
+    epoch: int
+    takeover_command: str
+
+
+class QuestionView(BaseModel):
+    question_id: str
+    chunk_id: str
+    node_id: str | None = None
+    session_id: str | None = None
+    runner_id: str
+    epoch: int
+    question: str
+    options: list[str] = Field(default_factory=list)
+    asked_at: str
+    answered: bool = False
+    answer: str | None = None
+    answered_by: str | None = None
+    answered_at: str | None = None
+
+
+class HubAdvanceResponse(BaseModel):
+    chunk_id: str
+    status: str
+    ran: bool
+    outcome_choice: str | None = None
+    to_node_name: str | None = None
+    detail: str = ""
+
+
 class ChunkDetail(BaseModel):
     chunk_id: str
     graph_id: str
@@ -87,6 +117,8 @@ class ChunkDetail(BaseModel):
     # required-field wire model deserializes the mock's replies unchanged.
     model: str
     route: RouteView | None = None
+    escalation: EscalationView | None = None
+    questions: list[QuestionView] = Field(default_factory=list)
 
 
 class QueuePeekEntry(BaseModel):
@@ -111,6 +143,8 @@ class RunnerView(BaseModel):
     # only models the first — it stands in for the hub, and the hub never sets the second.
     hub_paused: bool
     locally_paused: bool = False
+    locally_paused_by: str | None = None
+    locally_paused_reason: str | None = None
 
 
 class RunnerFactAck(BaseModel):

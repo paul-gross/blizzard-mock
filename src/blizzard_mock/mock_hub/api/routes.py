@@ -1,8 +1,11 @@
 """The hub-mirror routes — the ``/api`` surface a runner consumes (D-012).
 
 Vendor-native paths and JSON identical to the real hub OpenAPI subset the reconciliation
-loop calls: queue peek, route claim, chunk detail, envelope re-read, completion + decision
-apply, the fact-intake push, the PM-items pass-through, and the runner registry.
+loop calls: queue peek, route claim (plus route-token rotation), chunk detail, envelope
+re-read, completion + decision apply, the batched fact-intake push and its dedicated
+lease/escalation report counterparts, the questions poll, the hub-advance step, the
+PM-items pass-through, and the runner registry. Not necessarily exhaustive as the mock's
+surface grows — see the real hub's OpenAPI subset for the source of truth.
 Controllers hold only the ``MockHubService`` (``bzh:controller-read-only``); every rule
 lives in the service.
 
@@ -32,12 +35,14 @@ from fastapi.responses import JSONResponse
 from blizzard_mock.mock_hub.api.deps import (
     CompletionBody,
     DecisionBody,
+    EscalationReportBody,
+    LeaseReportBody,
     RouteClaimBody,
     RunnerFactBatchBody,
     RunnerRegistrationBody,
     get_service,
 )
-from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService
+from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService, QuestionNotFound
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub (``/api/health``, ``/api/ready`` sit outside both `chunks_router` and `fleet`
@@ -162,3 +167,41 @@ def get_runner(runner_id: str, service: Annotated[MockHubService, Depends(get_se
     if view is None:
         return JSONResponse(status_code=404, content={"detail": f"unknown runner {runner_id}"})
     return view
+
+
+@fleet_router.get("/questions/{question_id}")
+def get_question(question_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    try:
+        return service.question_view(question_id)
+    except QuestionNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/leases", status_code=202)
+def report_lease(
+    chunk_id: str, body: LeaseReportBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    try:
+        return service.report_lease(chunk_id, epoch=body.epoch, runner_id=body.runner_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/escalations", status_code=202)
+def report_escalation(
+    chunk_id: str, body: EscalationReportBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    try:
+        return service.report_escalation(
+            chunk_id, epoch=body.epoch, runner_id=body.runner_id, takeover_command=body.takeover_command
+        )
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/hub-advance")
+def hub_advance(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    try:
+        return service.hub_advance(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})

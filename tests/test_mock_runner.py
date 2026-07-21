@@ -3,7 +3,7 @@
 The mock runner is a *driver*: it performs the runner's outbound protocol against a hub.
 These tests wire it to an **in-process mock hub** (over ``httpx.ASGITransport`` — no
 network) and drive it through the driver's own control API (a ``TestClient`` over the mock
-runner app), asserting the happy path and **each of the eight runner-side levers** — the
+runner app), asserting the happy path and **each of the nine runner-side levers** — the
 misbehaviours a hub-under-test must reject or absorb. The mock hub does not itself
 validate the route capability token (``stale_route_token``/``omit_route_token``, issue
 #84b) — that check belongs to the real hub, exercised in ``blizzard``'s own
@@ -94,7 +94,7 @@ def test_driver_claims_and_completes_over_the_wire(stack: tuple[TestClient, Test
     assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
 
 
-def test_lever_catalog_lists_all_eight(stack: tuple[TestClient, TestClient]) -> None:
+def test_lever_catalog_lists_all_nine(stack: tuple[TestClient, TestClient]) -> None:
     _hub, runner = stack
     assert set(runner.get("/_levers").json()["catalog"]) == {
         "delay",
@@ -105,6 +105,7 @@ def test_lever_catalog_lists_all_eight(stack: tuple[TestClient, TestClient]) -> 
         "stale_epoch",
         "stale_route_token",
         "omit_route_token",
+        "lease_via_events",
     }
 
 
@@ -208,6 +209,124 @@ def test_lever_omit_route_token_submits_no_token(stack: tuple[TestClient, TestCl
     assert held is not None
     submitted = held.last_submission
     assert "route_token" not in submitted
+
+
+def test_default_lease_report_hits_the_dedicated_leases_route(stack: tuple[TestClient, TestClient]) -> None:
+    """The default transport (no lever) is the dedicated ``/leases`` route, not the
+    batched ``/events`` push — the hub's fence still advances (unchanged behavior)."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    hub.post("/_captured/reset")
+    claim = _claim(runner, chunk_id)
+    assert claim["claimed"] is True and claim["epoch"] == 1
+    assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
+    requests = hub.get("/_captured").json()["requests"]
+    paths = [r["path"] for r in requests]
+    assert f"/api/fleet/chunks/{chunk_id}/leases" in paths
+    assert "/api/fleet/events" not in paths
+
+
+def test_lever_lease_via_events_routes_the_report_through_events(stack: tuple[TestClient, TestClient]) -> None:
+    """``lease_via_events`` retains the mock's original transport: the fence-advancing
+    report rides the batched ``/events`` push instead of the dedicated route."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    runner.post("/_levers/lease_via_events", json={"chunk_id": chunk_id})
+    hub.post("/_captured/reset")
+    claim = _claim(runner, chunk_id)
+    assert claim["claimed"] is True and claim["epoch"] == 1
+    # the report still lands: the hub's fence advances exactly as the default path does.
+    assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
+    requests = hub.get("/_captured").json()["requests"]
+    paths = [r["path"] for r in requests]
+    assert f"/api/fleet/chunks/{chunk_id}/leases" not in paths
+    assert "/api/fleet/events" in paths
+
+
+# --- new drive verbs ---------------------------------------------------------
+
+
+def test_drive_escalate_records_the_escalation_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    out = runner.post(
+        "/_drive/escalate", json={"chunk_id": chunk_id, "takeover_command": "git checkout -b rescue"}
+    ).json()
+    assert out["drove"] is True and out["status"] == 202
+    detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] == {"epoch": 1, "takeover_command": "git checkout -b rescue"}
+
+
+def test_drive_decide_parks_the_chunk_at_the_gate(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    out = runner.post("/_drive/decide", json={"chunk_id": chunk_id, "choice": "pass"}).json()
+    assert out["drove"] is True
+    assert out["response"]["outcome"] == "parked_at_gate"
+    assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "needs_human"
+
+
+def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    asked = runner.post(
+        "/_drive/ask", json={"chunk_id": chunk_id, "question": "which db?", "options": ["sqlite", "postgres"]}
+    ).json()
+    assert asked["drove"] is True
+    question_id = asked["question_id"]
+
+    polled = runner.post("/_drive/poll-answer", json={"question_id": question_id}).json()
+    assert polled["status"] == 200
+    assert polled["response"]["question_id"] == question_id
+    assert polled["response"]["question"] == "which db?"
+    assert polled["response"]["answered"] is False
+
+    # the question is also visible off the chunk detail (hub-side minted state).
+    detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert any(q["question_id"] == question_id for q in detail["questions"])
+
+
+def test_drive_poll_answer_reflects_an_operator_answer(stack: tuple[TestClient, TestClient]) -> None:
+    """Drives the answered path through the hub's test-control answer route
+    (``POST /_seed/answer``, added alongside this parity work by the hub side)."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    asked = runner.post("/_drive/ask", json={"chunk_id": chunk_id, "question": "which db?"}).json()
+    question_id = asked["question_id"]
+
+    answer_resp = hub.post("/_seed/answer", json={"question_id": question_id, "answer": "postgres"})
+    assert answer_resp.status_code == 200
+
+    polled = runner.post("/_drive/poll-answer", json={"question_id": question_id}).json()
+    assert polled["response"]["answered"] is True
+    assert polled["response"]["answer"] == "postgres"
+
+
+def test_drive_pause_sets_the_runners_local_pause_brake(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    runner.post("/_drive/register")
+    out = runner.post("/_drive/pause", json={"by": "operator", "reason": "investigating"}).json()
+    assert out["status"] == 200
+    view = hub.get("/api/fleet/runners/runner-mock").json()
+    assert view["locally_paused"] is True
+    assert view["locally_paused_by"] == "operator"
+    assert view["locally_paused_reason"] == "investigating"
+
+
+def test_drive_resume_clears_the_runners_local_pause_brake(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    runner.post("/_drive/register")
+    runner.post("/_drive/pause", json={"by": "operator"})
+    out = runner.post("/_drive/resume", json={"by": "operator"}).json()
+    assert out["status"] == 200
+    view = hub.get("/api/fleet/runners/runner-mock").json()
+    assert view["locally_paused"] is False
 
 
 def test_lever_delay_slows_a_drive_call(stack: tuple[TestClient, TestClient]) -> None:

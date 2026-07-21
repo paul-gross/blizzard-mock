@@ -15,7 +15,17 @@ from fastapi import APIRouter, Depends, Request
 
 from blizzard_mock.levers import Lever, LeverParams
 from blizzard_mock.mock_runner.domain.levers import CATALOG, RunnerLever
-from blizzard_mock.mock_runner.domain.models import ChunkQueryBody, ClaimBody, CompleteBody
+from blizzard_mock.mock_runner.domain.models import (
+    AskBody,
+    ChunkQueryBody,
+    ClaimBody,
+    CompleteBody,
+    DecideBody,
+    EscalateBody,
+    PauseBody,
+    PollAnswerBody,
+    ResumeBody,
+)
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
 
 api_router = APIRouter(prefix="/api", tags=["runner"])
@@ -69,6 +79,38 @@ def drive_get_chunk(
 def drive_reset(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, bool]:
     service.reset()
     return {"reset": True}
+
+
+@drive_router.post("/escalate")
+def drive_escalate(body: EscalateBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.escalate(body.chunk_id, body.takeover_command)
+
+
+@drive_router.post("/decide")
+def drive_decide(body: DecideBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.decide(body.chunk_id, body.choice)
+
+
+@drive_router.post("/ask")
+def drive_ask(body: AskBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.ask(body.chunk_id, body.question, body.options)
+
+
+@drive_router.post("/poll-answer")
+def drive_poll_answer(
+    body: PollAnswerBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.poll_answer(body.question_id)
+
+
+@drive_router.post("/pause")
+def drive_pause(body: PauseBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.pause(body.by, body.reason)
+
+
+@drive_router.post("/resume")
+def drive_resume(body: ResumeBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
+    return service.resume(body.by)
 
 
 @levers_router.get("")

@@ -2,8 +2,9 @@
 
 Drives the hub-mirror surface over a ``TestClient`` (in-process, no network): the happy
 path — seed → peek → claim → fence → complete → a hub node derives ``done`` — plus **each
-of the six levers**, asserting the named edge state a runner-under-test would then have to
-survive. No ``blizzard`` import: the mock stands alone.
+of the seven levers**, asserting the named edge state a runner-under-test would then have
+to survive, and the full ``/events`` fact vocabulary (blizzard-mock#4). No ``blizzard``
+import: the mock stands alone.
 """
 
 from __future__ import annotations
@@ -148,9 +149,17 @@ def test_registry_register_and_pause_readback(client: TestClient) -> None:
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_six(client: TestClient) -> None:
+def test_lever_catalog_lists_all_seven(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
-    assert set(catalog) == {"delay", "drop_ack", "conflicting_fact", "unreachable", "replay", "stale_envelope"}
+    assert set(catalog) == {
+        "delay",
+        "drop_ack",
+        "conflicting_fact",
+        "unreachable",
+        "replay",
+        "stale_envelope",
+        "chunk_unknown",
+    }
 
 
 def test_lever_unreachable_heals_mid_lease(client: TestClient) -> None:
@@ -281,3 +290,327 @@ def test_lever_delay_slows_the_response(client: TestClient) -> None:
     started = time.monotonic()
     client.get(f"/api/fleet/chunks/{chunk_id}")
     assert time.monotonic() - started >= 0.18
+
+
+def test_lever_chunk_unknown_404s_mid_lease_then_self_expires(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    assert client.post("/_levers/chunk_unknown", json={"chunk_id": chunk_id, "remaining": 2}).status_code == 200
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").status_code == 404
+    assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 404
+    # healed after 2 affected calls — the chunk's actual state was never deleted.
+    healed = client.get(f"/api/fleet/chunks/{chunk_id}")
+    assert healed.status_code == 200
+    assert healed.json()["chunk_id"] == chunk_id
+
+
+# --- new fleet routes (blizzard-mock#4) --------------------------------------
+
+
+def test_get_question_returns_the_question_view(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 10,
+                    "kind": "question.asked",
+                    "payload": {
+                        "question_id": "q1",
+                        "chunk_id": chunk_id,
+                        "epoch": 1,
+                        "question": "merge now?",
+                        "options": ["yes", "no"],
+                        "asked_at": "2026-07-13T00:00:00+00:00",
+                    },
+                }
+            ],
+        },
+    )
+    view = client.get("/api/fleet/questions/q1")
+    assert view.status_code == 200
+    body = view.json()
+    assert body["question_id"] == "q1"
+    assert body["chunk_id"] == chunk_id
+    assert body["runner_id"] == "r1"
+    assert body["question"] == "merge now?"
+    assert body["options"] == ["yes", "no"]
+    assert body["answered"] is False
+    # ... and it shows up on the chunk's own detail read too.
+    detail_questions = client.get(f"/api/fleet/chunks/{chunk_id}").json()["questions"]
+    assert [q["question_id"] for q in detail_questions] == ["q1"]
+
+
+def test_get_question_404s_on_unknown_question(client: TestClient) -> None:
+    assert client.get("/api/fleet/questions/unknown").status_code == 404
+
+
+def test_report_lease_advances_the_fence_and_404s_on_unknown_chunk(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    resp = client.post(f"/api/fleet/chunks/{chunk_id}/leases", json={"epoch": 3, "runner_id": "r1"})
+    assert resp.status_code == 202
+    assert resp.json() == {"chunk_id": chunk_id}
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 3
+    assert client.post("/api/fleet/chunks/unknown/leases", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
+
+
+def test_report_escalation_is_readable_on_chunk_detail_and_404s_on_unknown_chunk(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    resp = client.post(
+        f"/api/fleet/chunks/{chunk_id}/escalations",
+        json={"epoch": 1, "runner_id": "r1", "takeover_command": "blizzard runner takeover ch_1"},
+    )
+    assert resp.status_code == 202
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] == {"epoch": 1, "takeover_command": "blizzard runner takeover ch_1"}
+    assert client.post("/api/fleet/chunks/unknown/escalations", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
+
+
+def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
+    resp = client.post(
+        "/_seed/chunk", json={"entry": "deliver", "nodes": {"deliver": {"executor": "hub", "mode": "merge-to-main"}}}
+    )
+    chunk_id = resp.json()["chunk_id"]
+    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
+
+    advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
+    assert advance.status_code == 200
+    assert advance.json() == {
+        "chunk_id": chunk_id,
+        "status": "done",
+        "ran": True,
+        "outcome_choice": None,
+        "to_node_name": None,
+        "detail": "hub node advanced to done",
+    }
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
+
+
+def test_hub_advance_is_a_noop_when_not_parked_at_a_hub_node(client: TestClient) -> None:
+    chunk_id = _seed(client)  # entry node "build" is executor: runner
+    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
+    assert advance.status_code == 200
+    assert advance.json()["ran"] is False
+    assert advance.json()["detail"] == "not parked at a hub command node"
+
+
+def test_hub_advance_404s_on_unknown_chunk(client: TestClient) -> None:
+    assert client.post("/api/fleet/chunks/unknown/hub-advance").status_code == 404
+
+
+# --- /events full fact vocabulary + ack partitioning -------------------------
+
+
+def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "escalation.recorded",
+                    "payload": {"chunk_id": chunk_id, "epoch": 1, "takeover_command": "take it over"},
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [2]
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["escalation"] == {
+        "epoch": 1,
+        "takeover_command": "take it over",
+    }
+
+
+def test_events_answer_delivered_marks_the_question_answered(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "question.asked",
+                    "payload": {
+                        "question_id": "q1",
+                        "chunk_id": chunk_id,
+                        "epoch": 1,
+                        "question": "?",
+                        "asked_at": "2026-07-13T00:00:00+00:00",
+                    },
+                }
+            ],
+        },
+    )
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 3, "kind": "answer.delivered", "payload": {"question_id": "q1", "chunk_id": chunk_id}}],
+        },
+    )
+    assert ack.json()["applied"] == [3]
+    assert client.get("/api/fleet/questions/q1").json()["answered"] is True
+
+
+def test_events_runner_locally_paused_and_resumed_are_runner_scoped(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    paused = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 1, "kind": "runner.locally_paused", "payload": {"by": "op", "reason": "maintenance"}}],
+        },
+    )
+    assert paused.json()["applied"] == [1]
+    view = client.get("/api/fleet/runners/r1").json()
+    assert view["locally_paused"] is True
+    assert view["locally_paused_by"] == "op"
+    assert view["locally_paused_reason"] == "maintenance"
+
+    resumed = client.post(
+        "/api/fleet/events",
+        json={"runner_id": "r1", "facts": [{"seq": 2, "kind": "runner.locally_resumed", "payload": {}}]},
+    )
+    assert resumed.json()["applied"] == [2]
+    view = client.get("/api/fleet/runners/r1").json()
+    assert view["locally_paused"] is False
+    assert view["locally_paused_by"] is None
+
+
+def test_events_usage_recorded_is_accepted(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "usage.recorded",
+                    "payload": {
+                        "chunk_id": chunk_id,
+                        "node_id": "build",
+                        "epoch": 1,
+                        "kind": "worker",
+                        "model": "claude-opus-4-8",
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_read_tokens": 0,
+                        "cache_create_tokens": 0,
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [2]
+    assert ack.json()["rejected"] == []
+
+
+def test_events_known_kind_on_an_unknown_chunk_is_still_applied(client: TestClient) -> None:
+    """The batched ``_apply`` carries no chunk-existence check on the real hub (unlike
+    the direct ``/leases``/``/escalations`` routes) — a known kind naming a chunk the
+    mock doesn't hold still lands as applied and the mark advances; the mutation is
+    just a no-op."""
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": "unknown", "epoch": 1}},
+            ],
+        },
+    )
+    body = ack.json()
+    assert body["applied"] == [1]
+    assert body["rejected"] == []
+    assert body["high_water"] == 1
+
+
+def test_events_unknown_kind_lands_in_rejected(client: TestClient) -> None:
+    ack = client.post(
+        "/api/fleet/events", json={"runner_id": "r1", "facts": [{"seq": 1, "kind": "made.up", "payload": {}}]}
+    )
+    assert ack.status_code == 200
+    body = ack.json()
+    assert body["applied"] == []
+    assert body["rejected"] == [1]
+    assert body["already_applied"] == []
+    assert body["high_water"] == 0  # the mark does not advance past a rejected seq
+
+
+def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    first = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": 1}}],
+        },
+    )
+    assert first.json()["applied"] == [1]
+    replayed = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": 99}}],
+        },
+    )
+    assert replayed.json()["already_applied"] == [1]
+    assert replayed.json()["applied"] == []
+    # the replayed epoch is discarded, not re-applied — the fence stays at 1.
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
+
+
+# --- test-control answer route ------------------------------------------------
+
+
+def test_seed_answer_makes_the_question_poll_return_answered(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "question.asked",
+                    "payload": {
+                        "question_id": "q1",
+                        "chunk_id": chunk_id,
+                        "epoch": 1,
+                        "question": "merge?",
+                        "asked_at": "2026-07-13T00:00:00+00:00",
+                    },
+                }
+            ],
+        },
+    )
+    resp = client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes", "answered_by": "ops"})
+    assert resp.status_code == 200
+    assert resp.json() == {"answered": True, "question_id": "q1"}
+
+    polled = client.get("/api/fleet/questions/q1").json()
+    assert polled["answered"] is True
+    assert polled["answer"] == "yes"
+    assert polled["answered_by"] == "ops"
+    assert polled["answered_at"] is not None
+
+
+def test_seed_answer_404s_on_unknown_question(client: TestClient) -> None:
+    resp = client.post("/_seed/answer", json={"question_id": "unknown", "answer": "yes"})
+    assert resp.status_code == 404

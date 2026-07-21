@@ -14,13 +14,14 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from blizzard_mock.levers import Lever, LeverParams
-from blizzard_mock.mock_hub.api.deps import get_captured, get_service
+from blizzard_mock.mock_hub.api.deps import AnswerControlBody, get_captured, get_service
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
 from blizzard_mock.mock_hub.domain.models import ChunkSpec
-from blizzard_mock.mock_hub.domain.service import MockHubService
+from blizzard_mock.mock_hub.domain.service import MockHubService, QuestionNotFound
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
 levers_router = APIRouter(prefix="/_levers", tags=["control"])
@@ -37,6 +38,18 @@ def seed_chunk(spec: ChunkSpec, service: Annotated[MockHubService, Depends(get_s
 def reset(service: Annotated[MockHubService, Depends(get_service)]) -> dict[str, bool]:
     service.reset()
     return {"reset": True}
+
+
+@seed_router.post("/answer")
+def seed_answer(body: AnswerControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — plays the operator's answer so a scenario can make the
+    runner's ``GET /questions/{id}`` poll return ``answered=True`` without a real
+    operator surface (the fleet mirror carries no board-facing answer route)."""
+    try:
+        service.answer_question(body.question_id, answer=body.answer, answered_by=body.answered_by)
+    except QuestionNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"answered": True, "question_id": body.question_id}
 
 
 @levers_router.get("")

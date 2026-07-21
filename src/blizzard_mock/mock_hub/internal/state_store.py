@@ -8,16 +8,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from blizzard_mock.mock_hub.domain.models import ChunkState
+from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 from blizzard_mock.mock_hub.domain.state import RunnerRow
 
 
 class InMemoryHubState:
-    """Process-local chunk map + runner registry. Implements ``IHubState``."""
+    """Process-local chunk map + question map + runner registry. Implements ``IHubState``."""
 
     def __init__(self) -> None:
         self._chunks: dict[str, ChunkState] = {}
         self._runners: dict[str, RunnerRow] = {}
+        self._questions: dict[str, QuestionState] = {}
 
     def put_chunk(self, chunk: ChunkState) -> None:
         self._chunks[chunk.chunk_id] = chunk
@@ -43,6 +44,16 @@ class InMemoryHubState:
     def list_runners(self) -> list[RunnerRow]:
         return list(self._runners.values())
 
+    def put_question(self, question: QuestionState) -> None:
+        self._questions[question.question_id] = question
+
+    def get_question(self, question_id: str) -> QuestionState | None:
+        return self._questions.get(question_id)
+
+    def list_questions(self) -> list[QuestionState]:
+        return list(self._questions.values())
+
     def clear(self) -> None:
         self._chunks.clear()
         self._runners.clear()
+        self._questions.clear()

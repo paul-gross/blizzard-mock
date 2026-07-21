@@ -43,7 +43,7 @@ class HttpxHubGateway:
     def claim(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/routes", body)
 
-    def report_lease(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def report_lease_via_events(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/events", body)
 
     def submit_completion(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -51,6 +51,21 @@ class HttpxHubGateway:
 
     def get_chunk(self, chunk_id: str) -> tuple[int, dict[str, Any]]:
         return self._get(f"{_API}/chunks/{chunk_id}")
+
+    def report_lease_direct(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        return self._post(f"{_API}/chunks/{chunk_id}/leases", body)
+
+    def report_escalation(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        return self._post(f"{_API}/chunks/{chunk_id}/escalations", body)
+
+    def submit_decision(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        return self._post(f"{_API}/chunks/{chunk_id}/decisions", body)
+
+    def get_question(self, question_id: str) -> tuple[int, dict[str, Any]]:
+        return self._get(f"{_API}/questions/{question_id}")
+
+    def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        return self._post(f"{_API}/events", body)
 
     def _get(self, path: str) -> tuple[int, dict[str, Any]]:
         try:

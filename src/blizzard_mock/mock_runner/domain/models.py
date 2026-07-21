@@ -59,3 +59,49 @@ class ChunkQueryBody(BaseModel):
     """POST /_drive/get-chunk — read a chunk's detail over the wire."""
 
     chunk_id: str
+
+
+class EscalateBody(BaseModel):
+    """POST /_drive/escalate — report retries-exhausted via the dedicated route,
+    fenced by the held lease's own epoch."""
+
+    chunk_id: str
+    takeover_command: str = ""
+
+
+class DecideBody(BaseModel):
+    """POST /_drive/decide — submit a decision at the held node (a runner-config gate
+    parks the chunk). ``choice`` is accepted for drive-body symmetry but is cosmetic:
+    the real ``DecisionSubmission`` carries no choice — resolution happens later,
+    through the board's own decision-resolve action — mirroring ``ClaimBody.environment_ids``."""
+
+    chunk_id: str
+    choice: str | None = None
+
+
+class AskBody(BaseModel):
+    """POST /_drive/ask — push a ``question.asked`` fact, minting a pollable question
+    hub-side."""
+
+    chunk_id: str
+    question: str
+    options: list[str] = Field(default_factory=list)
+
+
+class PollAnswerBody(BaseModel):
+    """POST /_drive/poll-answer — GET the question's current answer state."""
+
+    question_id: str
+
+
+class PauseBody(BaseModel):
+    """POST /_drive/pause — push a runner-scoped ``runner.locally_paused`` fact."""
+
+    by: str = "operator"
+    reason: str | None = None
+
+
+class ResumeBody(BaseModel):
+    """POST /_drive/resume — push a runner-scoped ``runner.locally_resumed`` fact."""
+
+    by: str = "operator"
