@@ -323,6 +323,74 @@ def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo) 
     assert envelope["total_cost_usd"] > 0
 
 
+def test_claude_facade_node_entry_resume_continues_in_place(fenced_repo) -> None:
+    """A **spawn-shaped** node-entry resume (blizzard issue #115, Slice 6) — the
+    extended real adapter's ``--resume <sid> <preamble+script>`` form, carrying the
+    *same* full node preamble + node script a fresh spawn gets, not a bare
+    follow-up message — must run the entered node's script and keep the session
+    **in place**: same ``session_id``, ``num_turns`` accumulating across entries.
+    This exercises no new engine code — ``run_prompt`` already splits the preamble
+    off the script unconditionally of ``is_resume`` (``engine.py`` line ~438) and
+    ``load_or_create`` + ``turns += 1`` already continue the named session
+    (``engine.py`` lines ~413-422) — this test is the proof the wiring already
+    satisfies the extended adapter's contract.
+
+    An e2e distinguishes fresh vs. resumed vs. targeted-resume exactly as this test
+    does: read ``session_id`` + ``num_turns`` off the JSON result envelope (the
+    same fields the real runner adapter's ``parse_usage``-neighboring code reads
+    off stdout) — a resumed node-entry keeps the prior node's ``session_id`` with
+    ``num_turns > 1``; a fresh entry (a new node, or the first entry into any node)
+    gets its own new ``session_id`` with ``num_turns == 1``.
+    """
+    cwd, env = fenced_repo
+    preamble = f"| Field | Value |\n|-------|-------|\n| environment workdir | `{cwd}` |\n\n"
+
+    def run(*extra_args: str, script: str) -> dict:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "blizzard_mock.harness.facades.claude_code",
+                "-p",
+                "--output-format",
+                "json",
+                *extra_args,
+                preamble + script,
+            ],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return json.loads(proc.stdout)
+
+    # First entry into node `build`: a fresh spawn (session_hint pre-assigns the id,
+    # exactly as `_spawn_attempt` does today when `resume_from` is None).
+    build_sid = "sess-node-build"
+    first = run("--session-id", build_sid, script="verdict('pass', 'first build')")
+    assert first["session_id"] == build_sid
+    assert first["num_turns"] == 1
+
+    # `review` runs fresh in between (a different node, its own session) — proves a
+    # resume does not leak across nodes.
+    review = run("--session-id", "sess-node-review", script="verdict('changes_requested')")
+    assert review["session_id"] == "sess-node-review"
+    assert review["num_turns"] == 1
+
+    # Re-entering `build` (`resume:build`): the extended adapter emits
+    # `--resume <resume_from>` carrying the *full* preamble + the re-entered node's
+    # script — not a bare follow-up message. The session must continue in place.
+    second = run("--resume", build_sid, script="verdict('pass', 'second build (resumed)')")
+    assert second["session_id"] == build_sid  # in place — no fork
+    assert second["num_turns"] == 2  # accumulated on the same sid, not reset
+
+    # A third, later re-entry keeps accumulating on the same sid.
+    third = run("--resume", build_sid, script="verdict('pass', 'third build (resumed again)')")
+    assert third["session_id"] == build_sid
+    assert third["num_turns"] == 3
+
+
 def test_claude_facade_fence_refusal_exit_code(tmp_path: Path) -> None:
     proc = subprocess.run(
         [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "verdict('x')"],
