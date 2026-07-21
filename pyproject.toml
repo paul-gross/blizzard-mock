@@ -15,6 +15,11 @@ dependencies = [
     # httpx backs FastAPI's TestClient and the in-process clients the
     # component/service tiers use to drive the forge.
     "httpx>=0.27.0",
+    # Form-encoded request bodies — the stub IdP's OAuth2 token endpoints
+    # (``POST /oidc/token``, ``POST /login/oauth/access_token``, issue #92) receive
+    # ``application/x-www-form-urlencoded`` bodies, which FastAPI's ``Form()`` requires
+    # this for even without a multipart body.
+    "python-multipart>=0.0.9",
     # CLI surface — every entrypoint (forge, fixture, mock-data, facades).
     "click>=8.1.0",
     # Domain models and request/response schemas.
@@ -30,6 +35,9 @@ dependencies = [
     # Git plumbing — the forge's bare-repo backing model and the
     # fixture-workspace scaffold both drive real git.
     "gitpython>=3.1.0",
+    # The stub IdP (issue #92) mints and signs `id_token`s (RS256) and serves a JWKS
+    # document — the mock-fleet counterpart the hub's oidc conformer verifies against.
+    "pyjwt[crypto]>=2.9.0",
 ]
 
 [build-system]
@@ -44,6 +52,7 @@ packages = ["src/blizzard_mock"]
 # click group). See each package's README for its contract.
 [project.scripts]
 blizzard-mock-forge = "blizzard_mock.forge.cli:main"
+blizzard-mock-idp = "blizzard_mock.idp.cli:main"
 blizzard-mock-hub = "blizzard_mock.mock_hub.cli:main"
 blizzard-mock-runner = "blizzard_mock.mock_runner.cli:main"
 blizzard-mock-fixture = "blizzard_mock.fixture_workspace.cli:main"
