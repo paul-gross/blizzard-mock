@@ -29,13 +29,23 @@ class InMemoryHubState:
     def list_chunks(self) -> list[ChunkState]:
         return list(self._chunks.values())
 
-    def upsert_runner(self, runner_id: str, workspace_id: str, at: datetime) -> bool:
+    def upsert_runner(
+        self,
+        runner_id: str,
+        workspace_id: str,
+        at: datetime,
+        *,
+        url: str | None = None,
+        redirect_uris: tuple[str, ...] = (),
+    ) -> bool:
         existing = self._runners.get(runner_id)
         if existing is None:
-            self._runners[runner_id] = RunnerRow(runner_id, workspace_id, at)
+            self._runners[runner_id] = RunnerRow(runner_id, workspace_id, at, url=url, redirect_uris=redirect_uris)
             return True
         existing.last_seen_at = at
         existing.workspace_id = workspace_id
+        existing.url = url
+        existing.redirect_uris = redirect_uris
         return False
 
     def get_runner(self, runner_id: str) -> RunnerRow | None:

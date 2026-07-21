@@ -17,11 +17,24 @@ from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 class RunnerRow:
     """A registered runner's mutable registry row (liveness + pause brakes)."""
 
-    def __init__(self, runner_id: str, workspace_id: str, at: datetime) -> None:
+    def __init__(
+        self,
+        runner_id: str,
+        workspace_id: str,
+        at: datetime,
+        *,
+        url: str | None = None,
+        redirect_uris: tuple[str, ...] = (),
+    ) -> None:
         self.runner_id = runner_id
         self.workspace_id = workspace_id
         self.registered_at = at
         self.last_seen_at = at
+        # The runner's optional federation identity (issue #95) — reported on every
+        # (re-)registration, mirroring the real hub's own unconditional-overwrite
+        # upsert (``blizzard.hub.domain.registry``).
+        self.url = url
+        self.redirect_uris = redirect_uris
         self.paused = False
         # The runner's own locally-reported pause brake (``runner.locally_paused`` /
         # ``runner.locally_resumed``) — distinct from ``paused``, the fleet's brake the
@@ -38,8 +51,19 @@ class IHubState(Protocol):
     def put_chunk(self, chunk: ChunkState) -> None: ...
     def get_chunk(self, chunk_id: str) -> ChunkState | None: ...
     def list_chunks(self) -> list[ChunkState]: ...
-    def upsert_runner(self, runner_id: str, workspace_id: str, at: datetime) -> bool:
-        """Register/heartbeat a runner; return ``True`` on first registration."""
+    def upsert_runner(
+        self,
+        runner_id: str,
+        workspace_id: str,
+        at: datetime,
+        *,
+        url: str | None = None,
+        redirect_uris: tuple[str, ...] = (),
+    ) -> bool:
+        """Register/heartbeat a runner; return ``True`` on first registration.
+
+        ``url``/``redirect_uris`` (issue #95) mirror the real hub's own registration
+        extension — overwritten unconditionally on every call, like ``workspace_id``."""
         ...
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...

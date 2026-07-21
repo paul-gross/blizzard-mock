@@ -157,7 +157,7 @@ def push_facts(body: RunnerFactBatchBody, service: Annotated[MockHubService, Dep
 
 @fleet_router.post("/runners", status_code=201)
 def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    first = service.register(body.runner_id, body.workspace_id)
+    first = service.register(body.runner_id, body.workspace_id, url=body.url, redirect_uris=tuple(body.redirect_uris))
     return {"runner_id": body.runner_id, "first_registration": first}
 
 

@@ -456,8 +456,12 @@ class MockHubService:
 
     # -- registry ----------------------------------------------------------
 
-    def register(self, runner_id: str, workspace_id: str) -> bool:
-        return self._state.upsert_runner(runner_id, workspace_id, self._clock.now())
+    def register(
+        self, runner_id: str, workspace_id: str, *, url: str | None = None, redirect_uris: tuple[str, ...] = ()
+    ) -> bool:
+        return self._state.upsert_runner(
+            runner_id, workspace_id, self._clock.now(), url=url, redirect_uris=redirect_uris
+        )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
         row = self._state.get_runner(runner_id)

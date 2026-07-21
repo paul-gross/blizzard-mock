@@ -51,6 +51,11 @@ class DecisionBody(BaseModel):
 class RunnerRegistrationBody(BaseModel):
     runner_id: str
     workspace_id: str = "workspace-mock"
+    # The runner's optional federation identity (issue #95) — named here (unlike most
+    # of this module's "only the fields the mock reads" convention) because the mock
+    # hub round-trips them into `MockHubService.register`, mirroring the real hub.
+    url: str | None = None
+    redirect_uris: list[str] = Field(default_factory=list)
 
 
 class RunnerFactBody(BaseModel):

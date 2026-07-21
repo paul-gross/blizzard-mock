@@ -146,6 +146,21 @@ def test_registry_register_and_pause_readback(client: TestClient) -> None:
     assert readback["locally_paused"] is False
 
 
+def test_registration_accepts_optional_federation_identity(client: TestClient) -> None:
+    """``url``/``redirect_uris`` (issue #95) — a wire-shape extension the mock hub round
+    -trips, mirroring the real hub's own optional registration fields."""
+    reg = client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-fed",
+            "workspace_id": "ws",
+            "url": "https://r-fed.example",
+            "redirect_uris": ["https://r-fed.example/api/auth/callback"],
+        },
+    )
+    assert reg.status_code == 201, reg.text
+
+
 # --- levers -----------------------------------------------------------------
 
 
