@@ -28,6 +28,7 @@ LEASE_MINTED = "lease.minted"
 QUESTION_ASKED = "question.asked"
 RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
+EVENT_RECORDED = "event.recorded"
 
 
 class MockRunnerService:
@@ -248,6 +249,43 @@ class MockRunnerService:
             }
         )
         return {"status": status, "response": response}
+
+    def report_event(
+        self,
+        *,
+        severity: str,
+        kind: str,
+        message: str,
+        chunk_id: str | None = None,
+        lease_id: str | None = None,
+        node_name: str | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Push one ``event.recorded`` operational-event fact via ``/events`` (issue #125).
+
+        The wire counterpart to the real runner's failure-event emission (its Phase 3
+        `_fail_attempt`/per-adapter sites): the hub folds this into its append-only
+        ``event_log`` and re-broadcasts it as ``event-logged``. ``chunk_id`` is optional —
+        a runner-scoped event names none, exactly like ``pause``/``resume``. Not
+        fence-advancing, so no held lease is required."""
+        self._apply_delay(chunk_id)
+        self._runner_seq += 1
+        payload: dict[str, Any] = {"severity": severity, "kind": kind, "message": message}
+        if chunk_id is not None:
+            payload["chunk_id"] = chunk_id
+        if lease_id is not None:
+            payload["lease_id"] = lease_id
+        if node_name is not None:
+            payload["node_name"] = node_name
+        if detail is not None:
+            payload["detail"] = detail
+        status, response = self._gw.push_facts(
+            {
+                "runner_id": self._runner_id,
+                "facts": [{"seq": self._runner_seq, "kind": EVENT_RECORDED, "payload": payload}],
+            }
+        )
+        return {"drove": True, "status": status, "response": response}
 
     # -- internals ---------------------------------------------------------
 

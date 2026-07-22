@@ -60,6 +60,7 @@ ANSWER_DELIVERED = "answer.delivered"
 RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 USAGE_RECORDED = "usage.recorded"
+EVENT_RECORDED = "event.recorded"
 
 
 class ChunkNotFound(Exception):
@@ -340,11 +341,12 @@ class MockHubService:
             row.locally_paused_by = None
             row.locally_paused_reason = None
             return True
-        # usage.recorded: no fence, no route-token gate at the real hub either
-        # (deliberate); the mock has no per-node-step usage ledger to post to, so
-        # accepting without modeling further is the honest minimum (issue #4). Any
-        # other kind is unrecognized — rejected, mirroring the real hub's fallthrough.
-        return kind == USAGE_RECORDED
+        # usage.recorded and event.recorded (issue #125): neither is fenced or
+        # route-token-gated at the real hub (deliberate); the mock has no usage ledger or
+        # event log to post to, so accepting without modeling further is the honest minimum
+        # (issue #4). Any other kind is unrecognized — rejected, mirroring the real hub's
+        # fallthrough.
+        return kind in (USAGE_RECORDED, EVENT_RECORDED)
 
     # -- completion apply --------------------------------------------------
 

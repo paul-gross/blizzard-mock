@@ -105,3 +105,16 @@ class ResumeBody(BaseModel):
     """POST /_drive/resume — push a runner-scoped ``runner.locally_resumed`` fact."""
 
     by: str = "operator"
+
+
+class ReportEventBody(BaseModel):
+    """POST /_drive/report-event — push one ``event.recorded`` operational-event fact
+    (issue #125). ``chunk_id`` is optional: a runner-scoped event names none."""
+
+    severity: str
+    kind: str
+    message: str
+    chunk_id: str | None = None
+    lease_id: str | None = None
+    node_name: str | None = None
+    detail: dict[str, Any] | None = None
