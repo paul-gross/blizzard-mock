@@ -73,6 +73,7 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `runner.locally_paused` | Sets the runner's `locally_paused`/`_by`/`_reason` (runner-scoped) |
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
+| `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled (issue #125) |
 
 ## Control plane
 

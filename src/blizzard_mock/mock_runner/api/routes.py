@@ -24,6 +24,7 @@ from blizzard_mock.mock_runner.domain.models import (
     EscalateBody,
     PauseBody,
     PollAnswerBody,
+    ReportEventBody,
     ResumeBody,
 )
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
@@ -94,6 +95,21 @@ def drive_decide(body: DecideBody, service: Annotated[MockRunnerService, Depends
 @drive_router.post("/ask")
 def drive_ask(body: AskBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.ask(body.chunk_id, body.question, body.options)
+
+
+@drive_router.post("/report-event")
+def drive_report_event(
+    body: ReportEventBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.report_event(
+        severity=body.severity,
+        kind=body.kind,
+        message=body.message,
+        chunk_id=body.chunk_id,
+        lease_id=body.lease_id,
+        node_name=body.node_name,
+        detail=body.detail,
+    )
 
 
 @drive_router.post("/poll-answer")

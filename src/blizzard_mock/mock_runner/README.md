@@ -42,6 +42,7 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   | `POST /_drive/poll-answer` `{question_id}` | `GET {hub}/api/fleet/questions/{id}` — the runner's answer poll |
   | `POST /_drive/pause` `{by?, reason?}` | Pushes a runner-scoped `runner.locally_paused` fact via `POST {hub}/api/fleet/events` (no `chunk_id`) |
   | `POST /_drive/resume` `{by?}` | Pushes a runner-scoped `runner.locally_resumed` fact via `POST {hub}/api/fleet/events` (no `chunk_id`) |
+  | `POST /_drive/report-event` `{severity, kind, message, chunk_id?, lease_id?, node_name?, detail?}` | Pushes an `event.recorded` operational-event fact via `POST {hub}/api/fleet/events` (issue #125); `chunk_id` optional — a runner-scoped event names none |
   | `POST /_drive/reset` | Drop held leases + clear levers |
 
 - **Levers** (`/_levers`): the same catalog/arm/clear/reset shape as the mock hub.
