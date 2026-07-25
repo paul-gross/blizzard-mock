@@ -82,7 +82,7 @@ def drive_claim(body: ClaimBody, service: Annotated[MockRunnerService, Depends(g
 
 @drive_router.post("/complete")
 def drive_complete(body: CompleteBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.complete(body.chunk_id, body.choice, body.artifacts)
+    return service.complete(body.chunk_id, body.choice, body.artifacts, body.check_results)
 
 
 @drive_router.post("/get-chunk")

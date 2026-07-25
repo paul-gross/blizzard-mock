@@ -74,6 +74,7 @@ class ChoiceSpec(BaseModel):
     name: str
     description: str = ""
     to: str  # a node id in the same chunk, or ``TERMINAL``
+    requires_checks: bool = False  # gate this edge on green checks (issue #114)
 
 
 class NodeSpec(BaseModel):
@@ -87,6 +88,8 @@ class NodeSpec(BaseModel):
     choices: list[ChoiceSpec] = Field(default_factory=list)
     produces: list[str] = Field(default_factory=list)
     checks: list[str] = Field(default_factory=list)
+    checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
+    checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
     retries_max: int | None = None
     mode: str | None = None  # hub node: merge-to-main | open-pr
 

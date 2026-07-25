@@ -48,11 +48,19 @@ class CompleteBody(BaseModel):
     (``attached=False``); the mock lets a service test set them directly, so the hub's
     ``produces_mode=enforce`` backstop (issue #113 phase 5) can be driven over the wire —
     the produces analogue of the ``stale_route_token``/``omit_route_token`` levers. Default
-    empty: every existing driver keeps submitting a completion with no artifacts."""
+    empty: every existing driver keeps submitting a completion with no artifacts.
+
+    ``check_results`` are the node's runner-executed check facts (issue #114), each a wire
+    ``CheckResult`` dict (``{command, passed}`` — the ``output_tail`` stays runner-local and
+    never rides the wire). A real runner fills this from its own ``check_results`` store; the
+    mock lets a service test set them directly, so the hub's ``requires_checks`` gate backstop
+    can be driven over the wire — the checks analogue of ``artifacts`` above. Default empty:
+    every existing driver keeps submitting a completion with no check results."""
 
     chunk_id: str
     choice: str
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    check_results: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChunkQueryBody(BaseModel):

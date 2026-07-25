@@ -17,6 +17,7 @@ from blizzard_mock.mock_hub.domain.models import ApplyOutcome, Executor, JudgedB
 class EnvelopeChoice(BaseModel):
     name: str
     description: str
+    requires_checks: bool = False  # gate this edge on green checks (issue #114)
 
 
 class NodeConfig(BaseModel):
@@ -26,6 +27,8 @@ class NodeConfig(BaseModel):
     session: SessionMode
     judged_by: JudgedBy
     checks: list[str] = Field(default_factory=list)
+    checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
+    checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
     produces: list[str] = Field(default_factory=list)
     retries_max: int | None = None
     mode: str | None = None
