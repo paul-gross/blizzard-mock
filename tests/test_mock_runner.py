@@ -339,3 +339,71 @@ def test_lever_delay_slows_a_drive_call(stack: tuple[TestClient, TestClient]) ->
     started = time.monotonic()
     runner.post("/_drive/get-chunk", json={"chunk_id": chunk_id})
     assert time.monotonic() - started >= 0.18
+
+
+# --------------------------------------------------------------------------------- #
+# Git-commit declaration channel (issue #143, Phase 3) — the served route + its
+# drive-plane lever, both landing in the same local store, no hub call.
+# --------------------------------------------------------------------------------- #
+
+
+def test_served_route_records_a_git_commit_declaration(stack: tuple[TestClient, TestClient]) -> None:
+    _hub, runner = stack
+    resp = runner.post(
+        "/api/leases/lease_1/git-commits",
+        json={"forge": "github", "repo": "blizzard", "branch": "feat/x", "commit": "abc123"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"recorded": True, "lease_id": "lease_1", "repo": "blizzard"}
+
+    read_back = runner.post("/_drive/get-git-commits", json={"lease_id": "lease_1"}).json()
+    assert read_back["declarations"] == {
+        "blizzard": {"forge": "github", "repo": "blizzard", "branch": "feat/x", "commit": "abc123"}
+    }
+
+
+def test_drive_declare_git_commit_lands_in_the_same_store_as_the_served_route(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    _hub, runner = stack
+    driven = runner.post(
+        "/_drive/declare-git-commit",
+        json={
+            "lease_id": "lease_2",
+            "forge": "github",
+            "repo": "blizzard-mock",
+            "branch": "main",
+            "commit": "cafef00d",
+        },
+    ).json()
+    assert driven == {"recorded": True, "lease_id": "lease_2", "repo": "blizzard-mock"}
+
+    read_back = runner.post("/_drive/get-git-commits", json={"lease_id": "lease_2"}).json()
+    assert read_back["declarations"] == {
+        "blizzard-mock": {"forge": "github", "repo": "blizzard-mock", "branch": "main", "commit": "cafef00d"}
+    }
+
+
+def test_re_declaring_the_same_repo_overwrites_the_prior_declaration(stack: tuple[TestClient, TestClient]) -> None:
+    _hub, runner = stack
+    runner.post(
+        "/_drive/declare-git-commit",
+        json={"lease_id": "lease_3", "forge": "github", "repo": "blizzard", "branch": "feat/x", "commit": "first"},
+    )
+    runner.post(
+        "/_drive/declare-git-commit",
+        json={"lease_id": "lease_3", "forge": "github", "repo": "blizzard", "branch": "feat/x", "commit": "second"},
+    )
+    read_back = runner.post("/_drive/get-git-commits", json={"lease_id": "lease_3"}).json()
+    assert read_back["declarations"]["blizzard"]["commit"] == "second"
+
+
+def test_drive_reset_clears_declared_git_commits(stack: tuple[TestClient, TestClient]) -> None:
+    _hub, runner = stack
+    runner.post(
+        "/_drive/declare-git-commit",
+        json={"lease_id": "lease_4", "forge": "github", "repo": "blizzard", "branch": "feat/x", "commit": "abc123"},
+    )
+    runner.post("/_drive/reset")
+    read_back = runner.post("/_drive/get-git-commits", json={"lease_id": "lease_4"}).json()
+    assert read_back["declarations"] == {}

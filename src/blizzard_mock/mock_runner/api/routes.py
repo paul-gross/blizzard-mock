@@ -21,7 +21,10 @@ from blizzard_mock.mock_runner.domain.models import (
     ClaimBody,
     CompleteBody,
     DecideBody,
+    DeclareGitCommitBody,
     EscalateBody,
+    GitCommitDeclarationBody,
+    LeaseQueryBody,
     PauseBody,
     PollAnswerBody,
     ReportEventBody,
@@ -49,6 +52,19 @@ def ready() -> dict[str, bool]:
     return {"ready": True}
 
 
+@api_router.post("/leases/{lease_id}/git-commits")
+def record_git_commit_declaration(
+    lease_id: str, body: GitCommitDeclarationBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    """The mock's served counterpart to the real runner's ``POST /api/leases/{lease_id}/
+    git-commits`` (issue #143, Phase 3) — no lease-token auth here (the mock runner holds
+    no lease-token store), a lease-scoped local write only, exactly wire-shape-compatible
+    with the real route."""
+    return service.declare_git_commit(
+        lease_id, forge=body.forge, repo=body.repo, branch=body.branch, commit=body.commit
+    )
+
+
 @drive_router.post("/register")
 def drive_register(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.register()
@@ -74,6 +90,25 @@ def drive_get_chunk(
     body: ChunkQueryBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
     return service.get_chunk(body.chunk_id)
+
+
+@drive_router.post("/declare-git-commit")
+def drive_declare_git_commit(
+    body: DeclareGitCommitBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    """Drive a git-commit declaration directly against the mock's local store (issue #143,
+    Phase 3) — the produces-kind analogue of ``CompleteBody.artifacts``, so a service test
+    can set declaration state without a raw client to the served lease-scoped route."""
+    return service.declare_git_commit(
+        body.lease_id, forge=body.forge, repo=body.repo, branch=body.branch, commit=body.commit
+    )
+
+
+@drive_router.post("/get-git-commits")
+def drive_get_git_commits(
+    body: LeaseQueryBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return {"declarations": service.git_commits_for_lease(body.lease_id)}
 
 
 @drive_router.post("/reset")

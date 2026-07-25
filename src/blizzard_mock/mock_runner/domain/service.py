@@ -46,6 +46,12 @@ class MockRunnerService:
         #: Monotonic sequence for facts that are not chunk-scoped leases (question/pause/
         #: resume) — independent of a ``Held``'s own per-chunk lease-fact counter.
         self._runner_seq = 0
+        #: The mock's own local git-commit declaration store (issue #143, Phase 3) —
+        #: ``lease_id -> repo -> {forge, repo, branch, commit}``, latest-wins per
+        #: ``(lease_id, repo)``, mirroring the real runner's ``git_commit_declarations``
+        #: table. Purely local: no hub call backs it, exactly as the real declare channel
+        #: makes no hub call this phase.
+        self._git_commit_declarations: dict[str, dict[str, dict[str, str]]] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -58,6 +64,7 @@ class MockRunnerService:
     def reset(self) -> None:
         self._held.clear()
         self._runner_seq = 0
+        self._git_commit_declarations.clear()
         self._levers.clear_all()
 
     # -- drive verbs -------------------------------------------------------
@@ -157,6 +164,26 @@ class MockRunnerService:
 
     def held(self, chunk_id: str) -> Held | None:
         return self._held.get(chunk_id)
+
+    def declare_git_commit(self, lease_id: str, *, forge: str, repo: str, branch: str, commit: str) -> dict[str, Any]:
+        """Record a worker's explicit git-commit declaration for ``repo`` against
+        ``lease_id`` (issue #143, Phase 3) — the mock's own structural sibling of the real
+        runner's ``GitCommitDeclarationService.declare``. Append-and-read-newest per
+        ``(lease_id, repo)``, no hub call: the served route and the ``/_drive/*`` lever
+        both land here, exactly as the real store backs both the CLI-driven route and
+        (in the real runner) nothing else this phase."""
+        self._git_commit_declarations.setdefault(lease_id, {})[repo] = {
+            "forge": forge,
+            "repo": repo,
+            "branch": branch,
+            "commit": commit,
+        }
+        return {"recorded": True, "lease_id": lease_id, "repo": repo}
+
+    def git_commits_for_lease(self, lease_id: str) -> dict[str, dict[str, str]]:
+        """The lease's declared git commits, newest per repo — the read-back a service
+        test drives via ``/_drive/get-git-commits`` (issue #143, Phase 3)."""
+        return dict(self._git_commit_declarations.get(lease_id, {}))
 
     def escalate(self, chunk_id: str, takeover_command: str = "") -> dict[str, Any]:
         """Report retries-exhausted via the dedicated route, fenced by the held epoch."""

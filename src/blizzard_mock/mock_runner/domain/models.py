@@ -61,6 +61,38 @@ class ChunkQueryBody(BaseModel):
     chunk_id: str
 
 
+class GitCommitDeclarationBody(BaseModel):
+    """POST /api/leases/{lease_id}/git-commits — the served route's wire body (issue #143,
+    Phase 3), mirroring the real runner's ``wire.git_commits.GitCommitDeclarationRequest``.
+    ``forge`` is worker-declared (decision R7) — carried verbatim, no hub interaction: the
+    declaration is purely local to the (mock) runner, exactly as it is on the real one."""
+
+    forge: str
+    repo: str
+    branch: str
+    commit: str
+
+
+class DeclareGitCommitBody(BaseModel):
+    """POST /_drive/declare-git-commit — drive a git-commit declaration directly against
+    the mock runner's own local store (issue #143, Phase 3), the produces-kind analogue of
+    ``CompleteBody.artifacts``: a service test can set declaration state without a raw
+    client to the lease-scoped served route above, mirroring the ``/_drive/*`` convention
+    every other verb here follows."""
+
+    lease_id: str
+    forge: str
+    repo: str
+    branch: str
+    commit: str
+
+
+class LeaseQueryBody(BaseModel):
+    """POST /_drive/get-git-commits — read back a lease's declared git commits."""
+
+    lease_id: str
+
+
 class EscalateBody(BaseModel):
     """POST /_drive/escalate — report retries-exhausted via the dedicated route,
     fenced by the held lease's own epoch."""
