@@ -3,7 +3,7 @@
 The seven edge-state levers in ``levers.py`` steer a *response* a runner-under-test must
 survive; this is the mirror image — capturing what a request *presented*, so a service
 test can assert a real runner's outbound ``Authorization`` header actually reached the
-hub, on every runner->hub call (including the pm-items proxy forward), by reading
+hub, on every runner->hub call (including the work-items proxy forward), by reading
 ``GET /_captured`` rather than wiring assertion logic into the domain rules themselves.
 """
 

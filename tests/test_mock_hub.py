@@ -34,7 +34,7 @@ _SPEC = {
         },
         "deliver": {"executor": "hub", "mode": "merge-to-main"},
     },
-    "pm_pointers": [{"source": "o-r", "ref": "1"}],
+    "work_refs": [{"source": "o-r", "ref": "1"}],
 }
 
 

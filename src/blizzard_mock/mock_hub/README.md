@@ -47,7 +47,7 @@ so a test can assert a real runner presented its bearer token.
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token (issue #84b) |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
-| `GET /api/fleet/chunks/{id}/pm-items` | Pass-through PM items — canned per pointer, no forge integration |
+| `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |
 | `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
 | `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
 | `POST /api/fleet/chunks/{id}/leases` | Direct, non-buffered `lease.minted` report — advances the fence (D-044), 202 `{"chunk_id"}` |
@@ -92,7 +92,7 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
   arrival order. `POST /_captured/reset` clears it. A service test uses this to assert
   a real runner's
   outbound `Authorization` header actually reached the hub, on every runner→hub call
-  including the pm-items proxy forward.
+  including the work-items proxy forward.
 
 ## Lever surface (`/_levers`)
 

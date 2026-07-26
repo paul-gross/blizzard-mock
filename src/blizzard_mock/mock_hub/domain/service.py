@@ -39,8 +39,6 @@ from blizzard_mock.mock_hub.domain.wire import (
     HubAdvanceResponse,
     NodeConfig,
     NodeEnvelope,
-    PmItemEntry,
-    PmItemsView,
     QuestionView,
     QueuePeekEntry,
     QueuePeekResponse,
@@ -49,6 +47,8 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteView,
     RunnerFactAck,
     RunnerView,
+    WorkItemEntry,
+    WorkItemsView,
 )
 
 #: The runner-fact vocabulary (``blizzard.wire.facts``) the batched ``/events`` push
@@ -110,7 +110,7 @@ class MockHubService:
             model=spec.model,
             entry=spec.entry,
             nodes=spec.nodes,
-            pm_pointers=spec.pm_pointers,
+            work_refs=spec.work_refs,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -130,7 +130,7 @@ class MockHubService:
                 chunk_id=c.chunk_id,
                 graph_id=c.graph_id,
                 position=i,
-                pm_pointers=[p.model_dump() for p in c.pm_pointers],
+                work_refs=[p.model_dump() for p in c.work_refs],
             )
             for i, c in enumerate(ready)
         ]
@@ -207,26 +207,26 @@ class MockHubService:
             status=chunk.status.value,
             current_node_id=chunk.current_node_id,
             latest_epoch=chunk.latest_epoch or None,
-            pm_pointers=[p.model_dump() for p in chunk.pm_pointers],
+            work_refs=[p.model_dump() for p in chunk.work_refs],
             model=chunk.model,
             route=route,
             escalation=escalation,
             questions=questions,
         )
 
-    def pm_items(self, chunk_id: str) -> PmItemsView:
-        """A chunk's pass-through PM items — one canned entry per pointer.
+    def work_items(self, chunk_id: str) -> WorkItemsView:
+        """A chunk's pass-through work items — one canned entry per pointer.
 
         The mock carries no forge integration (D-012's vendor-native fidelity stops at
-        the wire shape here); this exists so the fleet-side pm-items route is reachable
+        the wire shape here); this exists so the fleet-side work-items route is reachable
         at all, for the runner-local proxy's forward and the wire-shape/auth-capture
-        assertions it backs (issue #86b/#87), not for PM-content behavior."""
+        assertions it backs (issue #86b/#87), not for work-item-content behavior."""
         chunk = self._require(chunk_id)
         now = self._clock.now().isoformat()
-        return PmItemsView(
+        return WorkItemsView(
             items=[
-                PmItemEntry(source=p.source, ref=p.ref, fetched_at=now, title=f"mock item {p.source}#{p.ref}")
-                for p in chunk.pm_pointers
+                WorkItemEntry(source=p.source, ref=p.ref, fetched_at=now, title=f"mock item {p.source}#{p.ref}")
+                for p in chunk.work_refs
             ]
         )
 
@@ -603,7 +603,7 @@ class MockHubService:
             ),
             prompt=node.prompt,
             judgement_prompt=node.judgement_prompt,
-            pm_pointers=[p.model_dump() for p in chunk.pm_pointers],
+            work_refs=[p.model_dump() for p in chunk.work_refs],
         )
 
     def _require(self, chunk_id: str) -> ChunkState:

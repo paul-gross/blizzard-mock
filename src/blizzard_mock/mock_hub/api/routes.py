@@ -4,7 +4,7 @@ Vendor-native paths and JSON identical to the real hub OpenAPI subset the reconc
 loop calls: queue peek, route claim (plus route-token rotation), chunk detail, envelope
 re-read, completion + decision apply, the batched fact-intake push and its dedicated
 lease/escalation report counterparts, the questions poll, the hub-advance step, the
-PM-items pass-through, and the runner registry. Not necessarily exhaustive as the mock's
+work-items pass-through, and the runner registry. Not necessarily exhaustive as the mock's
 surface grows — see the real hub's OpenAPI subset for the source of truth.
 Controllers hold only the ``MockHubService`` (``bzh:controller-read-only``); every rule
 lives in the service.
@@ -116,10 +116,14 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
+@fleet_router.get("/chunks/{chunk_id}/work-items")
+# The real hub keeps `/pm-items` as a deprecated alias onto the same handler (blizzard
+# issue #55); a counterpart mock that served only one of the two would let a caller pass
+# here and 404 against the real thing, which is the divergence this mock exists to prevent.
 @fleet_router.get("/chunks/{chunk_id}/pm-items")
-def get_pm_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+def get_work_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:
-        return service.pm_items(chunk_id)
+        return service.work_items(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 

@@ -121,23 +121,23 @@ class QuestionState(BaseModel):
     answered_at: str | None = None
 
 
-class PmPointerSpec(BaseModel):
-    """One ``{source, ref}`` PM pointer (D-105) — mirrors the hub's own pointer wire
-    (``blizzard.wire.chunk.PmPointerModel``)."""
+class WorkRefSpec(BaseModel):
+    """One ``{source, ref}`` work ref (D-105) — mirrors the hub's own pointer wire
+    (``blizzard.wire.chunk.WorkRefModel``)."""
 
     source: str
     ref: str
 
 
 class ChunkSpec(BaseModel):
-    """A seeded chunk: its scripted node graph plus PM pointers (POST /_seed/chunk)."""
+    """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
     model: str = DEFAULT_MODEL
     entry: str
     nodes: dict[str, NodeSpec]
-    pm_pointers: list[PmPointerSpec] = Field(default_factory=list)
+    work_refs: list[WorkRefSpec] = Field(default_factory=list)
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -151,7 +151,7 @@ class ChunkState(BaseModel):
     model: str = DEFAULT_MODEL
     entry: str
     nodes: dict[str, NodeSpec]
-    pm_pointers: list[PmPointerSpec] = Field(default_factory=list)
+    work_refs: list[WorkRefSpec] = Field(default_factory=list)
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

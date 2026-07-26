@@ -42,7 +42,7 @@ class NodeEnvelope(BaseModel):
     node: NodeConfig
     prompt: str | None
     judgement_prompt: str | None
-    pm_pointers: list[dict[str, str]] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list)
     artifacts: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -114,7 +114,7 @@ class ChunkDetail(BaseModel):
     status: str
     current_node_id: str | None
     latest_epoch: int | None
-    pm_pointers: list[dict[str, str]] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list)
     # The chunk's model selection (issue #27) — the store column is non-nullable and
     # every mint carries the real hub's DEFAULT_MODEL; mirrored here so a real runner's
     # required-field wire model deserializes the mock's replies unchanged.
@@ -128,7 +128,7 @@ class QueuePeekEntry(BaseModel):
     chunk_id: str
     graph_id: str
     position: int
-    pm_pointers: list[dict[str, str]] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list)
 
 
 class QueuePeekResponse(BaseModel):
@@ -158,12 +158,12 @@ class RunnerFactAck(BaseModel):
     rejected: list[int] = Field(default_factory=list)
 
 
-class PmItemEntry(BaseModel):
-    """One pointer's pass-through PM item — mirrors ``blizzard.wire.chunk.PmItemEntry``.
+class WorkItemEntry(BaseModel):
+    """One pointer's pass-through work item — mirrors ``blizzard.wire.chunk.WorkItemEntry``.
 
     The mock carries no forge integration, so ``title``/``body`` are canned rather than
     vendor-fetched — the point of this route existing in the mock is the wire shape and
-    the auth-header capture (issue #86b/#87), not PM-content fidelity."""
+    the auth-header capture (issue #86b/#87), not work-item-content fidelity."""
 
     source: str
     ref: str
@@ -176,5 +176,5 @@ class PmItemEntry(BaseModel):
     error: str | None = None
 
 
-class PmItemsView(BaseModel):
-    items: list[PmItemEntry] = Field(default_factory=list)
+class WorkItemsView(BaseModel):
+    items: list[WorkItemEntry] = Field(default_factory=list)
