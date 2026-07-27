@@ -208,4 +208,6 @@ Each facade registers a `[project.scripts]` binary:
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
-legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit).
+legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit) and
+`tests/test_harness_hooks.py` (the hook seam: the lifecycle fire points, the
+exits that fire nothing, and hook execution from a `--settings` document).
