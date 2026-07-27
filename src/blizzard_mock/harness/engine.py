@@ -32,6 +32,7 @@ import contextlib
 import contextvars
 import os
 import re
+import textwrap
 import time
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
@@ -69,10 +70,11 @@ PREAMBLE_TABLE_HEADER = "| Field | Value |"
 
 #: Delimiters that say outright which part of a prompt is the program — the same
 #: tagged-text idiom the wire already uses on the *output* side (:data:`CHOICE_OPEN`,
-#: ``<Ask>``), turned around onto the input. A prompt carrying them is exec'd from its
-#: tagged blocks alone and everything outside them is prose the engine never runs; an
-#: untagged prompt keeps the positional :func:`split_worker_preamble` behavior. See
-#: :func:`split_behavior_script`.
+#: ``<Ask>``), turned around onto the input. A prompt carrying them **on lines of their
+#: own** is exec'd from its tagged blocks alone and everything outside them is prose the
+#: engine never runs; a prompt without such a line — including one that only mentions a
+#: tag inline, as operator preamble prose may — keeps the positional
+#: :func:`split_worker_preamble` behavior. See :func:`split_behavior_script`.
 BEHAVIOR_SCRIPT_OPEN = "<behavior-script>"
 BEHAVIOR_SCRIPT_CLOSE = "</behavior-script>"
 
@@ -283,14 +285,25 @@ def fenced_env(base: Mapping[str, str] | None = None, **extra: str) -> dict[str,
 class TaggedPrompt:
     """A tagged prompt's two halves: the program, and the prose around it.
 
-    ``script`` is every ``<behavior-script>`` block's contents concatenated in order;
-    ``prose`` is the rest of the prompt with the blocks (and their tags) elided — real
-    prose a transcript can show as "what the user said", where an untagged prompt has
-    only its preamble or a synthetic placeholder.
+    ``script`` is every ``<behavior-script>`` block's contents, dedented and
+    concatenated in order; ``prose`` is the rest of the prompt with the blocks (and
+    their delimiter lines) elided — real prose, which is both what a transcript shows
+    as "what the user said" and what a resumed script reads back from
+    :func:`~blizzard_mock.harness.helpers.answer`, where an untagged prompt has only
+    its preamble, a synthetic placeholder, or the raw message.
     """
 
     script: str
     prose: str
+
+
+def _tag_line(tag: str) -> re.Pattern[str]:
+    """A delimiter matcher: that tag *alone* on its line, bar surrounding whitespace."""
+    return re.compile(rf"^[ \t]*{re.escape(tag)}[ \t]*$")
+
+
+_OPEN_LINE = _tag_line(BEHAVIOR_SCRIPT_OPEN)
+_CLOSE_LINE = _tag_line(BEHAVIOR_SCRIPT_CLOSE)
 
 
 def split_behavior_script(prompt: str) -> TaggedPrompt | None:
@@ -302,53 +315,76 @@ def split_behavior_script(prompt: str) -> TaggedPrompt | None:
     tagged prompt does not consult :func:`split_worker_preamble` at all — and lets a
     mock-targeted prompt read like a real node prompt instead of being pure code.
 
-    Returns ``None`` when the prompt carries neither tag, which is the caller's
-    signal to fall back to the legacy positional split. Raises
-    :class:`BehaviorScriptTagError` when the tags are unbalanced or nested — never a
-    silent fall-through to legacy exec, because a typo'd tag that quietly succeeds
-    with no verdict and no side effects makes tests rot invisibly.
+    **A delimiter counts only on a line of its own** (leading/trailing whitespace
+    aside). The prompt a worker receives is not all script-author-owned: the runner
+    prepends operator prose it composes itself
+    (``blizzard:runner/harness/preamble.py``), and that prose may well *mention* the
+    tag — a house rule about it, or a quoted work item like the one this feature came
+    from. Matched as a bare substring, such a mention would either hijack a legacy
+    run (an illustrative block becomes the whole program and the node's real script
+    silently never runs) or, unpaired, hard-fail every untagged spawn in the
+    deployment. Line-anchoring makes an inline mention — ``a `<behavior-script>`
+    tag`` — inert, so a prompt with no *block* keeps behaving exactly as it did
+    before the tag existed.
+
+    Blocks are :func:`~textwrap.dedent`\\ ed, so a tag nested in a markdown list or a
+    blockquote yields runnable source rather than an ``IndentationError``.
+
+    Returns ``None`` when the prompt carries no delimiter line at all, which is the
+    caller's signal to fall back to the legacy positional split. Raises
+    :class:`BehaviorScriptTagError` when the delimiter lines are unbalanced or
+    nested, or when they enclose nothing executable — never a silent fall-through to
+    legacy exec, and never a quiet no-op turn, because a tag that succeeds with no
+    verdict and no side effects makes tests rot invisibly.
 
     The tag is orthogonal to the fence: it marks *which part* of a prompt is the
     program, while :func:`assert_fenced` decides whether anything may run at all. A
     tag in prompt content is never on its own sufficient to trigger execution.
     """
-    if BEHAVIOR_SCRIPT_OPEN not in prompt and BEHAVIOR_SCRIPT_CLOSE not in prompt:
-        return None
-
-    unmatched_close = (
-        f"unbalanced behavior-script tags: a {BEHAVIOR_SCRIPT_CLOSE} with no opening {BEHAVIOR_SCRIPT_OPEN}"
-    )
     blocks: list[str] = []
     prose: list[str] = []
-    pos = 0
-    while True:
-        open_at = prompt.find(BEHAVIOR_SCRIPT_OPEN, pos)
-        close_at = prompt.find(BEHAVIOR_SCRIPT_CLOSE, pos)
-        if open_at == -1:
-            if close_at != -1:
-                raise BehaviorScriptTagError(unmatched_close)
-            prose.append(prompt[pos:])
-            break
-        if close_at != -1 and close_at < open_at:
-            raise BehaviorScriptTagError(unmatched_close)
-        body_at = open_at + len(BEHAVIOR_SCRIPT_OPEN)
-        close_at = prompt.find(BEHAVIOR_SCRIPT_CLOSE, body_at)
-        if close_at == -1:
-            raise BehaviorScriptTagError(
-                f"unbalanced behavior-script tags: a {BEHAVIOR_SCRIPT_OPEN} with no closing {BEHAVIOR_SCRIPT_CLOSE}"
-            )
-        body = prompt[body_at:close_at]
-        if BEHAVIOR_SCRIPT_OPEN in body:
-            raise BehaviorScriptTagError(
-                f"malformed behavior-script tags: a nested {BEHAVIOR_SCRIPT_OPEN} inside a block — blocks do not nest"
-            )
-        blocks.append(body.strip("\n"))
-        prose.append(prompt[pos:open_at])
-        pos = close_at + len(BEHAVIOR_SCRIPT_CLOSE)
+    body: list[str] = []
+    open_line: int | None = None
+
+    for number, line in enumerate(prompt.splitlines(), start=1):
+        if _OPEN_LINE.match(line):
+            if open_line is not None:
+                raise BehaviorScriptTagError(
+                    f"malformed behavior-script tags: a nested {BEHAVIOR_SCRIPT_OPEN} on line {number} "
+                    f"inside the block opened on line {open_line} — blocks do not nest"
+                )
+            open_line, body = number, []
+        elif _CLOSE_LINE.match(line):
+            if open_line is None:
+                raise BehaviorScriptTagError(
+                    f"unbalanced behavior-script tags: a {BEHAVIOR_SCRIPT_CLOSE} on line {number} "
+                    f"with no opening {BEHAVIOR_SCRIPT_OPEN}"
+                )
+            blocks.append(textwrap.dedent("\n".join(body)))
+            open_line = None
+        elif open_line is None:
+            prose.append(line)
+        else:
+            body.append(line)
+
+    if open_line is not None:
+        raise BehaviorScriptTagError(
+            f"unbalanced behavior-script tags: the {BEHAVIOR_SCRIPT_OPEN} on line {open_line} "
+            f"has no closing {BEHAVIOR_SCRIPT_CLOSE}"
+        )
+    if not blocks:
+        # No delimiter *line* anywhere — whatever the prompt says about the tag in
+        # passing, it carries no block, so it is a legacy prompt.
+        return None
 
     # Blocks join on a newline so two of them never fuse into one line; the prose
     # keeps its own shape, minus the gaps the elided blocks left behind.
-    return TaggedPrompt(script="\n".join(blocks), prose=re.sub(r"\n{3,}", "\n\n", "".join(prose)).strip())
+    script = "\n".join(blocks)
+    if not script.strip():
+        raise BehaviorScriptTagError(
+            f"empty behavior-script block: the {BEHAVIOR_SCRIPT_OPEN} block(s) enclose nothing to execute"
+        )
+    return TaggedPrompt(script=script, prose=re.sub(r"\n{3,}", "\n\n", "\n".join(prose)).strip())
 
 
 def split_worker_preamble(prompt: str) -> tuple[str, str]:
@@ -514,30 +550,7 @@ def run_prompt(
 
     assert_fenced(cwd, env)
 
-    store = SessionStore(_state_root(env, cwd))
-    if is_resume:
-        if not session_id:
-            raise ValueError("resume requires a session_id")
-        state = store.load_or_create(session_id)
-        state.resumes.append(prompt)
-    else:
-        session_id = session_id or str(uuid.uuid4())
-        state = store.load_or_create(session_id)
-    state.turns += 1
-
-    ctx = RunContext(
-        session=state,
-        wire=wire,
-        cwd=cwd,
-        env=env,
-        store=store,
-        is_resume=is_resume,
-        resume_message=prompt if is_resume else None,
-        ask_cmd=_ask_cmd(env),
-        transcript=transcript,
-    )
-
-    # Which part of the prompt is the program? A `<behavior-script>` tag says so
+    # Which part of the prompt is the program? A `<behavior-script>` block says so
     # outright; without one, the runner's preamble still rides ahead of the envelope on
     # a spawn — prose for an agent to read, not code to run — so the positional split
     # decides. A malformed tag is neither: it is carried into the run below and raised
@@ -554,6 +567,34 @@ def run_prompt(
         script = tagged.script
     elif tag_error is None:
         preamble, script = split_worker_preamble(prompt)
+    # What the *human* said this turn: a tagged prompt's prose, else the whole raw
+    # message (an untagged resume is code end to end, and `answer()` has always
+    # returned it verbatim). This is what a resumed script reads back as its answer.
+    message = tagged.prose if tagged is not None else prompt
+
+    store = SessionStore(_state_root(env, cwd))
+    if is_resume:
+        if not session_id:
+            raise ValueError("resume requires a session_id")
+        state = store.load_or_create(session_id)
+        state.resumes.append(message)
+    else:
+        session_id = session_id or str(uuid.uuid4())
+        state = store.load_or_create(session_id)
+    state.turns += 1
+
+    ctx = RunContext(
+        session=state,
+        wire=wire,
+        cwd=cwd,
+        env=env,
+        store=store,
+        is_resume=is_resume,
+        resume_message=message if is_resume else None,
+        ask_cmd=_ask_cmd(env),
+        transcript=transcript,
+    )
+
     if transcript is not None:
         # Never the raw script (it would misrepresent code as "what the user said"):
         # the tagged prompt's own prose, else the real preamble prose, else a short

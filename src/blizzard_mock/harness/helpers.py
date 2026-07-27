@@ -136,5 +136,11 @@ def state() -> SessionState:
 
 
 def answer() -> str | None:
-    """Return the resume message this turn was resumed with (the answer), if any."""
+    """Return the resume message this turn was resumed with (the answer), if any.
+
+    The *answer*, not the script that carries it: on a ``<behavior-script>``-tagged
+    resume this is the message's prose with its blocks elided, so a script never
+    reads its own source back. An untagged resume is code end to end and returns
+    the whole raw message, as it always has.
+    """
     return current_context().session.last_answer

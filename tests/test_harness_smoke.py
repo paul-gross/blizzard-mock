@@ -494,9 +494,59 @@ def _tagged(*scripts: str, prose: str = _PROSE) -> str:
     return "\n".join(parts)
 
 
+def _runner_preamble(workspace_prose: str, cwd: Path) -> str:
+    """A stand-in for the runner's spawn preamble (``blizzard:runner/harness/preamble.py``).
+
+    Operator-owned prose ahead of the facts table — layers the *script author does not
+    control*, which is why what they happen to say about the tag must not change how a
+    prompt is read.
+    """
+    return (
+        "You are a worker in a blizzard fleet.\n\n"
+        f"{workspace_prose}\n\n"
+        f"| Field | Value |\n|-------|-------|\n| chunk id | `ch_1` |\n| environment workdir | `{cwd}` |\n"
+    )
+
+
 def test_split_behavior_script_returns_none_for_an_untagged_prompt() -> None:
     # The caller's signal to fall back to the legacy positional split.
     assert engine.split_behavior_script("verdict('pass')\n") is None
+
+
+@pytest.mark.parametrize(
+    "mention",
+    [
+        f"House rule: wrap your script in a `{engine.BEHAVIOR_SCRIPT_OPEN}` tag.",
+        f"House rule: put your script between `{engine.BEHAVIOR_SCRIPT_OPEN}` and `{engine.BEHAVIOR_SCRIPT_CLOSE}`.",
+    ],
+    ids=["unbalanced-inline", "balanced-inline"],
+)
+def test_prose_that_only_mentions_the_tag_carries_no_block(mention: str) -> None:
+    # A delimiter counts on a line of its own; inline, it is just words.
+    assert engine.split_behavior_script(f"{mention}\nverdict('pass')\n") is None
+
+
+@pytest.mark.parametrize(
+    "mention",
+    [
+        f"House rule: wrap your script in a `{engine.BEHAVIOR_SCRIPT_OPEN}` tag.",
+        f"House rule: put your script between `{engine.BEHAVIOR_SCRIPT_OPEN}` and `{engine.BEHAVIOR_SCRIPT_CLOSE}`.",
+    ],
+    ids=["unbalanced-inline", "balanced-inline"],
+)
+def test_preamble_prose_about_the_tag_leaves_a_legacy_script_alone(mention: str, fenced_repo) -> None:
+    """The runner composes the preamble, not the script author: operator prose that
+    merely talks about the tag must neither hijack the run (its snippet becoming the
+    program while the node's real script is silently reclassified as prose) nor, when
+    unpaired, kill every untagged spawn in the deployment."""
+    cwd, _ = fenced_repo
+    prompt = _runner_preamble(mention, cwd) + "\nverdict('pass', 'the real node script ran')\n"
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert "the real node script ran" in (result.text or "")
 
 
 def test_split_behavior_script_separates_the_program_from_the_prose() -> None:
@@ -576,11 +626,47 @@ def test_a_malformed_tag_fails_the_turn_loudly(prompt: str, expected: str, fence
     assert expected in result.text
 
 
+@pytest.mark.parametrize(
+    "block",
+    [
+        f"{engine.BEHAVIOR_SCRIPT_OPEN}\n{engine.BEHAVIOR_SCRIPT_CLOSE}",
+        f"{engine.BEHAVIOR_SCRIPT_OPEN}\n   \n{engine.BEHAVIOR_SCRIPT_CLOSE}",
+    ],
+    ids=["empty", "whitespace-only"],
+)
+def test_a_block_enclosing_nothing_fails_rather_than_succeeding_with_no_verdict(block: str, fenced_repo) -> None:
+    """Well-formed but empty is the same rot as malformed: exit 0 with no verdict and no
+    side effects is exactly what a test cannot notice."""
+    code, result = _run(f"{_PROSE}\n{block}\n", fenced_repo)
+
+    assert code == 1
+    assert result.subtype == "error_during_execution"
+    assert "empty behavior-script block" in result.text
+
+
+def test_an_indented_block_is_dedented(fenced_repo) -> None:
+    """A tag nested in a markdown list or blockquote — a natural shape once prompts read
+    like prose — must yield runnable source, not an IndentationError."""
+    prompt = (
+        "Steps:\n\n"
+        f"  {engine.BEHAVIOR_SCRIPT_OPEN}\n"
+        "  marks = 'indented'\n"
+        "  if marks:\n"
+        "      verdict('pass', marks)\n"
+        f"  {engine.BEHAVIOR_SCRIPT_CLOSE}\n"
+    )
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 0
+    assert "indented" in (result.text or "")
+
+
 def test_a_tagged_resume_message_execs_its_block(fenced_repo) -> None:
     _run(_tagged("ask('proceed?', ['yes', 'no'])"), fenced_repo, session_id="sess-tagged-resume")
 
     code, result = _run(
-        _tagged("verdict('pass', answer() and 'resumed')"),
+        _tagged("verdict('pass', answer())", prose="Go ahead, ship it."),
         fenced_repo,
         session_id="sess-tagged-resume",
         is_resume=True,
@@ -588,16 +674,21 @@ def test_a_tagged_resume_message_execs_its_block(fenced_repo) -> None:
 
     assert code == 0
     assert result.subtype == "success"
-    assert "resumed" in (result.text or "")
+    # `answer()` hands back the human's prose — never the script's own source.
+    assert "Go ahead, ship it." in (result.text or "")
+    assert "verdict(" not in (result.text or "")
+    assert engine.BEHAVIOR_SCRIPT_OPEN not in (result.text or "")
 
 
 def test_an_untagged_resume_message_still_execs_in_full(fenced_repo) -> None:
     _run("ask('proceed?')", fenced_repo, session_id="sess-untagged-resume")
 
-    code, result = _run("verdict('pass', 'legacy')", fenced_repo, session_id="sess-untagged-resume", is_resume=True)
+    code, result = _run("verdict('pass', answer())", fenced_repo, session_id="sess-untagged-resume", is_resume=True)
 
     assert code == 0
-    assert "legacy" in (result.text or "")
+    # Untagged, the resume is code end to end, and `answer()` returns it verbatim as
+    # it always has — what blizzard's own ask/answer scripts read.
+    assert "verdict('pass', answer())" in (result.text or "")
 
 
 def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_repo) -> None:

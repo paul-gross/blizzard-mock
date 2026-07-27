@@ -21,14 +21,28 @@ the program — the same tagged-text idiom the mock uses on the *output* side
 engine never runs, so a mock-targeted prompt can read like a real node prompt
 instead of being pure code. `engine.split_behavior_script()` owns the split and
 lives in the shared engine, so all three facades get it, on spawn and on resume
-alike. A tagged prompt does not consult the preamble split below at all.
+alike. A tagged prompt does not consult the preamble split below at all. Blocks
+are dedented, so a tag nested in a markdown list or blockquote runs.
+
+**A delimiter counts only on a line of its own** (leading/trailing whitespace
+aside). The worker's prompt is not all script-author-owned: the runner composes
+operator prose ahead of the envelope (`blizzard:runner/harness/preamble.py`), and
+that prose may well *mention* the tag — a house rule about it, or a quoted work
+item. Matched as a bare substring, such a mention would either hijack a legacy run
+(the mention's snippet becoming the program while the node's real script is
+silently reclassified as prose) or, unpaired, hard-fail every untagged spawn in
+the deployment. Line-anchoring makes an inline mention — ``a `<behavior-script>`
+tag`` — inert, so a prompt with no *block* keeps behaving exactly as it did before
+the tag existed. **Quote the tag inline, never as a standalone block:** prose that
+sets both delimiters alone on their own lines *is* a block, since nothing
+distinguishes an illustration from the real thing.
 
 **A malformed tag fails the turn loudly.** An opening tag with no close, a close
-with no open, or a nested open ends the run as `error_during_execution` (exit 1)
-with a message naming the tag problem — never a silent fall-through to the legacy
-path, and never a no-op "text turn". Silent degradation is the failure mode
-designed out: a typo'd tag that quietly succeeds with no verdict and no side
-effects makes tests rot invisibly.
+with no open, a nested open, or a block enclosing nothing executable ends the run
+as `error_during_execution` (exit 1) with a message naming the tag problem — never
+a silent fall-through to the legacy path, and never a no-op "text turn". Silent
+degradation is the failure mode designed out: a tag that quietly succeeds with no
+verdict and no side effects makes tests rot invisibly.
 
 The tag is orthogonal to the fence: it marks *which part* of a prompt is the
 program, while `assert_fenced` (below) decides whether the binary may execute
@@ -180,7 +194,7 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 | `hang()` | Block forever (stall/heartbeat/REAP testing). |
 | `crash(hard=False)` | Die without a verdict — soft (error run, exit 1) or `hard` (`os._exit`). |
 | `state()` | The `SessionState` — `state().last_ask`, `state().last_answer`. |
-| `answer()` | The resume message this turn was resumed with. |
+| `answer()` | The resume message this turn was resumed with — a tagged resume's **prose**, so a script never reads its own source back; an untagged one's raw message, as always. |
 
 ## Binaries
 

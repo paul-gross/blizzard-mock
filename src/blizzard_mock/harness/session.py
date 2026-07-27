@@ -29,9 +29,11 @@ class SessionState:
     """The durable state of one mock-harness session, keyed by ``session_id``.
 
     ``turns`` counts spawn + each resume; ``asks`` is every ask fired across the
-    session's life; ``resumes`` is the sequence of resume messages delivered
-    (each a behavior-script that arrived as code); ``verdicts`` is every verdict
-    emitted. A resumed script reads ``asks``/``resumes`` to reconstruct context.
+    session's life; ``resumes`` is the sequence of resume messages delivered —
+    what the *human* said, so a ``<behavior-script>``-tagged resume records its
+    prose alone and an untagged one (code end to end) the whole raw message;
+    ``verdicts`` is every verdict emitted. A resumed script reads
+    ``asks``/``resumes`` to reconstruct context.
     """
 
     session_id: str
