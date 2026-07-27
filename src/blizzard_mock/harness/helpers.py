@@ -1,8 +1,8 @@
 """The terse helper library behavior scripts import.
 
 A mock-harness prompt *is* a Python script; these helpers keep the common cases
-one line each — ``apply_diff`` / ``commit`` / ``verdict`` / ``ask`` / ``hang`` /
-``crash`` — with raw Python underneath for the weird cases. They are bound into
+one line each — ``apply_diff`` / ``commit`` / ``tool_call`` / ``verdict`` / ``ask``
+/ ``hang`` / ``crash`` — with raw Python underneath for the weird cases. They are bound into
 the script namespace by :func:`blizzard_mock.harness.engine.run_prompt`, so a
 script calls ``commit("msg")`` with no import; called outside an engine run they
 raise (there is no ambient context).
@@ -70,19 +70,32 @@ def commit(message: str) -> str:
     return sha
 
 
-def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object], *, output: str) -> None:
-    """Mint a matched ``tool_use``/``tool_result`` pair on the transcript, if one is wired.
+def tool_call(name: str, tool_input: dict[str, object] | None = None, output: str = "ok") -> None:
+    """Record one tool call that does nothing else — no git, no files touched.
 
-    ``apply_diff`` and ``commit`` are the two real "tool calls" a mock script
-    performs, so pairing them is the fidelity worth having: a mocked conversation
-    shows real-looking tool turns with output, with no extra work from the
-    behavior-script author. No-op when no transcript writer is bound (every facade
-    but claude_code, and any direct engine caller that passes none).
+    ``apply_diff``/``commit`` are tool calls that also do real work, so a script
+    wanting a *timeline* of tool calls ("three calls, then ``hang()``") would
+    otherwise have to make commits it does not want. This is that timeline, in one
+    line per beat: the transcript pair and the ``PostToolUse`` hook fire, with the
+    tool ``name`` whatever the script says it is.
     """
-    if ctx.transcript is None:
-        return
-    tool_use_id = ctx.transcript.record_tool_call(name, tool_input)
-    ctx.transcript.record_tool_result(tool_use_id, output)
+    ctx = current_context()
+    _record_tool_turn(ctx, name, dict(tool_input or {}), output=output)
+
+
+def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object], *, output: str) -> None:
+    """The effects of one tool call: the transcript pair, and the ``PostToolUse`` hooks.
+
+    Two independent seams, deliberately: the transcript pair is minted **when a
+    writer is wired** (every facade but claude_code passes none), and the hooks fire
+    **regardless** — a run with hooks and no transcript still beats. See the package
+    README's "Conversation transcripts" for which helpers call this.
+    """
+    if ctx.transcript is not None:
+        tool_use_id = ctx.transcript.record_tool_call(name, tool_input)
+        ctx.transcript.record_tool_result(tool_use_id, output)
+    if ctx.hooks is not None:
+        ctx.hooks.on_tool_use(name, tool_input, output)
 
 
 def verdict(choice: str, assessment: str = "") -> None:

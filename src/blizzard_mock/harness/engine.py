@@ -158,11 +158,9 @@ class ITranscriptWriter(Protocol):
     reader today — ``blizzard/runner/transcripts/parser.py``); every other facade
     passes ``None`` and the engine no-ops. The engine calls into it at two defined
     points — the spawn/resume user turn and the final result — and never renders
-    anything itself; :func:`~blizzard_mock.harness.helpers.apply_diff` and
-    :func:`~blizzard_mock.harness.helpers.commit` call ``record_tool_call`` /
-    ``record_tool_result`` directly off the run context to mint a matched
-    ``tool_use``/``tool_result`` pair for the two real "tool calls" a mock script
-    performs.
+    anything itself; the helper surface drives ``record_tool_call`` /
+    ``record_tool_result`` off the run context in between (the package README's
+    "Conversation transcripts" owns which helpers those are).
     """
 
     def record_user(self, text: str) -> None:
@@ -511,6 +509,7 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
         "ask": helpers.ask,
         "apply_diff": helpers.apply_diff,
         "commit": helpers.commit,
+        "tool_call": helpers.tool_call,
         "verdict": helpers.verdict,
         "hang": helpers.hang,
         "crash": helpers.crash,
@@ -557,8 +556,9 @@ def run_prompt(
     ``transcript``, when supplied (only the claude_code facade constructs one — a
     genuine Claude-shaped conversation is only useful where a reader exists), mints
     the user turn for this run and the assistant turn for its result; it is also
-    bound onto the run context so ``apply_diff``/``commit`` can mint matched tool
-    turns mid-script. ``None`` (every other facade) is a total no-op.
+    bound onto the run context, which the helper surface's tool calls write through
+    mid-script (the package README's "Conversation transcripts" owns that list).
+    ``None`` (every other facade) is a total no-op.
 
     ``hooks``, when supplied (only the claude_code facade constructs one, from the
     ``--settings`` document the runner hands it), executes the hook commands that

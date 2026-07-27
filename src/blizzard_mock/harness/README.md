@@ -91,10 +91,11 @@ recorded* — see "Conversation transcripts" below.
 - `session.py` — `SessionState` / `SessionStore`: the per-session JSON file
   (keyed by session id) that lets a resumed script read what it asked.
 - `helpers.py` — the terse helper library bound into every behavior script's
-  namespace (no import needed): `ask`, `apply_diff`, `commit`, `verdict`,
-  `hang`, `crash`, plus `state()` / `answer()` for reading session state. Raw
-  Python is available underneath for the weird cases. `apply_diff`/`commit` each
-  also mint a matched tool-call turn on the transcript, if one is wired.
+  namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
+  `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
+  state. Raw Python is available underneath for the weird cases. Its tool-call
+  helpers also drive the transcript and the hook seam — see "Conversation
+  transcripts" below.
 - `internal/` — real git plumbing (`git.py`) and stderr-routed structlog
   (`logging.py`); kept out of the framework-free core and the script surface.
 - `facades/` — one module per harness, each a thin CLI + wire over the engine:
@@ -114,10 +115,16 @@ run through the fleet produces a conversation the runner panel can open. This is
 
 - `engine.ITranscriptWriter` — the protocol, mirroring `IHarnessWire`:
   `record_user` (the spawn/resume turn), `record_result` (the final assistant
-  turn), and `record_tool_call` / `record_tool_result` (a matched pair, called by
-  `helpers.apply_diff` / `helpers.commit`). `engine.run_prompt` takes an optional
-  `transcript` parameter and calls into it at those points; `None` (every facade
-  but claude_code) is a total no-op.
+  turn), and `record_tool_call` / `record_tool_result`. `engine.run_prompt` takes
+  an optional `transcript` parameter and calls into it at those points; `None`
+  (every facade but claude_code) is a total no-op.
+- **The tool-call call sites — stated here and nowhere else.** Three helpers
+  mint a matched `tool_use`/`tool_result` pair: `apply_diff` (as `Edit`), `commit`
+  (as `Bash`), and `tool_call(name)`, which mints one and touches nothing else.
+  All three go through a single combined path in `helpers.py` that writes the
+  transcript pair **when a writer is wired** and fires the `PostToolUse` hooks
+  (`engine.IHookRunner`) **regardless** — the two seams are independent, so a run
+  with hooks and no transcript still fires.
 - `facades/_transcript.ClaudeTranscriptWriter` — the one implementation. Appends
   JSONL records to `<root>/mock-claude-code/<session_id>.jsonl`. The directory
   name is a fixed constant, not a mangled-cwd replica of real Claude Code's
@@ -189,6 +196,7 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 |--------|--------|
 | `apply_diff(diff)` | `git apply` a unified diff to the worktree (real files). |
 | `commit(message) -> sha` | Real `git commit -A`; returns the new sha. |
+| `tool_call(name, tool_input=None, output="ok")` | Record a tool call that does nothing else — the transcript pair and the `PostToolUse` fire, no git. For choreographing a deterministic tool timeline. |
 | `verdict(choice, assessment="")` | Emit `<Choice>{choice}</Choice>` + assessment as the turn's result. |
 | `ask(question, options=None)` | Record the ask, optionally shell out to `$BLIZZARD_RUNNER_ASK_CMD`, emit the tagged `<Ask …>` result, and **exit the turn**. |
 | `hang()` | Block forever (stall/heartbeat/REAP testing). |
@@ -209,5 +217,5 @@ Each facade registers a `[project.scripts]` binary:
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
 legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit) and
-`tests/test_harness_hooks.py` (the hook seam: the lifecycle fire points, the
-exits that fire nothing, and hook execution from a `--settings` document).
+`tests/test_harness_hooks.py` (the hook seam: the lifecycle fire points and the
+exits that fire nothing).

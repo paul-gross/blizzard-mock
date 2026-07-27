@@ -46,8 +46,9 @@ Usage:
   mock-claude-code -p --resume <session-id> "<resume-script>"
 
 The prompt is the program: it is Python, exec()'d in the acquired worktree with
-the helper surface (ask/apply_diff/commit/verdict/hang/crash) bound. Fenced —
-refuses to run unless test scaffolding marks the environment.
+the helper surface bound: ask, apply_diff, commit, tool_call, verdict, hang,
+crash, state, answer. Fenced — refuses to run unless test scaffolding marks the
+environment.
 
 See src/blizzard_mock/harness/README.md for the full contract.
 """

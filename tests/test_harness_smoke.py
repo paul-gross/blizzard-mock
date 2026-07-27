@@ -403,7 +403,7 @@ def test_claude_facade_bare_invocation_prints_usage(capsys) -> None:
 
 
 def test_helper_surface_is_present() -> None:
-    for name in ("ask", "apply_diff", "commit", "verdict", "hang", "crash", "state", "answer"):
+    for name in ("ask", "apply_diff", "commit", "tool_call", "verdict", "hang", "crash", "state", "answer"):
         assert callable(getattr(helpers, name))
 
 

@@ -15,6 +15,7 @@ also owns :func:`run_out_of_process`, a driver that binds the **engine** directl
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,8 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from blizzard_mock.harness import engine
+from blizzard_mock.harness import engine, helpers
 from blizzard_mock.harness.engine import FenceError, RunResult
+from blizzard_mock.harness.facades._text import PlainTextWire
+from blizzard_mock.harness.session import SessionState, SessionStore
 
 # --------------------------------------------------------------------------- #
 # In-process recording fake
@@ -241,3 +244,109 @@ def test_the_out_of_process_driver_binds_the_engine_directly() -> None:
     on the ``--settings`` wiring a later phase adds."""
     assert "engine.run_prompt(" in _DRIVER_SOURCE
     assert "facades" not in _DRIVER_SOURCE
+
+
+# --------------------------------------------------------------------------- #
+# PostToolUse: the tool-call fire points
+# --------------------------------------------------------------------------- #
+
+_DIFF = (
+    "diff --git a/new.txt b/new.txt\n"
+    "new file mode 100644\n"
+    "--- /dev/null\n"
+    "+++ b/new.txt\n"
+    "@@ -0,0 +1 @@\n"
+    "+hello from the mock\n"
+)
+
+
+class _RecordingTranscript:
+    """An ``ITranscriptWriter`` that records the calls the engine and helpers make."""
+
+    def __init__(self) -> None:
+        self.tool_calls: list[tuple[str, dict[str, object]]] = []
+        self.tool_results: list[tuple[str, str]] = []
+
+    def record_user(self, text: str) -> None: ...
+
+    def record_result(self, result: RunResult) -> None: ...
+
+    def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
+        self.tool_calls.append((name, dict(tool_input)))
+        return f"toolu_{len(self.tool_calls)}"
+
+    def record_tool_result(self, tool_use_id: str, output: str) -> None:
+        self.tool_results.append((tool_use_id, output))
+
+
+@pytest.fixture
+def fenced_dir(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """A fenced directory that is deliberately **not** a git repo."""
+    engine.write_fence_marker(tmp_path)
+    return tmp_path, engine.fenced_env({"PATH": os.environ.get("PATH", "")})
+
+
+def test_apply_diff_and_commit_each_fire_post_tool_use_and_still_mint_their_pair(fenced_repo) -> None:
+    """The two real tool calls fire once each, with Claude's own tool names, and the
+    transcript pair the existing tests assert is unaffected by the split."""
+    hooks = _RecordingHookRunner()
+    transcript = _RecordingTranscript()
+    _run(
+        f"apply_diff({_DIFF!r})\ncommit('feat: add new.txt')",
+        fenced_repo,
+        hooks=hooks,
+        transcript=transcript,
+    )
+
+    assert [name for name, _, _ in hooks.tool_uses] == ["Edit", "Bash"]
+    assert hooks.calls == ["tool:Edit", "tool:Bash", "session_end"]
+    assert [name for name, _ in transcript.tool_calls] == ["Edit", "Bash"]
+    assert len(transcript.tool_results) == 2
+
+
+def test_the_hook_fires_with_no_transcript_wired(fenced_repo) -> None:
+    """The two seams are independent: the early return that used to skip everything
+    when no writer was bound must not skip the hooks."""
+    hooks = _RecordingHookRunner()
+    _run(f"apply_diff({_DIFF!r})\ncommit('feat: add new.txt')", fenced_repo, hooks=hooks, transcript=None)
+    assert [name for name, _, _ in hooks.tool_uses] == ["Edit", "Bash"]
+
+
+def test_tool_call_fires_once_mints_one_pair_and_touches_no_git(fenced_dir) -> None:
+    """Run in a directory that is not a git repo: any git call would fail the turn,
+    so a clean success is itself the proof that nothing was committed."""
+    hooks = _RecordingHookRunner()
+    transcript = _RecordingTranscript()
+    code, result = _run("tool_call('Read', {'file_path': '/tmp/x'})", fenced_dir, hooks=hooks, transcript=transcript)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert hooks.tool_uses == [("Read", {"file_path": "/tmp/x"}, "ok")]
+    assert transcript.tool_calls == [("Read", {"file_path": "/tmp/x"})]
+    assert len(transcript.tool_results) == 1
+
+
+def test_a_scripted_tool_timeline_beats_before_it_stalls(fenced_repo) -> None:
+    """Three beats, then ``hang()``: the choreography the helper exists for, observed
+    from outside the process that never returns."""
+    cwd, env = fenced_repo
+    script = "tool_call('Read')\ntool_call('Read')\ntool_call('Read')\nhang()"
+    log, code = run_out_of_process(script, cwd=cwd, env=env, timeout=5.0)
+
+    assert code is None, "the child must still be hung when we kill it"
+    assert log_entries(log) == ["tool:Read", "tool:Read", "tool:Read"]
+
+
+def test_tool_call_is_bound_into_the_script_namespace(tmp_path: Path) -> None:
+    """The binding itself, asserted against ``_script_globals`` — a script calls
+    ``tool_call(...)`` with no import, exactly as it calls ``commit(...)``."""
+    ctx = engine.RunContext(
+        session=SessionState(session_id="s"),
+        wire=PlainTextWire(),
+        cwd=tmp_path,
+        env={},
+        store=SessionStore(tmp_path),
+        is_resume=False,
+    )
+    ns = engine._script_globals(ctx)
+    assert ns["tool_call"] is helpers.tool_call
