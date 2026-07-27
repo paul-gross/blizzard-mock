@@ -158,11 +158,9 @@ class ITranscriptWriter(Protocol):
     reader today — ``blizzard/runner/transcripts/parser.py``); every other facade
     passes ``None`` and the engine no-ops. The engine calls into it at two defined
     points — the spawn/resume user turn and the final result — and never renders
-    anything itself; :func:`~blizzard_mock.harness.helpers.apply_diff` and
-    :func:`~blizzard_mock.harness.helpers.commit` call ``record_tool_call`` /
-    ``record_tool_result`` directly off the run context to mint a matched
-    ``tool_use``/``tool_result`` pair for the two real "tool calls" a mock script
-    performs.
+    anything itself; the helper surface drives ``record_tool_call`` /
+    ``record_tool_result`` off the run context in between (the package README's
+    "Conversation transcripts" owns which helpers those are).
     """
 
     def record_user(self, text: str) -> None:
@@ -179,6 +177,27 @@ class ITranscriptWriter(Protocol):
 
     def record_tool_result(self, tool_use_id: str, output: str) -> None:
         """Append the ``tool_result`` turn matching a prior ``record_tool_call``."""
+        ...
+
+
+class IHookRunner(Protocol):
+    """A facade's optional hook-execution sink — mirrors :class:`ITranscriptWriter`.
+
+    Real Claude Code runs the hook commands declared in its ``--settings``
+    document; this is the seam that lets the mock do the same, so a runner-owned
+    hook travels its real path instead of being synthesized. Only the claude_code
+    facade constructs one (it is the only facade the runner passes ``--settings``
+    to); every other facade and every direct engine caller passes ``None`` and the
+    engine no-ops. The engine calls into it at two defined lifecycle points and
+    never constructs a hook payload or spawns anything itself.
+    """
+
+    def on_tool_use(self, name: str, tool_input: Mapping[str, object], tool_output: str) -> None:
+        """Fire the ``PostToolUse`` hooks for one tool call the script just made."""
+        ...
+
+    def on_session_end(self, result: RunResult) -> None:
+        """Fire the ``SessionEnd`` hooks once, as this turn's process exits."""
         ...
 
 
@@ -201,6 +220,7 @@ class RunContext:
     ask_cmd: Sequence[str] | None = None
     result: RunResult | None = None
     transcript: ITranscriptWriter | None = None
+    hooks: IHookRunner | None = None
 
 
 _CURRENT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar("blizzard_mock_run_context", default=None)
@@ -489,6 +509,7 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
         "ask": helpers.ask,
         "apply_diff": helpers.apply_diff,
         "commit": helpers.commit,
+        "tool_call": helpers.tool_call,
         "verdict": helpers.verdict,
         "hang": helpers.hang,
         "crash": helpers.crash,
@@ -513,6 +534,7 @@ def run_prompt(
     env: Mapping[str, str] | None = None,
     out: IO[str] | None = None,
     transcript: ITranscriptWriter | None = None,
+    hooks: IHookRunner | None = None,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
@@ -534,8 +556,16 @@ def run_prompt(
     ``transcript``, when supplied (only the claude_code facade constructs one — a
     genuine Claude-shaped conversation is only useful where a reader exists), mints
     the user turn for this run and the assistant turn for its result; it is also
-    bound onto the run context so ``apply_diff``/``commit`` can mint matched tool
-    turns mid-script. ``None`` (every other facade) is a total no-op.
+    bound onto the run context, which the helper surface's tool calls write through
+    mid-script (the package README's "Conversation transcripts" owns that list).
+    ``None`` (every other facade) is a total no-op.
+
+    ``hooks``, when supplied (only the claude_code facade constructs one, from the
+    ``--settings`` document the runner hands it), executes the hook commands that
+    document declares. ``on_session_end`` fires once at the tail of this function,
+    after the wire render and before the return, so the hook completes while the
+    process is still alive. ``None`` (every other facade, and every direct caller)
+    is a total no-op.
     """
     import sys
 
@@ -593,6 +623,7 @@ def run_prompt(
         resume_message=message if is_resume else None,
         ask_cmd=_ask_cmd(env),
         transcript=transcript,
+        hooks=hooks,
     )
 
     if transcript is not None:
@@ -645,4 +676,11 @@ def run_prompt(
         transcript.record_result(result)
     stream.write(wire.render(result))
     stream.flush()
+    if hooks is not None:
+        # The tail, after the render: the hook subprocess runs to completion while
+        # this process is still alive, so a "declared done" signal is durable before
+        # the runner can observe the exit it is compared against. The exits that do
+        # *not* reach here carry meaning of their own — see the package README's
+        # "Hook execution".
+        hooks.on_session_end(result)
     return result.exit_code

@@ -80,28 +80,32 @@ harness binding.
 
 The engine/facade split is what lets a new harness be added without touching the
 engine: the engine owns *what* is emitted (a `RunResult`), a facade's
-`IHarnessWire` owns *how* it is rendered. A second, optional facade seam follows
+`IHarnessWire` owns *how* it is rendered. Two further optional facade seams follow
 the same shape: `ITranscriptWriter` owns *whether and how a conversation is
-recorded* — see "Conversation transcripts" below.
+recorded* — see "Conversation transcripts" below — and `IHookRunner` owns *whether
+and how a settings document's hook commands are executed* — see "Hook execution".
 
 - `engine.py` — the shared `exec()` engine, the fence, the `<behavior-script>`
-  split, and `run_prompt()`; owns the `RunResult`, the `IHarnessWire` and
-  `ITranscriptWriter` protocols facades implement, and the `RunContext` the
-  helpers read. Framework-free.
+  split, and `run_prompt()`; owns the `RunResult`, the `IHarnessWire`,
+  `ITranscriptWriter` and `IHookRunner` protocols facades implement, and the
+  `RunContext` the helpers read. Framework-free — it spawns nothing itself.
 - `session.py` — `SessionState` / `SessionStore`: the per-session JSON file
   (keyed by session id) that lets a resumed script read what it asked.
 - `helpers.py` — the terse helper library bound into every behavior script's
-  namespace (no import needed): `ask`, `apply_diff`, `commit`, `verdict`,
-  `hang`, `crash`, plus `state()` / `answer()` for reading session state. Raw
-  Python is available underneath for the weird cases. `apply_diff`/`commit` each
-  also mint a matched tool-call turn on the transcript, if one is wired.
+  namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
+  `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
+  state. Raw Python is available underneath for the weird cases. Its tool-call
+  helpers also drive the transcript and the hook seam — see "Conversation
+  transcripts" below.
 - `internal/` — real git plumbing (`git.py`) and stderr-routed structlog
   (`logging.py`); kept out of the framework-free core and the script surface.
 - `facades/` — one module per harness, each a thin CLI + wire over the engine:
   `claude_code.py`, `codex.py`, `opencode.py`. They share the engine and differ
   only in invocation shape / output format / exit + resume semantics.
   `facades/_transcript.py` is the claude_code-only `ITranscriptWriter`
-  implementation (below); `codex.py`/`opencode.py` never construct one.
+  implementation (below), and `facades/_hooks.py` the claude_code-only
+  `IHookRunner` one ("Hook execution" below); `codex.py`/`opencode.py` never
+  construct either.
 
 ## Conversation transcripts
 
@@ -114,10 +118,16 @@ run through the fleet produces a conversation the runner panel can open. This is
 
 - `engine.ITranscriptWriter` — the protocol, mirroring `IHarnessWire`:
   `record_user` (the spawn/resume turn), `record_result` (the final assistant
-  turn), and `record_tool_call` / `record_tool_result` (a matched pair, called by
-  `helpers.apply_diff` / `helpers.commit`). `engine.run_prompt` takes an optional
-  `transcript` parameter and calls into it at those points; `None` (every facade
-  but claude_code) is a total no-op.
+  turn), and `record_tool_call` / `record_tool_result`. `engine.run_prompt` takes
+  an optional `transcript` parameter and calls into it at those points; `None`
+  (every facade but claude_code) is a total no-op.
+- **The tool-call call sites — stated here and nowhere else.** Three helpers
+  mint a matched `tool_use`/`tool_result` pair: `apply_diff` (as `Edit`), `commit`
+  (as `Bash`), and `tool_call(name)`, which mints one and touches nothing else.
+  All three go through a single combined path in `helpers.py` that writes the
+  transcript pair **when a writer is wired** and fires the `PostToolUse` hooks
+  (`engine.IHookRunner`) **regardless** — the two seams are independent, so a run
+  with hooks and no transcript still fires.
 - `facades/_transcript.ClaudeTranscriptWriter` — the one implementation. Appends
   JSONL records to `<root>/mock-claude-code/<session_id>.jsonl`. The directory
   name is a fixed constant, not a mangled-cwd replica of real Claude Code's
@@ -152,6 +162,87 @@ run through the fleet produces a conversation the runner panel can open. This is
   envelope-less fallback. The figures are synthesized deterministically by output
   length in `facades/_usage.py` and are **illustrative, not a pricing table** —
   blizzard never derives cost from one; `total_cost_usd` is the harness's own number.
+
+## Hook execution
+
+Real Claude Code executes the hook commands declared in its `--settings`
+document, and the runner depends on two of them: a `PostToolUse` command that
+signals progress, and a `SessionEnd` command that signals "this process declared
+itself done". `mock-claude-code` executes them for real — the command runs as a
+subprocess and does whatever it does — so those signals travel their actual path
+instead of being synthesized by whoever wanted them. This is **claude_code-only**:
+it is the only facade the runner passes `--settings`, so `codex.py` and
+`opencode.py` never construct a runner and the engine no-ops for them.
+
+- `engine.IHookRunner` — the protocol, mirroring `ITranscriptWriter`:
+  `on_tool_use(name, tool_input, tool_output)` and `on_session_end(result)`.
+  `engine.run_prompt` takes an optional `hooks` parameter; `None` is a total
+  no-op. The engine constructs no payload and spawns nothing itself.
+- **The two lifecycle points.** `PostToolUse` fires from the tool-call helpers —
+  "Conversation transcripts" above owns that list — so a working mock worker
+  signals progress as a side effect of working, and `tool_call(name)` gives a
+  script a deterministic timeline with no git in it. `SessionEnd` fires once at
+  the tail of `run_prompt`, after the wire render.
+- **Why the tail.** The hook subprocess runs to completion while the mock process
+  is still alive, so a "declared done" signal is durable *before* an observer can
+  see the process exit. Firing and forgetting, or firing after exit, would make
+  those two orderings race — and telling them apart is the whole point of the
+  signal.
+- `facades/_hooks.SettingsHookRunner` — the one implementation. It reads
+  `hooks.PostToolUse[].hooks[]` and `hooks.SessionEnd[].hooks[]` from the settings
+  JSON (inner entries with `type: "command"`) and runs each command with
+  `shell=True` in the acquired worktree, **inheriting the spawn environment** —
+  which is the point, since it is how a hook command finds the identity its caller
+  injected. A Claude-Code-shaped JSON payload goes in on stdin:
+  `hook_event_name`, `session_id`, `cwd`, `transcript_path`, plus
+  `tool_name`/`tool_input`/`tool_response` on `PostToolUse` and `reason` on
+  `SessionEnd`. Output is **captured, never inherited** — a chatty hook writing to
+  the facade's own stdout would interleave with the `{"type":"result", …}` envelope
+  the adapter parses.
+- **Nothing a hook does can fail the turn.** A missing file, unparseable JSON, an
+  absent `hooks` key, a malformed entry, a nonzero exit, or a command that outruns
+  the per-hook timeout (60s, real Claude Code's default) is logged to the
+  stderr-routed structlog and ignored. The runner writes this document; a mock that
+  hard-failed on a bad one would turn a settings typo into a dead fleet.
+- **A missing hook binary degrades silently, by construction.** If the command
+  names a binary that is not on the child's `PATH`, the shell exits 127 and that
+  exit is swallowed like any other — the turn is green and no signal was sent.
+  Debugging "why did no hook fire", start there: the `hook command exited nonzero`
+  warning on stderr is the only trace it leaves.
+- **The three invocation shapes the runner makes, and what each expects.** Spawn
+  (`-p --output-format json --model … --session-id … --settings …`) fires. Resume
+  with a message (`-p --output-format json --resume … --settings …`) fires —
+  `--resume` inherits nothing from the original spawn, so the flag rides again, and
+  **each turn is its own process, so each fires its own `SessionEnd`**. The
+  synchronous verdict elicitation (`-p --output-format json --resume …`) carries
+  **no** `--settings`, deliberately: it must not record a done-signal for a turn
+  the worker did not finish. `--model` is accepted and ignored.
+- **Which exits fire no `SessionEnd`** — by class, not by list. The tail is skipped
+  when **no session ever started** (a fence refusal; a pre-session argument error)
+  and when **the process never reached its tail** (`crash(hard=True)`, which is
+  `os._exit`; `hang()`, which blocks until it is killed; and a script raising
+  `SystemExit`, which the engine's `except Exception` does not catch). The first
+  two of those are deliberate and meaningful: they leave exactly the
+  no-`SessionEnd` signal a `SIGKILL`ed real Claude Code leaves, which is the case
+  an observer needs to tell apart from a clean exit.
+- **`cwd` is fixed at construction and does not follow a script's repointing.** The
+  hook's working directory and the payload's `cwd` are the acquired worktree
+  resolved when the run started — matching real Claude Code, whose hooks also run
+  in the fixed session cwd. A fleet-tier script that repoints `ctx.cwd` at one repo
+  (see "Script helper API" for the convention and why) still fires its hooks in the
+  environment directory, not the repo it just committed in.
+- **`session_id` and `reason`.** `SessionEnd`'s `session_id` is the run's own, so
+  both resume shapes are right. `PostToolUse` reports the id the facade resolved
+  from `--session-id`/`--resume`; a bare direct invocation that supplies neither
+  (never how the runner drives this facade) reports `""`. `reason` is always
+  `"other"` — Claude Code's vocabulary is `clear`/`logout`/`prompt_input_exit`/
+  `other`, and only `other` describes a headless `-p` process exiting. Deriving it
+  from the run's outcome would emit values real Claude Code never sends; the
+  outcome already rides the wire envelope.
+- **Wired: `PostToolUse` and `SessionEnd`, nothing else.** No other event, and no
+  matchers or per-tool filters — the runner's document declares bare command hooks.
+  The payload's `hook_event_name` discriminates, so another event drops in later
+  without a payload redesign.
 
 ## The fence
 
@@ -189,6 +280,7 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 |--------|--------|
 | `apply_diff(diff)` | `git apply` a unified diff to the worktree (real files). |
 | `commit(message) -> sha` | Real `git commit -A`; returns the new sha. |
+| `tool_call(name, tool_input=None, output="ok")` | Record a tool call that does nothing else — the transcript pair and the `PostToolUse` fire, no git. For choreographing a deterministic tool timeline. |
 | `verdict(choice, assessment="")` | Emit `<Choice>{choice}</Choice>` + assessment as the turn's result. |
 | `ask(question, options=None)` | Record the ask, optionally shell out to `$BLIZZARD_RUNNER_ASK_CMD`, emit the tagged `<Ask …>` result, and **exit the turn**. |
 | `hang()` | Block forever (stall/heartbeat/REAP testing). |
@@ -202,10 +294,13 @@ Each facade registers a `[project.scripts]` binary:
 
 | Binary | Facade | Surface |
 |--------|--------|---------|
-| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
+| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
-legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit).
+legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit) and
+`tests/test_harness_hooks.py` (the hook seam: the lifecycle fire points, the
+exits that fire nothing, and real `--settings` hook execution against stub shell
+commands).

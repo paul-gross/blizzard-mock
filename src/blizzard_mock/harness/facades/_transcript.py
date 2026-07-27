@@ -10,9 +10,10 @@ everywhere else and the shared engine no-ops.
 
 Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`: the engine
 calls into it at two defined points (the spawn/resume user turn, the final
-assistant result) and never renders anything itself; ``apply_diff``/``commit``
-(``harness/helpers.py``) call ``record_tool_call``/``record_tool_result`` directly
-off the run context to mint a matched ``tool_use``/``tool_result`` pair.
+assistant result) and never renders anything itself; the ``harness/helpers.py``
+tool-call surface drives ``record_tool_call``/``record_tool_result`` off the run
+context in between — the package README's "Conversation transcripts" owns which
+helpers those are.
 
 Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
 for a human reading the file, even though the parser does not read them (it reads
@@ -87,6 +88,15 @@ class ClaudeTranscriptWriter:
         self._session_id = session_id
         self._cwd = cwd
         self._path = root / PROJECT_DIR_NAME / f"{session_id}.jsonl"
+
+    @property
+    def path(self) -> Path:
+        """The JSONL file this writer appends to.
+
+        Read by ``claude_code.main`` for the hook payload's ``transcript_path``, so
+        the composition below stays the one place the file's location is decided.
+        """
+        return self._path
 
     def record_user(self, text: str) -> None:
         self._append("user", {"role": "user", "content": text})
