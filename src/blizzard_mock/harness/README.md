@@ -14,18 +14,42 @@ environment. A test mints a workflow graph whose node prompts are behavior
 scripts, and the code rides the real pipeline (hub envelope → runner → adapter →
 spawn), including per-attempt variation via judgement `prompt_addendum` (D-071).
 
-**…but only the envelope half of it.** The runner spawns a worker at the winter
-**workspace root** and prepends a machine-local preamble — the operator's
-workspace prose plus a facts table naming the environments the chunk holds
-(blizzard issue #17, `design/harness-adapters.md`). That preamble is addressed to
-an agent's judgement, not to `exec`, and the cwd it arrives with is the
-workspace, not the worktree the node must touch. A real agent reads the prose and
-goes to its env; the mock does the analogous thing without an LLM:
-`engine.split_worker_preamble()` drops the preamble so only the script runs, and
-`engine.acquired_worktree()` reads the env's workdir off `BLIZZARD_ENV_WORKDIRS`
-(injected alongside the prompt) so the script still runs *in the acquired
-worktree*. Both no-op for a direct caller: a bare script with no preamble, and no
-`BLIZZARD_ENV_WORKDIRS`, runs in cwd as before.
+**…but say which part of it.** A `<behavior-script>…</behavior-script>` tag marks
+the program — the same tagged-text idiom the mock uses on the *output* side
+(`<Choice>`, `<Ask>`), turned around onto the input. Only the tagged blocks are
+`exec`'d, several concatenating in order; everything around them is prose the
+engine never runs, so a mock-targeted prompt can read like a real node prompt
+instead of being pure code. `engine.split_behavior_script()` owns the split and
+lives in the shared engine, so all three facades get it, on spawn and on resume
+alike. A tagged prompt does not consult the preamble split below at all.
+
+**A malformed tag fails the turn loudly.** An opening tag with no close, a close
+with no open, or a nested open ends the run as `error_during_execution` (exit 1)
+with a message naming the tag problem — never a silent fall-through to the legacy
+path, and never a no-op "text turn". Silent degradation is the failure mode
+designed out: a typo'd tag that quietly succeeds with no verdict and no side
+effects makes tests rot invisibly.
+
+The tag is orthogonal to the fence: it marks *which part* of a prompt is the
+program, while `assert_fenced` (below) decides whether the binary may execute
+anything at all. A tag in prompt content is never on its own sufficient to
+trigger execution.
+
+**Untagged, only the envelope half of it (legacy).** The runner spawns a worker at
+the winter **workspace root** and prepends a machine-local preamble — the
+operator's workspace prose plus a facts table naming the environments the chunk
+holds (blizzard issue #17, `design/harness-adapters.md`). That preamble is
+addressed to an agent's judgement, not to `exec`, and the cwd it arrives with is
+the workspace, not the worktree the node must touch. A real agent reads the prose
+and goes to its env; the mock does the analogous thing without an LLM:
+`engine.split_worker_preamble()` drops the preamble positionally — everything
+through the last row of the facts table — so only the script that follows runs,
+and `engine.acquired_worktree()` reads the env's workdir off
+`BLIZZARD_ENV_WORKDIRS` (injected alongside the prompt) so the script still runs
+*in the acquired worktree*. This path is the **fallback for a prompt carrying no
+`<behavior-script>` block**, and it is unchanged: every pre-tag behavior script
+keeps working. Both no-op for a direct caller: a bare script with no preamble, and
+no `BLIZZARD_ENV_WORKDIRS`, runs in cwd as before.
 
 A script can do anything an agent can: apply a diff and `git commit` (**real
 commits** — everything downstream of the harness seam runs for real), fire the
@@ -46,9 +70,10 @@ engine: the engine owns *what* is emitted (a `RunResult`), a facade's
 the same shape: `ITranscriptWriter` owns *whether and how a conversation is
 recorded* — see "Conversation transcripts" below.
 
-- `engine.py` — the shared `exec()` engine, the fence, and `run_prompt()`; owns
-  the `RunResult`, the `IHarnessWire` and `ITranscriptWriter` protocols facades
-  implement, and the `RunContext` the helpers read. Framework-free.
+- `engine.py` — the shared `exec()` engine, the fence, the `<behavior-script>`
+  split, and `run_prompt()`; owns the `RunResult`, the `IHarnessWire` and
+  `ITranscriptWriter` protocols facades implement, and the `RunContext` the
+  helpers read. Framework-free.
 - `session.py` — `SessionState` / `SessionStore`: the per-session JSON file
   (keyed by session id) that lets a resumed script read what it asked.
 - `helpers.py` — the terse helper library bound into every behavior script's
@@ -101,8 +126,10 @@ run through the fleet produces a conversation the runner panel can open. This is
   need: no `uuid`/`parentUuid` DAG, no `isSidechain` subagent sidecars, no
   `<persisted-output>` offload wrapper, no byte-exact ANSI fidelity. The user
   turn's text is never the raw exec'd Python — that would misrepresent code as
-  "what the user said" — it is the real preamble prose when the spawn carried
-  one (`split_worker_preamble`), else a short synthetic line.
+  "what the user said" — it is a tagged prompt's own prose with its
+  `<behavior-script>` blocks elided, else the real preamble prose when an
+  untagged spawn carried one (`split_worker_preamble`), else a short synthetic
+  line.
 - Every **assistant** record carries `message.model` + `message.usage` (tokens by
   class), and the final result envelope additionally carries top-level `usage` +
   `total_cost_usd` — the same fields the real harness reports, so the runner's
@@ -130,7 +157,8 @@ directory beside the marker, overridable via `BLIZZARD_MOCK_HARNESS_STATE_DIR`.
 
 ## Script helper API
 
-A behavior-script is Python; these names are pre-bound in its namespace:
+A behavior-script is Python — inside a `<behavior-script>` block, or the whole
+untagged prompt past the preamble. These names are pre-bound in its namespace:
 
 `apply_diff`/`commit` act on `current_context().cwd`, which `run_prompt` sets
 to `engine.acquired_worktree()` — the **environment's** directory, not any
@@ -165,4 +193,5 @@ Each facade registers a `[project.scripts]` binary:
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
-state, crash, hang, and the Claude Code JSON envelope + fence-refusal exit).
+state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
+legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit).

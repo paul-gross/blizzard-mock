@@ -13,9 +13,12 @@ Responsibilities owned here:
   engine refuses to run unless test scaffolding marks the environment (a
   :data:`FENCE_ENV_VAR` env var *and* a :data:`FENCE_MARKER_FILENAME` marker file
   in the worktree tree). It can never pass as a real harness binding.
-- **The exec.** Treat the prompt (or, on resume, the resume message) as Python
-  source and :func:`exec` it in the worktree with the
-  :mod:`blizzard_mock.harness.helpers` surface bound as globals.
+- **The exec.** Treat the prompt's behavior script (or, on resume, the resume
+  message's) as Python source and :func:`exec` it in the worktree with the
+  :mod:`blizzard_mock.harness.helpers` surface bound as globals. Which part of the
+  prompt *is* the program is said explicitly by a ``<behavior-script>`` tag
+  (:func:`split_behavior_script`); an untagged prompt falls back to the positional
+  :func:`split_worker_preamble` and execs everything after the preamble.
 - **Session state.** Persist a per-session file so a resumed script can read what
   it asked and act on the answer it was resumed with.
 
@@ -28,6 +31,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import os
+import re
 import time
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
@@ -63,6 +67,15 @@ ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
 #: :func:`split_worker_preamble`.
 PREAMBLE_TABLE_HEADER = "| Field | Value |"
 
+#: Delimiters that say outright which part of a prompt is the program — the same
+#: tagged-text idiom the wire already uses on the *output* side (:data:`CHOICE_OPEN`,
+#: ``<Ask>``), turned around onto the input. A prompt carrying them is exec'd from its
+#: tagged blocks alone and everything outside them is prose the engine never runs; an
+#: untagged prompt keeps the positional :func:`split_worker_preamble` behavior. See
+#: :func:`split_behavior_script`.
+BEHAVIOR_SCRIPT_OPEN = "<behavior-script>"
+BEHAVIOR_SCRIPT_CLOSE = "</behavior-script>"
+
 #: Structured markers the facade wire embeds so a dumb adapter can parse the two
 #: reply shapes out of the harness-native output (mirrors Claude Code's tagged
 #: text; see ``design/harness-adapters.md``'s ``<Choice>{name}</Choice>``).
@@ -83,6 +96,17 @@ class FenceError(RuntimeError):
 
 class HarnessCrash(RuntimeError):
     """A behavior script called ``crash()`` — the worker died without a verdict."""
+
+
+class BehaviorScriptTagError(ValueError):
+    """A prompt's ``<behavior-script>`` tags are unbalanced or nested.
+
+    Raised out of :func:`split_behavior_script` and re-raised inside the run so the
+    turn ends as an ``error_during_execution``. Silent degradation is the failure
+    mode designed out here: a typo'd tag must never fall back to the legacy
+    exec-everything path or quietly succeed as a no-op turn, because a script that
+    stops running while its tests keep passing rots them invisibly.
+    """
 
 
 class _AskExit(Exception):
@@ -255,8 +279,83 @@ def fenced_env(base: Mapping[str, str] | None = None, **extra: str) -> dict[str,
 # --------------------------------------------------------------------------- #
 
 
+@dataclass(frozen=True)
+class TaggedPrompt:
+    """A tagged prompt's two halves: the program, and the prose around it.
+
+    ``script`` is every ``<behavior-script>`` block's contents concatenated in order;
+    ``prose`` is the rest of the prompt with the blocks (and their tags) elided — real
+    prose a transcript can show as "what the user said", where an untagged prompt has
+    only its preamble or a synthetic placeholder.
+    """
+
+    script: str
+    prose: str
+
+
+def split_behavior_script(prompt: str) -> TaggedPrompt | None:
+    """Split a ``<behavior-script>``-tagged prompt into its program and its prose.
+
+    The tag says *this part is the program*: only the tagged blocks reach the
+    interpreter, and everything around them is prose the engine treats as data. That
+    decouples the mock from the exact shape of the runner's spawn preamble — a
+    tagged prompt does not consult :func:`split_worker_preamble` at all — and lets a
+    mock-targeted prompt read like a real node prompt instead of being pure code.
+
+    Returns ``None`` when the prompt carries neither tag, which is the caller's
+    signal to fall back to the legacy positional split. Raises
+    :class:`BehaviorScriptTagError` when the tags are unbalanced or nested — never a
+    silent fall-through to legacy exec, because a typo'd tag that quietly succeeds
+    with no verdict and no side effects makes tests rot invisibly.
+
+    The tag is orthogonal to the fence: it marks *which part* of a prompt is the
+    program, while :func:`assert_fenced` decides whether anything may run at all. A
+    tag in prompt content is never on its own sufficient to trigger execution.
+    """
+    if BEHAVIOR_SCRIPT_OPEN not in prompt and BEHAVIOR_SCRIPT_CLOSE not in prompt:
+        return None
+
+    unmatched_close = (
+        f"unbalanced behavior-script tags: a {BEHAVIOR_SCRIPT_CLOSE} with no opening {BEHAVIOR_SCRIPT_OPEN}"
+    )
+    blocks: list[str] = []
+    prose: list[str] = []
+    pos = 0
+    while True:
+        open_at = prompt.find(BEHAVIOR_SCRIPT_OPEN, pos)
+        close_at = prompt.find(BEHAVIOR_SCRIPT_CLOSE, pos)
+        if open_at == -1:
+            if close_at != -1:
+                raise BehaviorScriptTagError(unmatched_close)
+            prose.append(prompt[pos:])
+            break
+        if close_at != -1 and close_at < open_at:
+            raise BehaviorScriptTagError(unmatched_close)
+        body_at = open_at + len(BEHAVIOR_SCRIPT_OPEN)
+        close_at = prompt.find(BEHAVIOR_SCRIPT_CLOSE, body_at)
+        if close_at == -1:
+            raise BehaviorScriptTagError(
+                f"unbalanced behavior-script tags: a {BEHAVIOR_SCRIPT_OPEN} with no closing {BEHAVIOR_SCRIPT_CLOSE}"
+            )
+        body = prompt[body_at:close_at]
+        if BEHAVIOR_SCRIPT_OPEN in body:
+            raise BehaviorScriptTagError(
+                f"malformed behavior-script tags: a nested {BEHAVIOR_SCRIPT_OPEN} inside a block — blocks do not nest"
+            )
+        blocks.append(body.strip("\n"))
+        prose.append(prompt[pos:open_at])
+        pos = close_at + len(BEHAVIOR_SCRIPT_CLOSE)
+
+    # Blocks join on a newline so two of them never fuse into one line; the prose
+    # keeps its own shape, minus the gaps the elided blocks left behind.
+    return TaggedPrompt(script="\n".join(blocks), prose=re.sub(r"\n{3,}", "\n\n", "".join(prose)).strip())
+
+
 def split_worker_preamble(prompt: str) -> tuple[str, str]:
     """Split a spawn prompt into ``(preamble, behavior_script)``.
+
+    The **legacy, untagged** discrimination: positional, and consulted only for a prompt
+    with no ``<behavior-script>`` tag (:func:`split_behavior_script`, which supersedes it).
 
     The prompt is the program — but only the *envelope* half of it. The runner prepends a
     machine-local preamble to every spawn: the operator's workspace prose, then a facts
@@ -387,6 +486,11 @@ def run_prompt(
     resume message — which *also arrives as code* and is what gets executed,
     with the persisted session state (prior asks) available to it.
 
+    Spawn and resume read the prompt the same way: a ``<behavior-script>``-tagged
+    prompt execs its blocks alone (:func:`split_behavior_script`), an untagged one
+    execs everything past the preamble (:func:`split_worker_preamble`), and a
+    malformed tag fails the turn as an ``error_during_execution``.
+
     Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
     :class:`RunResult` through ``wire`` to ``out`` exactly once (a ``hang`` never
     reaches that line; a ``crash`` renders an error result).
@@ -433,24 +537,43 @@ def run_prompt(
         transcript=transcript,
     )
 
-    # The runner's preamble rides ahead of the envelope on a spawn; it is prose for an
-    # agent to read, not code to run, so only the script half reaches the interpreter.
-    preamble, script = split_worker_preamble(prompt)
+    # Which part of the prompt is the program? A `<behavior-script>` tag says so
+    # outright; without one, the runner's preamble still rides ahead of the envelope on
+    # a spawn — prose for an agent to read, not code to run — so the positional split
+    # decides. A malformed tag is neither: it is carried into the run below and raised
+    # there, so the turn fails loudly instead of degrading to either quiet path.
+    tag_error: BehaviorScriptTagError | None = None
+    tagged: TaggedPrompt | None = None
+    try:
+        tagged = split_behavior_script(prompt)
+    except BehaviorScriptTagError as exc:
+        tag_error = exc
+
+    preamble, script = "", ""
+    if tagged is not None:
+        script = tagged.script
+    elif tag_error is None:
+        preamble, script = split_worker_preamble(prompt)
     if transcript is not None:
-        # Never the raw script (it would misrepresent code as "what the user said");
-        # the real preamble prose when present, else a short synthetic line.
-        user_text = preamble if preamble else (_TRANSCRIPT_RESUME_TEXT if is_resume else _TRANSCRIPT_SPAWN_TEXT)
+        # Never the raw script (it would misrepresent code as "what the user said"):
+        # the tagged prompt's own prose, else the real preamble prose, else a short
+        # synthetic line.
+        prose = tagged.prose if tagged is not None else preamble
+        user_text = prose if prose else (_TRANSCRIPT_RESUME_TEXT if is_resume else _TRANSCRIPT_SPAWN_TEXT)
         transcript.record_user(user_text)
     _log.info(
         "mock harness run",
         session_id=session_id,
         resume=is_resume,
         cwd=str(cwd),
+        tagged=tagged is not None,
         preamble_stripped=bool(preamble),
     )
     token = _CURRENT.set(ctx)
     started = time.monotonic()
     try:
+        if tag_error is not None:
+            raise tag_error  # a bad tag fails the turn as an error run, never silently
         with _chdir(cwd):
             exec(compile(script, "<behavior-script>", "exec"), _script_globals(ctx))
         result = ctx.result or RunResult(session_id=session_id, subtype="success")

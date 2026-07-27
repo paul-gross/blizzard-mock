@@ -477,6 +477,156 @@ def test_preamble_prefixed_prompt_still_runs_its_script(fenced_repo) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The <behavior-script> tag (blizzard-mock issue #2)
+# --------------------------------------------------------------------------- #
+
+#: Prose that is a SyntaxError if it ever reaches the interpreter — every tagged-prompt
+#: test wraps its script in some, so "only the block ran" is proven by the turn not dying.
+_PROSE = "You are a fleet worker. Do the work item's thing, then declare a verdict.\n"
+
+
+def _tagged(*scripts: str, prose: str = _PROSE) -> str:
+    """A prompt with ``prose`` around each script in its own ``<behavior-script>`` block."""
+    parts = [prose]
+    for script in scripts:
+        parts.append(f"{engine.BEHAVIOR_SCRIPT_OPEN}\n{script}\n{engine.BEHAVIOR_SCRIPT_CLOSE}\n")
+        parts.append(prose)
+    return "\n".join(parts)
+
+
+def test_split_behavior_script_returns_none_for_an_untagged_prompt() -> None:
+    # The caller's signal to fall back to the legacy positional split.
+    assert engine.split_behavior_script("verdict('pass')\n") is None
+
+
+def test_split_behavior_script_separates_the_program_from_the_prose() -> None:
+    tagged = engine.split_behavior_script(_tagged("verdict('pass')"))
+
+    assert tagged is not None
+    assert tagged.script == "verdict('pass')"
+    assert engine.BEHAVIOR_SCRIPT_OPEN not in tagged.prose
+    assert "You are a fleet worker." in tagged.prose
+
+
+def test_tagged_prompt_execs_only_the_block(fenced_repo) -> None:
+    code, result = _run(_tagged("verdict('pass', 'ran')"), fenced_repo)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
+
+
+def test_multiple_blocks_are_concatenated_in_order(fenced_repo) -> None:
+    prompt = _tagged("marks = ['first']", "marks.append('second')", "verdict('pass', ','.join(marks))")
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 0
+    assert "first,second" in (result.text or "")
+
+
+def test_tagged_prompt_does_not_consult_the_preamble_split(fenced_repo) -> None:
+    """A tagged prompt's prose may sit *after* the facts table — the positional split
+    would feed that prose to the interpreter, the tag never does."""
+    cwd, _ = fenced_repo
+    prompt = (
+        f"| Field | Value |\n|-------|-------|\n| environment workdir | `{cwd}` |\n\n"
+        f"{_PROSE}\n{engine.BEHAVIOR_SCRIPT_OPEN}\nverdict('pass')\n{engine.BEHAVIOR_SCRIPT_CLOSE}\n"
+    )
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 0
+    assert result.subtype == "success"
+
+
+def test_a_tagged_block_still_runs_in_the_acquired_worktree(fenced_repo) -> None:
+    cwd, _ = fenced_repo
+    code, _ = _run(_tagged("import pathlib; pathlib.Path('tagged.txt').write_text('x')"), fenced_repo)
+
+    assert code == 0
+    assert (cwd / "tagged.txt").read_text() == "x"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        (f"{_PROSE}{engine.BEHAVIOR_SCRIPT_OPEN}\nverdict('pass')\n", "no closing"),
+        (f"{_PROSE}verdict('pass')\n{engine.BEHAVIOR_SCRIPT_CLOSE}\n", "no opening"),
+        (
+            f"{engine.BEHAVIOR_SCRIPT_OPEN}\nverdict('pass')\n"
+            f"{engine.BEHAVIOR_SCRIPT_OPEN}\nverdict('pass')\n{engine.BEHAVIOR_SCRIPT_CLOSE}\n",
+            "nested",
+        ),
+    ],
+    ids=["unclosed", "stray-close", "nested"],
+)
+def test_a_malformed_tag_fails_the_turn_loudly(prompt: str, expected: str, fenced_repo) -> None:
+    """Never a silent fall-through to legacy exec or a no-op turn: a typo'd tag that
+    quietly succeeds with no verdict and no side effects makes tests rot invisibly."""
+    with pytest.raises(engine.BehaviorScriptTagError):
+        engine.split_behavior_script(prompt)
+
+    code, result = _run(prompt, fenced_repo)
+
+    assert code == 1
+    assert result.is_error
+    assert result.subtype == "error_during_execution"
+    assert engine.BEHAVIOR_SCRIPT_OPEN in result.text  # names the tag problem
+    assert expected in result.text
+
+
+def test_a_tagged_resume_message_execs_its_block(fenced_repo) -> None:
+    _run(_tagged("ask('proceed?', ['yes', 'no'])"), fenced_repo, session_id="sess-tagged-resume")
+
+    code, result = _run(
+        _tagged("verdict('pass', answer() and 'resumed')"),
+        fenced_repo,
+        session_id="sess-tagged-resume",
+        is_resume=True,
+    )
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert "resumed" in (result.text or "")
+
+
+def test_an_untagged_resume_message_still_execs_in_full(fenced_repo) -> None:
+    _run("ask('proceed?')", fenced_repo, session_id="sess-untagged-resume")
+
+    code, result = _run("verdict('pass', 'legacy')", fenced_repo, session_id="sess-untagged-resume", is_resume=True)
+
+    assert code == 0
+    assert "legacy" in (result.text or "")
+
+
+def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_repo) -> None:
+    """Genuine prose with the script blocks elided, replacing the synthetic placeholder."""
+    recorded: list[str] = []
+
+    class _Transcript:
+        def record_user(self, text: str) -> None:
+            recorded.append(text)
+
+        def record_result(self, result: engine.RunResult) -> None: ...
+
+        def record_tool_call(self, name: str, tool_input: dict) -> str:
+            return "toolu_x"
+
+        def record_tool_result(self, tool_use_id: str, output: str) -> None: ...
+
+    code, _ = _run(_tagged("verdict('pass')"), fenced_repo, transcript=_Transcript())
+
+    assert code == 0
+    assert len(recorded) == 1
+    assert "You are a fleet worker." in recorded[0]
+    assert "verdict(" not in recorded[0]
+    assert engine.BEHAVIOR_SCRIPT_OPEN not in recorded[0]
+    assert engine.BEHAVIOR_SCRIPT_CLOSE not in recorded[0]
+    assert "is not shown here" not in recorded[0]  # not the synthetic placeholder
+
+
+# --------------------------------------------------------------------------- #
 # The acquired worktree (blizzard issue #17: cwd is the workspace root)
 # --------------------------------------------------------------------------- #
 
