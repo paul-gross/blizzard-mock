@@ -15,10 +15,12 @@ also owns :func:`run_out_of_process`, a driver that binds the **engine** directl
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -26,6 +28,7 @@ import pytest
 
 from blizzard_mock.harness import engine, helpers
 from blizzard_mock.harness.engine import FenceError, RunResult
+from blizzard_mock.harness.facades._hooks import build_hook_runner
 from blizzard_mock.harness.facades._text import PlainTextWire
 from blizzard_mock.harness.session import SessionState, SessionStore
 
@@ -350,3 +353,306 @@ def test_tool_call_is_bound_into_the_script_namespace(tmp_path: Path) -> None:
     )
     ns = engine._script_globals(ctx)
     assert ns["tool_call"] is helpers.tool_call
+
+
+# --------------------------------------------------------------------------- #
+# `--settings` hook execution: the real subprocess path
+#
+# Deliberately blizzard-free — every command below is a stub shell command, and
+# nothing here imports or assumes `blizzard`. The mock runs whatever string the
+# document names; which string a deployment writes is the runner's business.
+# --------------------------------------------------------------------------- #
+
+
+def settings_document(*, post_tool_use: str | None = None, session_end: str | None = None) -> dict[str, object]:
+    """A settings document with the **real producer's** nesting, verbatim.
+
+    Mirrors `blizzard`'s ``worker_settings_document()`` —
+    ``hooks.<Event>[].hooks[{type, command}]``. These tests cannot import it (they
+    stay blizzard-free), so this shape is the only thing tying the parser under
+    test to the one document it exists to read: a fixture that drifted to something
+    flatter would leave every criterion here green while the real document parsed
+    to zero commands.
+    """
+    hooks: dict[str, object] = {}
+    if post_tool_use is not None:
+        hooks["PostToolUse"] = [{"hooks": [{"type": "command", "command": post_tool_use}]}]
+    if session_end is not None:
+        hooks["SessionEnd"] = [{"hooks": [{"type": "command", "command": session_end}]}]
+    return {"hooks": hooks}
+
+
+def write_settings(path: Path, **kw: str | None) -> Path:
+    path.write_text(json.dumps(settings_document(**kw), indent=2) + "\n")
+    return path
+
+
+@pytest.fixture
+def scratch(tmp_path: Path) -> Path:
+    """A directory beside the fenced worktree, never inside it — hook stubs write
+    here, so a script's ``git add -A`` cannot sweep their output into a commit."""
+    directory = tmp_path.parent / f"{tmp_path.name}-scratch"
+    directory.mkdir(exist_ok=True)
+    return directory
+
+
+def _claude(argv: list[str], *, cwd: Path, env: Mapping[str, str]) -> subprocess.CompletedProcess[str]:
+    """Drive the real ``mock-claude-code`` binary as a subprocess."""
+    return subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", *argv],
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _lines(path: Path) -> list[str]:
+    return [line for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+
+
+def test_post_tool_use_runs_once_per_tool_call(fenced_repo, scratch: Path) -> None:
+    """One beat per ``apply_diff`` / ``commit`` / ``tool_call`` in the script."""
+    cwd, env = fenced_repo
+    beats = scratch / "beats.log"
+    settings = write_settings(scratch / "settings.json", post_tool_use=f"sh -c 'echo beat >> {beats}'")
+
+    script = f"apply_diff({_DIFF!r})\ncommit('feat: add new.txt')\ntool_call('Read')\nverdict('approve')"
+    proc = _claude(["-p", "--session-id", "sess-beats", "--settings", str(settings), script], cwd=cwd, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert _lines(beats) == ["beat", "beat", "beat"]
+
+
+def test_the_post_tool_use_payload_and_environment_reach_the_command(fenced_repo, scratch: Path) -> None:
+    """The stdin payload in full, the inherited spawn environment, and a
+    ``transcript_path`` that is the file the transcript writer actually wrote."""
+    cwd, env = fenced_repo
+    transcripts = scratch / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts), "HOOK_CANARY": "canary-value"}
+
+    payload_file = scratch / "payload.json"
+    canary_file = scratch / "canary.txt"
+    settings = write_settings(
+        scratch / "settings.json",
+        post_tool_use=f"sh -c 'cat > {payload_file}; printenv HOOK_CANARY > {canary_file}'",
+    )
+
+    script = "tool_call('Read', {'file_path': '/tmp/x'}, 'file contents')\nverdict('approve')"
+    proc = _claude(["-p", "--session-id", "sess-payload", "--settings", str(settings), script], cwd=cwd, env=env)
+    assert proc.returncode == 0, proc.stderr
+
+    payload = json.loads(payload_file.read_text())
+    assert payload["hook_event_name"] == "PostToolUse"
+    assert payload["session_id"] == "sess-payload"
+    assert payload["cwd"] == str(cwd)
+    assert payload["tool_name"] == "Read"
+    assert payload["tool_input"] == {"file_path": "/tmp/x"}
+    assert payload["tool_response"] == "file contents"
+
+    # The environment the mock was spawned with, inherited into the hook child.
+    assert canary_file.read_text().strip() == "canary-value"
+
+    # A truthful transcript_path: the file the writer minted for this session.
+    minted = list(transcripts.glob("*/sess-payload.jsonl"))
+    assert len(minted) == 1
+    assert Path(payload["transcript_path"]) == minted[0]
+
+
+@pytest.mark.parametrize(
+    "script",
+    ["verdict('approve')", "pass", "ask('which way?')", "raise ValueError('boom')", "crash()"],
+    ids=["verdict", "plain", "ask-park", "raised-exception", "soft-crash"],
+)
+def test_session_end_runs_exactly_once_on_each_soft_exit(fenced_repo, scratch: Path, script: str) -> None:
+    cwd, env = fenced_repo
+    ends = scratch / "ends.log"
+    settings = write_settings(scratch / "settings.json", session_end=f"sh -c 'cat >> {ends}; echo >> {ends}'")
+
+    _claude(["-p", "--session-id", "sess-end", "--settings", str(settings), script], cwd=cwd, env=env)
+
+    payloads = [json.loads(line) for line in _lines(ends)]
+    assert len(payloads) == 1
+    assert payloads[0]["hook_event_name"] == "SessionEnd"
+    assert payloads[0]["reason"] == "other"
+    assert payloads[0]["session_id"] == "sess-end"
+
+
+def test_session_end_does_not_run_on_a_hard_crash(fenced_repo, scratch: Path) -> None:
+    """``crash(hard=True)`` is ``os._exit`` — driven here as a real subprocess
+    through the facade, the shape the runner actually spawns."""
+    cwd, env = fenced_repo
+    ends = scratch / "ends.log"
+    settings = write_settings(scratch / "settings.json", session_end=f"sh -c 'echo end >> {ends}'")
+
+    proc = _claude(
+        ["-p", "--session-id", "sess-hard", "--settings", str(settings), "crash(hard=True)"], cwd=cwd, env=env
+    )
+
+    assert proc.returncode == 137
+    assert _lines(ends) == []
+
+
+def test_a_failing_hook_does_not_change_the_turn(fenced_repo, scratch: Path) -> None:
+    """A nonzero exit is logged and ignored: same exit code, same wire output."""
+    cwd, env = fenced_repo
+    settings = write_settings(scratch / "settings.json", post_tool_use="sh -c 'exit 3'", session_end="sh -c 'exit 4'")
+
+    argv = ["-p", "--output-format", "json", "--session-id", "sess-fail", "--settings", str(settings)]
+    proc = _claude([*argv, "tool_call('Read')\nverdict('approve', 'looks good')"], cwd=cwd, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["subtype"] == "success"
+    assert "<Choice>approve</Choice>" in envelope["result"]
+
+
+def test_a_wedged_hook_is_abandoned_at_the_timeout(fenced_repo, scratch: Path) -> None:
+    """A command that outruns its budget is killed and the turn still completes.
+
+    The runner is constructed directly so the timeout can be sub-second — the
+    facade has no flag for it, and 60s is real Claude Code's default.
+    """
+    cwd, env = fenced_repo
+    settings = write_settings(scratch / "settings.json", session_end="sleep 30")
+    hooks = build_hook_runner(str(settings), cwd=cwd, env=env, session_id="sess-timeout", timeout=0.4)
+    assert hooks is not None
+
+    started = time.monotonic()
+    code, result = _run("verdict('approve')", fenced_repo, hooks=hooks)
+    elapsed = time.monotonic() - started
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert elapsed < 10.0, "the wedged hook was not abandoned"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [None, "{not json", "{}", '{"hooks": {}}', '{"hooks": {"PostToolUse": []}}'],
+    ids=["missing-file", "unparseable", "empty-object", "no-events", "no-commands"],
+)
+def test_an_unusable_settings_document_degrades_to_no_hooks(fenced_repo, scratch: Path, content: str | None) -> None:
+    cwd, env = fenced_repo
+    settings = scratch / "settings.json"
+    if content is not None:
+        settings.write_text(content)
+
+    assert build_hook_runner(str(settings), cwd=cwd, env=env, session_id="s") is None
+
+    # …and the same path through the real binary is an ordinary, quiet success.
+    proc = _claude(
+        ["-p", "--session-id", "sess-degrade", "--settings", str(settings), "verdict('approve')"], cwd=cwd, env=env
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_no_settings_flag_builds_no_runner(fenced_repo) -> None:
+    """The ``judge`` invocation's deliberate omission, at the seam."""
+    cwd, env = fenced_repo
+    assert build_hook_runner(None, cwd=cwd, env=env, session_id="s") is None
+
+
+def test_hook_output_never_reaches_the_rendered_envelope(fenced_repo, scratch: Path) -> None:
+    """A chatty hook must not interleave with the JSON envelope the adapter parses."""
+    cwd, env = fenced_repo
+    chatty = "sh -c 'echo CHATTY-STDOUT; echo CHATTY-STDERR >&2'"
+    settings = write_settings(scratch / "settings.json", post_tool_use=chatty, session_end=chatty)
+
+    argv = ["-p", "--output-format", "json", "--session-id", "sess-chatty", "--settings", str(settings)]
+    proc = _claude([*argv, "tool_call('Read')\nverdict('approve')"], cwd=cwd, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "CHATTY" not in proc.stdout
+    envelope = json.loads(proc.stdout)
+    assert envelope["type"] == "result"
+
+
+@pytest.mark.parametrize(
+    ("module", "argv"),
+    [
+        ("blizzard_mock.harness.facades.codex", ["exec"]),
+        ("blizzard_mock.harness.facades.opencode", ["run"]),
+    ],
+    ids=["codex", "opencode"],
+)
+def test_the_other_facades_construct_no_hook_runner(fenced_repo, scratch: Path, module: str, argv: list[str]) -> None:
+    """Neither accepts ``--settings`` nor builds a runner, so nothing can fire."""
+    cwd, env = fenced_repo
+    beats = scratch / "beats.log"
+    write_settings(scratch / "settings.json", post_tool_use=f"sh -c 'echo beat >> {beats}'")
+
+    proc = subprocess.run(
+        [sys.executable, "-m", module, *argv, "tool_call('Read')\nverdict('approve')"],
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert _lines(beats) == []
+
+
+def test_a_resume_with_settings_fires_for_its_own_turn(fenced_repo, scratch: Path) -> None:
+    """``--resume`` inherits nothing from the spawn, so the flag rides again — and
+    each turn is its own process, so each fires its own ``SessionEnd``."""
+    cwd, env = fenced_repo
+    beats = scratch / "beats.log"
+    ends = scratch / "ends.log"
+    settings = write_settings(
+        scratch / "settings.json",
+        post_tool_use=f"sh -c 'echo beat >> {beats}'",
+        session_end=f"sh -c 'cat >> {ends}; echo >> {ends}'",
+    )
+
+    spawn = _claude(
+        ["-p", "--session-id", "sess-resume", "--settings", str(settings), "tool_call('Read')"], cwd=cwd, env=env
+    )
+    assert spawn.returncode == 0, spawn.stderr
+
+    resume_script = "tool_call('Read')\ntool_call('Grep')\nverdict('approve')"
+    resumed = _claude(["-p", "--resume", "sess-resume", "--settings", str(settings), resume_script], cwd=cwd, env=env)
+    assert resumed.returncode == 0, resumed.stderr
+
+    assert _lines(beats) == ["beat"] * 3  # one on spawn, two on the resumed turn
+    payloads = [json.loads(line) for line in _lines(ends)]
+    assert len(payloads) == 2  # one per process, not one per session
+    assert [p["session_id"] for p in payloads] == ["sess-resume", "sess-resume"]
+
+
+def test_a_resume_without_settings_fires_nothing(fenced_repo, scratch: Path) -> None:
+    """The ``judge`` shape: the session was spawned *with* settings, but this turn
+    carries none, so no ``SessionEnd`` can record a done-signal for a synchronous
+    verdict elicitation."""
+    cwd, env = fenced_repo
+    beats = scratch / "beats.log"
+    ends = scratch / "ends.log"
+    settings = write_settings(
+        scratch / "settings.json",
+        post_tool_use=f"sh -c 'echo beat >> {beats}'",
+        session_end=f"sh -c 'echo end >> {ends}'",
+    )
+
+    spawn = _claude(["-p", "--session-id", "sess-judge", "--settings", str(settings), "pass"], cwd=cwd, env=env)
+    assert spawn.returncode == 0, spawn.stderr
+    assert _lines(ends) == ["end"]
+
+    judge = _claude(["-p", "--resume", "sess-judge", "tool_call('Read')\nverdict('approve')"], cwd=cwd, env=env)
+    assert judge.returncode == 0, judge.stderr
+
+    assert _lines(beats) == []
+    assert _lines(ends) == ["end"]  # unchanged by the judge turn
+
+
+def test_the_usage_text_names_tool_call_and_the_settings_flag(capsys) -> None:
+    """What a bare ``mock-claude-code`` prints is the most visible enumeration in
+    the package; it goes stale by one every time the bound surface grows."""
+    from blizzard_mock.harness.facades import claude_code
+
+    with pytest.raises(SystemExit) as exc:
+        claude_code.main([])
+    assert exc.value.code == 0
+
+    printed = capsys.readouterr().out
+    assert "tool_call" in printed
+    assert "--settings <path>" in printed

@@ -89,6 +89,15 @@ class ClaudeTranscriptWriter:
         self._cwd = cwd
         self._path = root / PROJECT_DIR_NAME / f"{session_id}.jsonl"
 
+    @property
+    def path(self) -> Path:
+        """The JSONL file this writer appends to.
+
+        Read by ``claude_code.main`` for the hook payload's ``transcript_path``, so
+        the composition below stays the one place the file's location is decided.
+        """
+        return self._path
+
     def record_user(self, text: str) -> None:
         self._append("user", {"role": "user", "content": text})
 

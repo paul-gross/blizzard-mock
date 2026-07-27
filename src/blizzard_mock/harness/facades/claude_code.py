@@ -15,8 +15,9 @@ Surface mimicked (``design/harness-adapters.md``):
   resume message arrives as code, executed with the prior session state visible.
 - ``--output-format json`` emits the single ``{"type":"result", …}`` envelope the
   adapter's ``verdict`` parses (``<Choice>{name}</Choice>`` rides ``result``).
-- ``--settings <path>`` (the runner-owned worker hook file) is accepted and
-  ignored — the mock has no hooks to load.
+- ``--settings <path>`` (the runner-owned worker hook file) is read, and the
+  ``PostToolUse`` / ``SessionEnd`` commands it declares are executed as real
+  subprocesses — see the package README's "Hook execution".
 - ``--model <name>`` (the pinned worker model) is accepted and ignored — the mock
   is model-agnostic.
 
@@ -30,10 +31,12 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from blizzard_mock.harness.engine import RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
+from blizzard_mock.harness.facades._hooks import build_hook_runner
 from blizzard_mock.harness.facades._text import render_ask_text
 from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter, transcripts_root
 from blizzard_mock.harness.facades._usage import MOCK_MODEL, synthesize_cost_usd, synthesize_usage_tokens
@@ -42,8 +45,11 @@ _USAGE = """\
 mock-claude-code — mock Claude Code coding-harness facade
 
 Usage:
-  mock-claude-code -p [--output-format text|json] [--session-id <uuid>] "<script>"
-  mock-claude-code -p --resume <session-id> "<resume-script>"
+  mock-claude-code -p [--output-format text|json] [--session-id <uuid>] [--settings <path>] "<script>"
+  mock-claude-code -p --resume <session-id> [--settings <path>] "<resume-script>"
+
+--settings names a Claude Code settings document; its PostToolUse and SessionEnd
+hook commands are executed as real subprocesses.
 
 The prompt is the program: it is Python, exec()'d in the acquired worktree with
 the helper surface bound: ask, apply_diff, commit, tool_call, verdict, hang,
@@ -97,12 +103,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-format", choices=["text", "json"], default="text")
     parser.add_argument("--session-id", default=None)
     parser.add_argument("--resume", default=None, metavar="SESSION_ID")
-    parser.add_argument("--settings", default=None, help="accepted and ignored (mock has no hooks)")
+    parser.add_argument(
+        "--settings",
+        default=None,
+        help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
+    )
     parser.add_argument("--model", default=None, help="accepted and ignored (mock is model-agnostic)")
     return parser
 
 
-def _build_transcript_writer(session_id: str | None) -> ClaudeTranscriptWriter | None:
+def _build_transcript_writer(
+    session_id: str | None, *, cwd: Path, env: Mapping[str, str]
+) -> ClaudeTranscriptWriter | None:
     """The Claude-shaped transcript writer for this run, else ``None``.
 
     Only constructed when a session id is already known: the real runner always
@@ -111,11 +123,12 @@ def _build_transcript_writer(session_id: str | None) -> ClaudeTranscriptWriter |
     engine self-assign a uuid (no ``--session-id``/``--resume``) skips transcript
     writing — that path has no session id to key the file on until the engine
     mints one, and it is not how the runner drives this facade.
+
+    ``cwd``/``env`` are resolved once by :func:`main` and passed in, so the writer
+    and the hook runner cannot disagree about which worktree this run acquired.
     """
     if not session_id:
         return None
-    env = os.environ
-    cwd = acquired_worktree(env, Path.cwd())
     root = transcripts_root(env, fence_dir=fence_base_dir(cwd))
     return ClaudeTranscriptWriter(session_id=session_id, root=root, cwd=cwd)
 
@@ -131,8 +144,26 @@ def main(argv: list[str] | None = None) -> None:
     wire = ClaudeCodeWire(args.output_format)
     is_resume = args.resume is not None
     session_id = args.resume if is_resume else args.session_id
-    transcript = _build_transcript_writer(session_id)
-    code = _common.dispatch(wire=wire, script=script, session_id=session_id, is_resume=is_resume, transcript=transcript)
+    # Resolved once and shared: a second, independent resolution could disagree with
+    # the first about which worktree this run acquired.
+    env: Mapping[str, str] = os.environ
+    cwd = acquired_worktree(env, Path.cwd())
+    transcript = _build_transcript_writer(session_id, cwd=cwd, env=env)
+    hooks = build_hook_runner(
+        args.settings,
+        cwd=cwd,
+        env=env,
+        session_id=session_id,
+        transcript_path=transcript.path if transcript is not None else None,
+    )
+    code = _common.dispatch(
+        wire=wire,
+        script=script,
+        session_id=session_id,
+        is_resume=is_resume,
+        transcript=transcript,
+        hooks=hooks,
+    )
     raise SystemExit(code)
 
 
