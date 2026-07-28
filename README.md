@@ -1,7 +1,7 @@
 # blizzard-mock
 
 The **mock fleet** for blizzard. Everything blizzard integrates with is a pluggable
-seam (`blizzard-harness:/architecture/system-shape.md`, `bzh:pluggable-seams`), and
+seam (`blizzard-context:/architecture/system-shape.md`, `bzh:pluggable-seams`), and
 every seam gets a controllable mock here. The fleet exists for one reason: agents
 building blizzard must be able to construct any state — including rare edge cases —
 deterministically, cheaply, and **with no real tokens and no network**.
@@ -24,7 +24,7 @@ contract.
 
 ## Toolchain
 
-uv + ruff + pyright + pytest, per `blizzard-harness:/standards/python.md`
+uv + ruff + pyright + pytest, per `blizzard-context:/standards/python.md`
 (`bzh:python-toolchain`). Gates a change must pass:
 
 ```

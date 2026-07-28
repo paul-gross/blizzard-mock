@@ -24,7 +24,7 @@ dependencies = [
     "click>=8.1.0",
     # Domain models and request/response schemas.
     "pydantic>=2.0.0",
-    # Structured logging, per blizzard-harness standards/logging.md
+    # Structured logging, per blizzard-context standards/logging.md
     # (bzh:structlog-logging).
     "structlog>=24.0.0",
     # Store access for the mock-data CLI — it resets/seeds the hub and runner

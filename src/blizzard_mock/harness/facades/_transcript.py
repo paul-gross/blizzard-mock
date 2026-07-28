@@ -136,6 +136,6 @@ class ClaudeTranscriptWriter:
 
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
-# ``blizzard-harness:/exemplars/python/repo_pattern.py`` documents.
+# ``blizzard-context:/exemplars/python/repo_pattern.py`` documents.
 def _conforms_transcript_writer(x: ClaudeTranscriptWriter) -> ITranscriptWriter:
     return x
