@@ -108,12 +108,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
     )
-    parser.add_argument("--model", default=None, help="accepted and ignored (mock is model-agnostic)")
-    # Accepted from issue #144 onward. `parse_args` is strict, so the moment the runner
-    # emits `--effort` an unaware facade exits non-zero and every fleet-tier scenario
-    # dies at spawn. Accepted here, ignored for now; recording it into the per-session
-    # state is a later slice of the same issue.
-    parser.add_argument("--effort", default=None, help="accepted and ignored (mock is effort-agnostic)")
+    # Both are RECORDED onto the session state (issue #144) and otherwise ignored — the
+    # mock is model- and effort-agnostic, but what each turn was launched with is the
+    # observable a fleet-tier scenario asserts the mint-only model contract against.
+    parser.add_argument("--model", default=None, help="recorded onto the session, not acted on")
+    parser.add_argument("--effort", default=None, help="recorded onto the session, not acted on")
     return parser
 
 
@@ -168,6 +167,11 @@ def main(argv: list[str] | None = None) -> None:
         is_resume=is_resume,
         transcript=transcript,
         hooks=hooks,
+        # Recorded onto the session state, not acted on (issue #144): the mock is model-
+        # and effort-agnostic, but a fleet-tier scenario needs the observed flags to prove
+        # the mint-only model contract off real argv.
+        model=args.model,
+        effort=args.effort,
     )
     raise SystemExit(code)
 

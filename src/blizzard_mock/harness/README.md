@@ -90,7 +90,13 @@ and how a settings document's hook commands are executed* — see "Hook executio
   `ITranscriptWriter` and `IHookRunner` protocols facades implement, and the
   `RunContext` the helpers read. Framework-free — it spawns nothing itself.
 - `session.py` — `SessionState` / `SessionStore`: the per-session JSON file
-  (keyed by session id) that lets a resumed script read what it asked.
+  (keyed by session id) that lets a resumed script read what it asked. It also
+  records an `Invocation` per turn — the `--model`/`--effort` flags that turn was
+  launched with, `None` for a flag absent from argv. The mock acts on neither
+  (it is model- and effort-agnostic); they are recorded because *what each turn
+  was launched with* is the observable a fleet-tier scenario asserts blizzard's
+  mint-only model contract against. Note what that does and does not prove: the
+  facade sees argv, so this checks the **flag**, never the effective model.
 - `helpers.py` — the terse helper library bound into every behavior script's
   namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
   `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
@@ -294,7 +300,7 @@ Each facade registers a `[project.scripts]` binary:
 
 | Binary | Facade | Surface |
 |--------|--------|---------|
-| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
+| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. |
 
