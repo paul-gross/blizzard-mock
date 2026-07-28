@@ -119,6 +119,8 @@ class QuestionState(BaseModel):
     answer: str | None = None
     answered_by: str | None = None
     answered_at: str | None = None
+    delivered: bool = False
+    delivered_at: str | None = None
 
 
 class WorkRefSpec(BaseModel):

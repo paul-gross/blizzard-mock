@@ -97,6 +97,10 @@ class QuestionView(BaseModel):
     answer: str | None = None
     answered_by: str | None = None
     answered_at: str | None = None
+    # The return leg (blizzard#165): the ``answer.delivered`` fact landed, so the
+    # resume-with-answer ran and the dormant session woke around it.
+    delivered: bool = False
+    delivered_at: str | None = None
 
 
 class HubAdvanceResponse(BaseModel):

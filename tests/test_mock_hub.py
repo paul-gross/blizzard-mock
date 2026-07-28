@@ -476,7 +476,12 @@ def test_events_answer_delivered_marks_the_question_answered(client: TestClient)
         },
     )
     assert ack.json()["applied"] == [3]
-    assert client.get("/api/fleet/questions/q1").json()["answered"] is True
+    polled = client.get("/api/fleet/questions/q1").json()
+    assert polled["answered"] is True
+    # The delivery is readable in its own right (blizzard#165), not folded into
+    # `answered` — the real hub's view carries the same pair off `answer_deliveries`.
+    assert polled["delivered"] is True
+    assert polled["delivered_at"] is not None
 
 
 def test_events_runner_locally_paused_and_resumed_are_runner_scoped(client: TestClient) -> None:

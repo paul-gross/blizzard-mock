@@ -322,7 +322,12 @@ class MockHubService:
             question = self._state.get_question(str(payload.get("question_id", "")))
             if question is None:
                 return False
+            # `answered` is set here too as a mock shortcut: a scenario that pushes the
+            # delivery without first driving `POST /_seed/answer` still gets a coherent
+            # row back off the poll. The real hub derives it from the answer row alone.
             question.answered = True
+            question.delivered = True
+            question.delivered_at = self._clock.now().isoformat()
             self._state.put_question(question)
             return True
         if kind == RUNNER_LOCALLY_PAUSED:
@@ -536,6 +541,8 @@ class MockHubService:
             answer=question.answer,
             answered_by=question.answered_by,
             answered_at=question.answered_at,
+            delivered=question.delivered,
+            delivered_at=question.delivered_at,
         )
 
     def _advance(self, chunk: ChunkState, target: str) -> ApplyResponse:
