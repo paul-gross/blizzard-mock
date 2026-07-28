@@ -42,6 +42,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     QuestionView,
     QueuePeekEntry,
     QueuePeekResponse,
+    RotatePolicyView,
     RouteClaimResponse,
     RouteTokenRekeyResponse,
     RouteView,
@@ -598,6 +599,13 @@ class MockHubService:
                 node_name=node_id,
                 executor=node.executor,
                 session=node.session,
+                session_source=node.session_source,
+                session_name=node.session_name,
+                session_model=list(node.session_model),
+                session_effort=node.session_effort,
+                session_rotate=RotatePolicyView(**node.session_rotate.model_dump())
+                if node.session_rotate is not None
+                else None,
                 judged_by=node.judged_by,
                 checks=node.checks,
                 checks_cwd=node.checks_cwd,

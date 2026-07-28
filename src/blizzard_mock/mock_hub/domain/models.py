@@ -72,11 +72,28 @@ class ChoiceSpec(BaseModel):
     requires_checks: bool = False  # gate this edge on green checks (issue #114)
 
 
+class RotatePolicySpec(BaseModel):
+    """A declared session's rotation bounds (issue #144) — mirrors the hub's own."""
+
+    max_context_tokens: int | None = None
+    max_transcript_bytes: int | None = None
+    max_invocations: int | None = None
+
+
 class NodeSpec(BaseModel):
     """A scripted graph node an agent seeds. ``prompt`` rides straight into the envelope."""
 
     executor: Executor = Executor.RUNNER
     session: SessionMode = SessionMode.RESUME
+    # The session reference target and the effective declaration (issues #115, #144) —
+    # seeded per node rather than derived from a graph-level `sessions:` map, because a
+    # mock scenario scripts nodes directly and never mints a graph. A scenario seeds
+    # exactly what the real hub would have resolved onto the envelope.
+    session_source: str | None = None
+    session_name: str | None = None
+    session_model: list[str] = Field(default_factory=list)
+    session_effort: str | None = None
+    session_rotate: RotatePolicySpec | None = None
     judged_by: JudgedBy = JudgedBy.WORKER
     prompt: str | None = None
     judgement_prompt: str | None = None

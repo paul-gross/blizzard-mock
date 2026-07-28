@@ -634,3 +634,94 @@ def test_seed_answer_makes_the_question_poll_return_answered(client: TestClient)
 def test_seed_answer_404s_on_unknown_question(client: TestClient) -> None:
     resp = client.post("/_seed/answer", json={"question_id": "unknown", "answer": "yes"})
     assert resp.status_code == 404
+
+
+# --- the session declaration on the envelope (issues #115, #144) -------------
+#
+# `bzh:wire-change-extends-mock`: the mock's `NodeConfig` mirrors the real hub's, so a
+# real runner deserializes its replies unchanged. It never picked up `session_source`
+# when #115 landed, so it could not drive a targeted-resume envelope at all — cleared
+# here alongside #144's declaration fields.
+
+
+_SESSION_SPEC = {
+    "entry": "build",
+    "nodes": {
+        "build": {
+            "executor": "runner",
+            "prompt": "b",
+            "judgement_prompt": "j",
+            "session": "fresh",
+            "session_source": "code",
+            "session_name": "code",
+            "session_model": ["blizzard:basic", "gpt-5.3-codex"],
+            "session_effort": "medium",
+            "session_rotate": {"max_context_tokens": 120000, "max_invocations": 30},
+            "choices": [{"name": "pass", "description": "p", "to": "review"}],
+        },
+        "review": {
+            "executor": "runner",
+            "prompt": "r",
+            "judgement_prompt": "j",
+            "session": "resume",
+            "session_source": "code",
+            "session_name": "code",
+            "session_model": ["blizzard:basic"],
+            "choices": [{"name": "pass", "description": "p", "to": "done"}],
+        },
+    },
+    "work_refs": [{"source": "o-r", "ref": "1"}],
+}
+
+
+def test_a_seeded_session_declaration_rides_the_claim_envelope(client: TestClient) -> None:
+    resp = client.post("/_seed/chunk", json=_SESSION_SPEC)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert claim.status_code == 201, claim.text
+    node = claim.json()["envelope"]["node"]
+    assert node["session"] == "fresh"
+    assert node["session_source"] == "code"
+    assert node["session_name"] == "code"
+    assert node["session_model"] == ["blizzard:basic", "gpt-5.3-codex"]
+    assert node["session_effort"] == "medium"
+    assert node["session_rotate"] == {
+        "max_context_tokens": 120000,
+        "max_transcript_bytes": None,
+        "max_invocations": 30,
+    }
+
+
+def test_the_declaration_rides_the_next_envelope_and_the_idempotent_re_read(client: TestClient) -> None:
+    resp = client.post("/_seed/chunk", json=_SESSION_SPEC)
+    chunk_id = resp.json()["chunk_id"]
+    _claim_and_fence(client, chunk_id)
+
+    step = client.post(
+        f"/api/fleet/chunks/{chunk_id}/completions",
+        json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
+    )
+
+    node = step.json()["next_envelope"]["node"]
+    assert (node["node_name"], node["session"], node["session_name"]) == ("review", "resume", "code")
+    assert node["session_rotate"] is None  # `review` declares no bounds
+
+    re_read = client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
+    assert re_read["node"]["session_name"] == "code"
+
+
+def test_a_node_declaring_no_session_carries_the_pre_144_shape(client: TestClient) -> None:
+    # Every scenario written before #144 — no pool, no preference, nothing bounded.
+    chunk_id = _seed(client)
+
+    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    node = claim.json()["envelope"]["node"]
+    assert node["session_source"] is None
+    assert node["session_name"] is None
+    assert node["session_model"] == []
+    assert node["session_effort"] is None
+    assert node["session_rotate"] is None
