@@ -119,10 +119,11 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
-    # The chunk's model selection (issue #27) — the store column is non-nullable and
-    # every mint carries the real hub's DEFAULT_MODEL; mirrored here so a real runner's
-    # required-field wire model deserializes the mock's replies unchanged.
-    model: str
+    # The chunk's default model preference and effort (issue #144), replacing #27's
+    # `model` field-for-field with the real hub's — mirrored here so a real runner's wire
+    # model deserializes the mock's replies unchanged (`bzh:wire-change-extends-mock`).
+    default_model: list[str] = Field(default_factory=list)
+    default_effort: str | None = None
     route: RouteView | None = None
     escalation: EscalationView | None = None
     questions: list[QuestionView] = Field(default_factory=list)

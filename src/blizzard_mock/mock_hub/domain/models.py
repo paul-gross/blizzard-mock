@@ -50,11 +50,6 @@ class ChunkStatus(StrEnum):
 #: The reserved terminal node id a choice may point at (mirrors ``graph.RESERVED_TERMINAL``).
 TERMINAL = "done"
 
-#: Mirrors the real hub's ``blizzard.hub.domain.work.DEFAULT_MODEL`` (issue #27) — every
-#: mint sets it, and the store column is non-nullable.
-DEFAULT_MODEL = "claude-opus-4-8"
-
-
 class ApplyOutcome(StrEnum):
     """Mirrors ``blizzard.wire.envelope.ApplyOutcome`` (value-identical)."""
 
@@ -136,7 +131,12 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
-    model: str = DEFAULT_MODEL
+    # The chunk's default model preference and effort (issue #144), mirroring the real
+    # hub's `Chunk.default_model`/`default_effort` — what a surface declaring neither
+    # inherits. Both default to *express no preference*, exactly as ingest mints them, so
+    # a scenario that says nothing about either drives the same envelope the real hub does.
+    default_model: list[str] = Field(default_factory=list)
+    default_effort: str | None = None
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
@@ -150,7 +150,8 @@ class ChunkState(BaseModel):
 
     chunk_id: str
     graph_id: str
-    model: str = DEFAULT_MODEL
+    default_model: list[str] = Field(default_factory=list)
+    default_effort: str | None = None
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
