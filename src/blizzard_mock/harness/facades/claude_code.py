@@ -109,6 +109,11 @@ def _parser() -> argparse.ArgumentParser:
         help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
     )
     parser.add_argument("--model", default=None, help="accepted and ignored (mock is model-agnostic)")
+    # Accepted from issue #144 onward. `parse_args` is strict, so the moment the runner
+    # emits `--effort` an unaware facade exits non-zero and every fleet-tier scenario
+    # dies at spawn. Accepted here, ignored for now; recording it into the per-session
+    # state is a later slice of the same issue.
+    parser.add_argument("--effort", default=None, help="accepted and ignored (mock is effort-agnostic)")
     return parser
 
 
