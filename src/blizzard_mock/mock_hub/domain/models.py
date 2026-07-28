@@ -50,6 +50,7 @@ class ChunkStatus(StrEnum):
 #: The reserved terminal node id a choice may point at (mirrors ``graph.RESERVED_TERMINAL``).
 TERMINAL = "done"
 
+
 class ApplyOutcome(StrEnum):
     """Mirrors ``blizzard.wire.envelope.ApplyOutcome`` (value-identical)."""
 
