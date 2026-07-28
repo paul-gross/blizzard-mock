@@ -25,6 +25,20 @@ class Ask:
 
 
 @dataclass
+class Invocation:
+    """One turn's observed model/effort flags (issue #144).
+
+    ``None`` means the flag was **absent from argv** — which on a resume is the
+    assertion, not an absence of information: the mint-only model contract says a
+    resume passes no ``--model`` and leans on the harness restoring the session's own.
+    """
+
+    kind: str  # spawn | resume
+    model: str | None = None
+    effort: str | None = None
+
+
+@dataclass
 class SessionState:
     """The durable state of one mock-harness session, keyed by ``session_id``.
 
@@ -34,6 +48,13 @@ class SessionState:
     prose alone and an untagged one (code end to end) the whole raw message;
     ``verdicts`` is every verdict emitted. A resumed script reads
     ``asks``/``resumes`` to reconstruct context.
+
+    ``invocations`` records the **model and effort flags each turn received**
+    (issue #144), one entry per turn in order, so a fleet-tier scenario can assert
+    the application contract off real observed argv: the mint carried the resolved
+    model, and every resume carried none. The facade sees only what it was handed,
+    which is what makes this a check of the *flag* and not of the effective model —
+    the gap the verifiability matrix records.
     """
 
     session_id: str
@@ -41,6 +62,7 @@ class SessionState:
     asks: list[Ask] = field(default_factory=list)
     resumes: list[str] = field(default_factory=list)
     verdicts: list[str] = field(default_factory=list)
+    invocations: list[Invocation] = field(default_factory=list)
 
     @property
     def last_ask(self) -> Ask | None:
@@ -58,7 +80,8 @@ class SessionState:
     def from_json(cls, text: str) -> SessionState:
         raw = json.loads(text)
         asks = [Ask(**a) for a in raw.pop("asks", [])]
-        return cls(asks=asks, **raw)
+        invocations = [Invocation(**i) for i in raw.pop("invocations", [])]
+        return cls(asks=asks, invocations=invocations, **raw)
 
 
 class SessionStore:

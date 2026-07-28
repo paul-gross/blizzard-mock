@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from blizzard_mock.harness.internal.logging import get_logger
-from blizzard_mock.harness.session import Ask, SessionState, SessionStore
+from blizzard_mock.harness.session import Ask, Invocation, SessionState, SessionStore
 
 _log = get_logger(__name__)
 
@@ -535,6 +535,8 @@ def run_prompt(
     out: IO[str] | None = None,
     transcript: ITranscriptWriter | None = None,
     hooks: IHookRunner | None = None,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
@@ -548,6 +550,11 @@ def run_prompt(
     prompt execs its blocks alone (:func:`split_behavior_script`), an untagged one
     execs everything past the preamble (:func:`split_worker_preamble`), and a
     malformed tag fails the turn as an ``error_during_execution``.
+
+    ``model``/``effort`` (issue #144) are the flags this invocation was launched with —
+    recorded onto the session state as an :class:`~blizzard_mock.harness.session.Invocation`
+    and otherwise ignored (the mock is model- and effort-agnostic). ``None`` means the flag
+    was absent from argv, which on a resume is precisely what a fleet-tier scenario asserts.
 
     Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
     :class:`RunResult` through ``wire`` to ``out`` exactly once (a ``hang`` never
@@ -612,6 +619,9 @@ def run_prompt(
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
     state.turns += 1
+    # What this turn was actually launched with (issue #144) — the observable behind the
+    # mint-only model contract's fleet-tier proof.
+    state.invocations.append(Invocation(kind="resume" if is_resume else "spawn", model=model, effort=effort))
 
     ctx = RunContext(
         session=state,

@@ -20,11 +20,31 @@ class EnvelopeChoice(BaseModel):
     requires_checks: bool = False  # gate this edge on green checks (issue #114)
 
 
+class RotatePolicyView(BaseModel):
+    """A declared session's rotation bounds (issue #144) — mirrors
+    ``blizzard.wire.envelope.RotatePolicyView``."""
+
+    max_context_tokens: int | None = None
+    max_transcript_bytes: int | None = None
+    max_invocations: int | None = None
+
+
 class NodeConfig(BaseModel):
     node_id: str
     node_name: str
     executor: Executor
     session: SessionMode
+    # The session reference target (issue #115) — the parsed `<name>` of a
+    # `resume:<name>`/`fresh:<name>` form; null for the bare forms. Never picked up when
+    # #115 landed, so the mock could not drive a targeted-resume envelope at all.
+    session_source: str | None = None
+    # The **effective** session declaration for this node-step (issue #144), already
+    # merged hub-side (declaration over chunk default, field by field). The runner reads
+    # these to resolve its pool, its model/effort, and its rotation bounds.
+    session_name: str | None = None
+    session_model: list[str] = Field(default_factory=list)
+    session_effort: str | None = None
+    session_rotate: RotatePolicyView | None = None
     judged_by: JudgedBy
     checks: list[str] = Field(default_factory=list)
     checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
@@ -119,10 +139,11 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
-    # The chunk's model selection (issue #27) — the store column is non-nullable and
-    # every mint carries the real hub's DEFAULT_MODEL; mirrored here so a real runner's
-    # required-field wire model deserializes the mock's replies unchanged.
-    model: str
+    # The chunk's default model preference and effort (issue #144), replacing #27's
+    # `model` field-for-field with the real hub's — mirrored here so a real runner's wire
+    # model deserializes the mock's replies unchanged (`bzh:wire-change-extends-mock`).
+    default_model: list[str] = Field(default_factory=list)
+    default_effort: str | None = None
     route: RouteView | None = None
     escalation: EscalationView | None = None
     questions: list[QuestionView] = Field(default_factory=list)

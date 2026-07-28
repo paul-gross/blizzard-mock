@@ -1017,3 +1017,61 @@ def test_synthesize_cost_usd_grows_with_token_counts() -> None:
     small = synthesize_cost_usd(synthesize_usage_tokens("hi"))
     large = synthesize_cost_usd(synthesize_usage_tokens("x" * 5000))
     assert large > small
+
+
+# --- recorded model/effort flags (issue #144) --------------------------------
+
+
+def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool = False, **flags) -> None:
+    """One `mock-claude-code` turn, with whichever of `--model`/`--effort` was given."""
+    session_flag = ["--resume", session] if resume else ["--session-id", session]
+    extra = [arg for name, value in flags.items() if value for arg in (f"--{name}", value)]
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            *session_flag,
+            *extra,
+            script,
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def _session_state(cwd: Path, session: str) -> dict:
+    path = engine.fence_base_dir(cwd) / ".blizzard-mock-harness" / "sessions" / f"{session}.json"
+    return json.loads(path.read_text())
+
+
+def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(fenced_repo) -> None:
+    """The observable behind blizzard's mint-only model contract: a mint carries the
+    resolved model, and a resume carries none — the harness restores the session's own.
+
+    Recorded, never acted on: the mock is model-agnostic. And it is a check of the
+    **flag**, not of the effective model — the facade only ever sees argv.
+    """
+    cwd, env = fenced_repo
+    _run_claude(cwd, env, "sess-1", "verdict('pass')", model="sonnet", effort="high")
+    _run_claude(cwd, env, "sess-1", "verdict('pass')", resume=True, effort="high")
+
+    state = _session_state(cwd, "sess-1")
+
+    assert state["invocations"] == [
+        {"kind": "spawn", "model": "sonnet", "effort": "high"},
+        {"kind": "resume", "model": None, "effort": "high"},
+    ]
+
+
+def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    _run_claude(cwd, env, "sess-2", "verdict('pass')")
+
+    assert _session_state(cwd, "sess-2")["invocations"] == [{"kind": "spawn", "model": None, "effort": None}]

@@ -43,12 +43,14 @@ def dispatch(
     is_resume: bool,
     transcript: ITranscriptWriter | None = None,
     hooks: IHookRunner | None = None,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> int:
     """Run ``script`` through the engine, mapping a fence refusal to an error exit.
 
-    ``transcript`` and ``hooks`` ride straight through to
-    :func:`~blizzard_mock.harness.engine.run_prompt`; only the claude_code facade
-    ever supplies either.
+    ``transcript``, ``hooks``, and the observed ``model``/``effort`` flags (issue #144)
+    ride straight through to :func:`~blizzard_mock.harness.engine.run_prompt`; only the
+    claude_code facade supplies any of them.
     """
     try:
         return run_prompt(
@@ -58,6 +60,8 @@ def dispatch(
             is_resume=is_resume,
             transcript=transcript,
             hooks=hooks,
+            model=model,
+            effort=effort,
         )
     except FenceError as exc:
         print(str(exc), file=sys.stderr)
