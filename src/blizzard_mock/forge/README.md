@@ -51,11 +51,16 @@ armed.
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /repos/{owner}/{repo}` | Repo, with `default_branch` read from bare `HEAD` |
-| `GET /repos/{o}/{r}/issues?state=` | List issues |
+| `GET /repos/{o}/{r}/issues?state=&labels=` | List issues; `labels=` is a comma-separated AND filter, composes with `state=all` |
 | `GET /repos/{o}/{r}/issues/{n}` | Get issue (body) |
 | `POST /repos/{o}/{r}/issues` | Create issue |
 | `GET /repos/{o}/{r}/issues/{n}/comments` | List the comment thread |
 | `POST /repos/{o}/{r}/issues/{n}/comments` | Add a comment (issue or PR) |
+| `GET /repos/{o}/{r}/labels` | List repo-level label definitions |
+| `POST /repos/{o}/{r}/labels` | Create a repo-level label; 422 if the name already exists |
+| `GET /repos/{o}/{r}/issues/{n}/labels` | List an issue's labels |
+| `POST /repos/{o}/{r}/issues/{n}/labels` | Add label(s) to an issue (idempotent) |
+| `DELETE /repos/{o}/{r}/issues/{n}/labels/{name}` | Remove one label from an issue; 404 if not set |
 | `GET /repos/{o}/{r}/pulls?state=` | List PRs |
 | `POST /repos/{o}/{r}/pulls` | Create PR (`head`/`base` branches); 422 if an open PR already exists for the same `head`/`base` |
 | `GET /repos/{o}/{r}/pulls/{n}` | Get PR — live `mergeable`/`mergeable_state`, `merged` |

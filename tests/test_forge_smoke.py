@@ -138,6 +138,83 @@ def test_blank_title_rejected(client: TestClient) -> None:
     assert client.post(f"/repos/{REPO}/issues", json={"title": "  "}).status_code == 422
 
 
+# -- labels: repo-level definitions + issue assignment ----------------------
+
+
+def test_create_and_list_repo_labels(client: TestClient) -> None:
+    created = client.post(f"/repos/{REPO}/labels", json={"name": "blizzard:ingested"})
+    assert created.status_code == 201
+    assert created.json() == {"name": "blizzard:ingested"}
+
+    listed = client.get(f"/repos/{REPO}/labels").json()
+    assert listed == [{"name": "blizzard:ingested"}]
+
+
+def test_create_duplicate_repo_label_is_422(client: TestClient) -> None:
+    client.post(f"/repos/{REPO}/labels", json={"name": "blizzard:ingested"})
+    dup = client.post(f"/repos/{REPO}/labels", json={"name": "blizzard:ingested"})
+    assert dup.status_code == 422
+
+
+def test_add_and_list_issue_labels(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+
+    added = client.post(f"/repos/{REPO}/issues/{number}/labels", json=["blizzard:ingested"])
+    assert added.status_code == 200
+    assert added.json() == [{"name": "blizzard:ingested"}]
+
+    listed = client.get(f"/repos/{REPO}/issues/{number}/labels").json()
+    assert listed == [{"name": "blizzard:ingested"}]
+
+    got = client.get(f"/repos/{REPO}/issues/{number}").json()
+    assert got["labels"] == [{"name": "blizzard:ingested"}]
+
+
+def test_add_issue_label_is_idempotent(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    client.post(f"/repos/{REPO}/issues/{number}/labels", json=["blizzard:ingested"])
+    again = client.post(f"/repos/{REPO}/issues/{number}/labels", json=["blizzard:ingested"])
+    assert again.json() == [{"name": "blizzard:ingested"}]
+
+
+def test_remove_issue_label(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    client.post(f"/repos/{REPO}/issues/{number}/labels", json=["blizzard:ingested", "blizzard:in-progress"])
+
+    removed = client.delete(f"/repos/{REPO}/issues/{number}/labels/blizzard:ingested")
+    assert removed.status_code == 200
+    assert removed.json() == [{"name": "blizzard:in-progress"}]
+
+
+def test_remove_absent_issue_label_is_404(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    resp = client.delete(f"/repos/{REPO}/issues/{number}/labels/blizzard:ingested")
+    assert resp.status_code == 404
+
+
+def test_list_issues_filters_by_labels_and_composes_with_state_all(client: TestClient) -> None:
+    a = client.post(f"/repos/{REPO}/issues", json={"title": "a"}).json()["number"]
+    b = client.post(f"/repos/{REPO}/issues", json={"title": "b"}).json()["number"]
+    client.post(f"/repos/{REPO}/issues/{a}/labels", json=["blizzard:ingested", "blizzard:in-progress"])
+    client.post(f"/repos/{REPO}/issues/{b}/labels", json=["blizzard:ingested"])
+
+    only_ingested = client.get(f"/repos/{REPO}/issues", params={"labels": "blizzard:ingested", "state": "all"}).json()
+    assert {i["number"] for i in only_ingested} == {a, b}
+
+    both = client.get(
+        f"/repos/{REPO}/issues", params={"labels": "blizzard:ingested,blizzard:in-progress", "state": "all"}
+    ).json()
+    assert {i["number"] for i in both} == {a}
+
+
+def test_list_issues_labels_filter_still_honors_state(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "closes"}).json()["number"]
+    client.post(f"/repos/{REPO}/issues/{number}/labels", json=["blizzard:ingested"])
+    # default state=open still applies alongside the labels filter
+    open_only = client.get(f"/repos/{REPO}/issues", params={"labels": "blizzard:ingested"}).json()
+    assert {i["number"] for i in open_only} == {number}
+
+
 # -- delivery seam: pull requests (D-057 / D-065) --------------------------
 
 

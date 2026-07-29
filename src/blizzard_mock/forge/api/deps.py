@@ -31,6 +31,10 @@ class CreateIssueBody(BaseModel):
     user: str = "octocat"
 
 
+class CreateLabelBody(BaseModel):
+    name: str
+
+
 class CreateCommentBody(BaseModel):
     body: str
     user: str = "octocat"

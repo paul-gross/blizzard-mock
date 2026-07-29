@@ -85,6 +85,12 @@ class Issue(BaseModel):
     comments: list[Comment] = Field(default_factory=list)
 
 
+class Label(BaseModel):
+    """A repo-level label definition (name only — no color/description modeled)."""
+
+    name: str
+
+
 class PullRequest(BaseModel):
     """A delivery item: a merge proposal of ``head`` into ``base`` (D-057…D-065).
 

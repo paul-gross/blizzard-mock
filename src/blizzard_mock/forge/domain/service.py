@@ -14,6 +14,8 @@ from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import (
     HeadMismatch,
     IssueNotFound,
+    LabelAlreadyExists,
+    LabelNotFound,
     MergeRejected,
     NotFastForward,
     NotMergeable,
@@ -32,6 +34,7 @@ from blizzard_mock.forge.domain.levers import (
 from blizzard_mock.forge.domain.models import (
     Comment,
     Issue,
+    Label,
     MergeableState,
     MergeMethod,
     PullRequest,
@@ -92,9 +95,9 @@ class ForgeService:
 
     # -- issues ------------------------------------------------------------
 
-    def list_issues(self, owner: str, name: str, state: str | None) -> list[Issue]:
+    def list_issues(self, owner: str, name: str, state: str | None, labels: list[str] | None = None) -> list[Issue]:
         repo = self.get_repo(owner, name)
-        return self._state.list_issues(repo.full_name, state)
+        return self._state.list_issues(repo.full_name, state, labels)
 
     def get_issue(self, owner: str, name: str, number: int) -> Issue:
         repo = self.get_repo(owner, name)
@@ -146,6 +149,38 @@ class ForgeService:
             created_at=now,
             updated_at=now,
         )
+
+    # -- labels --------------------------------------------------------------
+
+    def list_labels(self, owner: str, name: str) -> list[Label]:
+        repo = self.get_repo(owner, name)
+        return self._state.list_labels(repo.full_name)
+
+    def create_label(self, owner: str, name: str, *, label_name: str) -> Label:
+        repo = self.get_repo(owner, name)
+        if self._state.get_label(repo.full_name, label_name) is not None:
+            raise LabelAlreadyExists(f"label {label_name!r} already exists in {repo.full_name}")
+        label = Label(name=label_name)
+        self._state.put_label(repo.full_name, label)
+        return label
+
+    def add_issue_labels(self, owner: str, name: str, number: int, *, labels: list[str]) -> Issue:
+        repo = self.get_repo(owner, name)
+        issue = self.get_issue(owner, name, number)
+        for label_name in labels:
+            if label_name not in issue.labels:
+                issue.labels.append(label_name)
+        self._state.put_issue(repo.full_name, issue)
+        return issue
+
+    def remove_issue_label(self, owner: str, name: str, number: int, *, label_name: str) -> Issue:
+        repo = self.get_repo(owner, name)
+        issue = self.get_issue(owner, name, number)
+        if label_name not in issue.labels:
+            raise LabelNotFound(f"label {label_name!r} not set on issue #{number} in {repo.full_name}")
+        issue.labels.remove(label_name)
+        self._state.put_issue(repo.full_name, issue)
+        return issue
 
     # -- pull requests -----------------------------------------------------
 

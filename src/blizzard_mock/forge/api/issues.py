@@ -25,8 +25,10 @@ def list_issues(
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
     state: str = "open",
+    labels: str | None = None,
 ) -> list[dict[str, Any]]:
-    issues = service.list_issues(owner, repo, state)
+    label_list = labels.split(",") if labels else None
+    issues = service.list_issues(owner, repo, state, label_list)
     return [ser.issue_json(f"{owner}/{repo}", issue, base_url) for issue in issues]
 
 
