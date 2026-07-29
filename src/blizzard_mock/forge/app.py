@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.issues import router as issues_router
+from blizzard_mock.forge.api.labels import router as labels_router
 from blizzard_mock.forge.api.levers import router as levers_router
 from blizzard_mock.forge.api.middleware import LeverMiddleware
 from blizzard_mock.forge.api.pulls import router as pulls_router
@@ -57,6 +58,7 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
 
     app.include_router(repos_router)
     app.include_router(issues_router)
+    app.include_router(labels_router)
     app.include_router(pulls_router)
     app.include_router(refs_router)
     app.include_router(levers_router)

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from blizzard_mock.forge.domain.models import Comment, Issue, PullRequest
+from blizzard_mock.forge.domain.models import Comment, Issue, Label, PullRequest
 
 
 @dataclass
 class _RepoState:
     issues: dict[int, Issue] = field(default_factory=dict)
     pulls: dict[int, PullRequest] = field(default_factory=dict)
+    labels: dict[str, Label] = field(default_factory=dict)
     next_number: int = 1
     next_comment_id: int = 1
 
@@ -36,11 +37,13 @@ class InMemoryForgeState:
     def get_issue(self, repo: str, number: int) -> Issue | None:
         return self._repo(repo).issues.get(number)
 
-    def list_issues(self, repo: str, state: str | None) -> list[Issue]:
+    def list_issues(self, repo: str, state: str | None, labels: list[str] | None = None) -> list[Issue]:
         issues = sorted(self._repo(repo).issues.values(), key=lambda i: i.number)
-        if state in (None, "all"):
-            return issues
-        return [i for i in issues if i.state.value == state]
+        if state not in (None, "all"):
+            issues = [i for i in issues if i.state.value == state]
+        if labels:
+            issues = [i for i in issues if set(labels) <= set(i.labels)]
+        return issues
 
     def get_pull(self, repo: str, number: int) -> PullRequest | None:
         return self._repo(repo).pulls.get(number)
@@ -50,6 +53,12 @@ class InMemoryForgeState:
         if state in (None, "all"):
             return pulls
         return [p for p in pulls if p.state.value == state]
+
+    def get_label(self, repo: str, name: str) -> Label | None:
+        return self._repo(repo).labels.get(name)
+
+    def list_labels(self, repo: str) -> list[Label]:
+        return sorted(self._repo(repo).labels.values(), key=lambda label: label.name)
 
     # -- writes ------------------------------------------------------------
 
@@ -78,3 +87,6 @@ class InMemoryForgeState:
     def add_pull_comment(self, repo: str, number: int, comment: Comment) -> None:
         pull = self._repo(repo).pulls[number]
         pull.comments.append(comment)
+
+    def put_label(self, repo: str, label: Label) -> None:
+        self._repo(repo).labels[label.name] = label

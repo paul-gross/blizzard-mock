@@ -13,7 +13,7 @@ from typing import Any
 
 from blizzard_mock.forge.domain.git import GitCommit
 from blizzard_mock.forge.domain.levers import Lever
-from blizzard_mock.forge.domain.models import Comment, Issue, Repo
+from blizzard_mock.forge.domain.models import Comment, Issue, Label, Repo
 from blizzard_mock.forge.domain.service import MergeResult, PullView
 
 
@@ -50,7 +50,7 @@ def issue_json(repo_full: str, issue: Issue, base_url: str, *, is_pull: bool = F
         "body": issue.body,
         "state": issue.state.value,
         "user": _user(issue.user),
-        "labels": [{"name": name} for name in issue.labels],
+        "labels": issue_labels_json(issue.labels),
         "comments": len(issue.comments),
         "created_at": _ts(issue.created_at),
         "updated_at": _ts(issue.updated_at),
@@ -64,6 +64,14 @@ def issue_json(repo_full: str, issue: Issue, base_url: str, *, is_pull: bool = F
             "html_url": f"{base_url}/{repo_full}/pull/{issue.number}",
         }
     return payload
+
+
+def issue_labels_json(names: list[str]) -> list[dict[str, Any]]:
+    return [{"name": name} for name in names]
+
+
+def label_json(label: Label) -> dict[str, Any]:
+    return {"name": label.name}
 
 
 def comment_json(repo_full: str, number: int, comment: Comment, base_url: str) -> dict[str, Any]:

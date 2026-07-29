@@ -83,3 +83,15 @@ class GitError(ForgeError):
     """An operation against the backing git repo failed unexpectedly."""
 
     status = 500
+
+
+class LabelAlreadyExists(ForgeError):
+    """A repo-level label with this name already exists (GitHub 422)."""
+
+    status = 422
+
+
+class LabelNotFound(ForgeError):
+    """No such label is set on the issue (GitHub 404, issue-label ``DELETE``)."""
+
+    status = 404
