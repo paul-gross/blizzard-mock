@@ -13,8 +13,10 @@ piece of the drift check; the rules themselves live in the domain.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
-from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, insert, select
+from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, event, insert, select
+from sqlalchemy.exc import IntegrityError
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.schema_contract import (
@@ -24,7 +26,7 @@ from blizzard_mock.mock_data.domain.schema_contract import (
     SchemaDriftError,
     check_drift,
 )
-from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary
+from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary, SeedIntegrityError
 
 # A live hub/runner daemon may hold the same sqlite file open — set a busy
 # timeout so a lock contends and *waits* rather than this tool immediately
@@ -34,12 +36,29 @@ from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary
 _SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 
 
+def _enable_sqlite_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
+    """Turn on FK enforcement for this sqlite connection — off by default per
+    connection, unlike postgres. Without it, an orphan ``--chunk``/
+    ``--runner-id`` (naming a row this tool never seeded) lands silently on
+    sqlite instead of raising the ``IntegrityError`` :func:`ReflectedStore.write`
+    translates into a :class:`SeedIntegrityError` — exactly the silent-wrong-row
+    failure mode the tool's drift guard exists to prevent for schema shape."""
+    del connection_record
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def create_seed_engine(url: str) -> Engine:
     """Build the engine this tool writes through, sqlite-safe against a live daemon."""
     connect_args: dict[str, object] = {}
-    if url.startswith("sqlite"):
+    is_sqlite = url.startswith("sqlite")
+    if is_sqlite:
         connect_args["timeout"] = _SQLITE_BUSY_TIMEOUT_SECONDS
-    return create_engine(url, connect_args=connect_args)
+    engine = create_engine(url, connect_args=connect_args)
+    if is_sqlite:
+        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+    return engine
 
 
 def _is_autoincrement_pk(column: Column, table: Table) -> bool:
@@ -89,10 +108,17 @@ class ReflectedStore:
         by_table: dict[str, list[FactRow]] = {}
         for row in rows:
             by_table.setdefault(row.table, []).append(row)
-        with self._engine.begin() as conn:
-            for table in meta.sorted_tables:  # parents before children (FK-safe)
-                for row in by_table.get(table.name, []):
-                    conn.execute(insert(table).values(**row.values))
+        try:
+            with self._engine.begin() as conn:
+                for table in meta.sorted_tables:  # parents before children (FK-safe)
+                    for row in by_table.get(table.name, []):
+                        conn.execute(insert(table).values(**row.values))
+        except IntegrityError as exc:
+            raise SeedIntegrityError(
+                "constraint violation writing seeded rows — a referenced row (e.g. a "
+                "--chunk/--runner-id this store never seeded) may not exist, or the store "
+                f"already carries this data (try `reset` first): {exc.orig}"
+            ) from exc
 
     def reset(self) -> ResetSummary:
         meta = self._reflect()

@@ -28,6 +28,7 @@ from sqlalchemy import (
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
+from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError
 from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore, create_seed_engine
 
 
@@ -152,6 +153,46 @@ def test_write_lands_rows_fk_safe_regardless_of_caller_order(tmp_path: Path) -> 
     with create_engine(url).begin() as conn:
         assert [r[0] for r in conn.execute(select(registrations.c.runner_id)).all()] == ["r1"]
         assert [r[0] for r in conn.execute(select(pause_facts.c.runner_id)).all()] == ["r1"]
+
+
+# --- referential integrity (sqlite FK enforcement) -----------------------------
+
+
+def test_write_rejects_a_dangling_foreign_key(tmp_path: Path) -> None:
+    """sqlite FK enforcement is on for the engine this tool writes through: a child
+    row naming a parent that was never written raises ``SeedIntegrityError`` — the
+    drift guard only validates column *shape*, so without this a `runner_id` no
+    `runner_registrations` row ever names would otherwise land silently."""
+    url, _registrations, pause_facts = _hub_store(tmp_path)
+    now = datetime.now(UTC)
+    with pytest.raises(SeedIntegrityError):
+        _store(url).write(
+            [
+                FactRow(
+                    table="runner_pause_facts",
+                    values={"runner_id": "ghost", "paused": True, "set_at": now, "set_by": "t"},
+                )
+            ]
+        )
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(pause_facts)).all() == []
+
+
+def test_write_rejects_a_row_that_collides_with_one_already_written(tmp_path: Path) -> None:
+    """A unique-constraint clash (e.g. re-writing a primary key the store already
+    carries) also raises ``SeedIntegrityError``, not a raw traceback — the
+    ``scenario board``-rerun-without-``reset`` case."""
+    url, registrations, _pause = _hub_store(tmp_path)
+    now = datetime.now(UTC)
+    row = FactRow(
+        table="runner_registrations",
+        values={"runner_id": "r1", "workspace_id": "ws", "registered_at": now, "last_seen_at": now},
+    )
+    _store(url).write([row])
+    with pytest.raises(SeedIntegrityError):
+        _store(url).write([row])
+    with create_engine(url).begin() as conn:
+        assert len(conn.execute(select(registrations)).all()) == 1
 
 
 # --- reset (unmigrated store) --------------------------------------------------

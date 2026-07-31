@@ -144,6 +144,15 @@ code path runs; only `--url` is spelled out per verb below.
   supplied. A miss is a schema drift — the live store moved out from under this
   tool — and raises `SchemaDriftError` naming the table and the offending
   column(s), never a silently-wrong row. Guide: `blizzard-context:/tooling/store-seeding.md`.
+- **Referential integrity is enforced, not just column shape**: the drift guard above
+  validates a `FactRow`'s shape, not whether an id it names (a `--chunk`/`--runner-id`
+  this store never seeded) actually exists. `internal/reflected_store.py` turns on
+  sqlite's `PRAGMA foreign_keys=ON` for the engine it writes through (sqlite leaves FK
+  enforcement off per-connection by default, unlike postgres) and translates the
+  underlying `IntegrityError` — a dangling foreign key, or a unique-constraint clash
+  (e.g. re-running `scenario board` against a store that already carries one without an
+  intervening `reset`) — into `SeedIntegrityError`, the same "fail loud" contract as a
+  schema drift.
 - The concept composers (one `domain/*_seed.py` module per concept) are pure
   functions of already-loaded data (`bzh:domain-takes-objects`) returning a
   `FactRow`/`list[FactRow]` — no SQLAlchemy, no store read of their own. `cli.py`

@@ -1222,7 +1222,12 @@ def test_create_runner_pause_local_lands_a_reason(tmp_path: Path) -> None:
 
 def test_create_runner_pause_fleet_lands_no_reason_column(tmp_path: Path) -> None:
     url, meta = _full_hub_store(tmp_path)
-    result = _runner().invoke(
+    runner = _runner()
+    # `runner_pause_facts.runner_id` carries a real FK to `runner_registrations` (unlike
+    # `runner_local_pause_facts`, which has none) — register the runner first.
+    registered = runner.invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "r-1"])
+    assert registered.exit_code == 0, registered.output
+    result = runner.invoke(
         cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "r-1", "--fleet"]
     )
     assert result.exit_code == 0, result.output
@@ -1474,6 +1479,213 @@ def test_create_runner_against_a_drifted_schema_is_a_clean_click_exception(tmp_p
     assert "runner_registrations" in result.output
     assert "workspace_id" in result.output
     assert "Traceback" not in result.output
+
+
+def test_create_usage_against_a_store_missing_lease_facts_is_a_clean_click_exception(tmp_path: Path) -> None:
+    """Regression: ``_resolve_usage_defaults``'s own lookup query used to run *before*
+    the command's try block, so a ``SchemaDriftError`` it raised (a missing
+    ``lease_facts`` table) escaped uncaught instead of surfacing as a clean
+    ``ClickException`` like every other drift path in this tool."""
+    url = f"sqlite:///{tmp_path / 'hub.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    Table("chunks", meta, Column("chunk_id", String, primary_key=True))
+    meta.create_all(engine)
+
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            "ch_missing",
+            "--kind",
+            "spawn",
+            "--model",
+            "m",
+            "--input-tokens",
+            "1",
+            "--no-cost",
+        ],
+    )
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "lease_facts" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_create_event_against_a_store_missing_lease_facts_is_a_clean_click_exception(tmp_path: Path) -> None:
+    """Same regression as above, for ``create event``'s ``_resolve_event_runner_id`` lookup."""
+    url = f"sqlite:///{tmp_path / 'hub.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    Table("chunks", meta, Column("chunk_id", String, primary_key=True))
+    meta.create_all(engine)
+
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "test.kind",
+            "--severity",
+            "info",
+            "--message",
+            "hi",
+            "--chunk",
+            "ch_missing",
+        ],
+    )
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "lease_facts" in result.output
+    assert "Traceback" not in result.output
+
+
+# --- --seed reproducibility through the actual CLI (not just the pure composer) ---
+
+
+def test_create_graph_same_seed_mints_the_same_id_across_two_stores(tmp_path: Path) -> None:
+    """Regression: ``create graph`` kept a real ``SystemClock()`` regardless of
+    ``--seed``, and ``ids.ulid`` draws its leading bits from the clock — so two runs
+    at the same ``--seed`` minted *different* ids despite the documented
+    reproducibility contract."""
+    store_a, store_b = tmp_path / "a", tmp_path / "b"
+    store_a.mkdir()
+    store_b.mkdir()
+    url_a, _meta_a = _full_hub_store(store_a)
+    url_b, _meta_b = _full_hub_store(store_b)
+    result_a = _runner().invoke(cli, ["create", "graph", "--store", "hub", "--url", url_a, "--seed", "1"])
+    result_b = _runner().invoke(cli, ["create", "graph", "--store", "hub", "--url", url_b, "--seed", "1"])
+    assert result_a.exit_code == 0, result_a.output
+    assert result_b.exit_code == 0, result_b.output
+    assert result_a.output.strip() == result_b.output.strip()
+
+
+def test_create_chunk_same_seed_mints_the_same_id_across_two_stores(tmp_path: Path) -> None:
+    """Same regression as above, for ``create chunk`` (and the graph it auto-mints)."""
+    store_a, store_b = tmp_path / "a", tmp_path / "b"
+    store_a.mkdir()
+    store_b.mkdir()
+    url_a, _meta_a = _full_hub_store(store_a)
+    url_b, _meta_b = _full_hub_store(store_b)
+    result_a = _runner().invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url_a, "--status", "ready", "--seed", "1"]
+    )
+    result_b = _runner().invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url_b, "--status", "ready", "--seed", "1"]
+    )
+    assert result_a.exit_code == 0, result_a.output
+    assert result_b.exit_code == 0, result_b.output
+    assert result_a.output.strip() == result_b.output.strip()
+
+
+def test_create_question_same_seed_mints_the_same_id_across_two_stores(tmp_path: Path) -> None:
+    """Same regression as above, for ``create question`` — a fixed ``--chunk-id``
+    keeps the parked chunk itself identical across stores so only the question's
+    own ``--seed`` reproducibility is under test."""
+    store_a, store_b = tmp_path / "a", tmp_path / "b"
+    store_a.mkdir()
+    store_b.mkdir()
+    url_a, _meta_a = _full_hub_store(store_a)
+    url_b, _meta_b = _full_hub_store(store_b)
+    for url in (url_a, url_b):
+        chunk_result = _runner().invoke(
+            cli,
+            [
+                "create",
+                "chunk",
+                "--store",
+                "hub",
+                "--url",
+                url,
+                "--status",
+                "waiting_on_human",
+                "--chunk-id",
+                "ch-fixed",
+            ],
+        )
+        assert chunk_result.exit_code == 0, chunk_result.output
+    result_a = _runner().invoke(
+        cli,
+        ["create", "question", "--store", "hub", "--url", url_a, "--chunk", "ch-fixed", "--text", "q?", "--seed", "1"],
+    )
+    result_b = _runner().invoke(
+        cli,
+        ["create", "question", "--store", "hub", "--url", url_b, "--chunk", "ch-fixed", "--text", "q?", "--seed", "1"],
+    )
+    assert result_a.exit_code == 0, result_a.output
+    assert result_b.exit_code == 0, result_b.output
+    assert result_a.output.strip() == result_b.output.strip()
+
+
+# --- referential integrity surfaces as a clean CLI error, not a silent orphan row ---
+
+
+def test_create_runner_pause_fleet_refuses_an_unregistered_runner(tmp_path: Path) -> None:
+    """Regression: no referential-integrity precondition meant ``--runner-id`` naming
+    a runner that was never registered landed a silently-orphaned
+    ``runner_pause_facts`` row (sqlite never enforced the FK by default)."""
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "ghost-runner", "--fleet"]
+    )
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+
+
+def test_create_usage_refuses_a_chunk_that_was_never_seeded(tmp_path: Path) -> None:
+    """Same regression as above, for a ``--chunk`` naming a chunk that was never
+    ``create chunk``-ed."""
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            "ch_ghost",
+            "--kind",
+            "spawn",
+            "--model",
+            "m",
+            "--input-tokens",
+            "1",
+            "--no-cost",
+            "--node",
+            "explicit-node",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+
+
+def test_scenario_board_rerun_without_reset_is_a_clean_click_exception(tmp_path: Path) -> None:
+    """Regression: ``scenario board`` unconditionally mints a fresh graph under a
+    fixed name, so re-running it against a store that already carries one (the
+    easiest mistake to make with the tool's own flagship one-command entry point)
+    used to raise a raw ``IntegrityError`` traceback, including local filesystem
+    paths, instead of an actionable message."""
+    url, _meta = _full_hub_store(tmp_path)
+    first = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert first.exit_code == 0, first.output
+    second = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert second.exit_code != 0
+    assert "Traceback" not in second.output
+    assert "reset" in second.output.lower()
 
 
 # --- --dir resolves a runtime config's db_url -------------------------------

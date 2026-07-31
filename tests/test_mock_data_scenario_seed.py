@@ -101,6 +101,26 @@ def test_census_reports_the_cost_partial_count() -> None:
     assert scenario.census.usage_fact_count >= scenario.census.cost_partial_count
 
 
+# --- workspace attribution ----------------------------------------------------
+
+
+def test_every_seeded_route_claims_a_workspace_its_own_runner_is_registered_under() -> None:
+    """Regression: every ``running``/``delivering`` chunk's ``route_created`` row used
+    to hardcode the same ``workspace-seed`` (``chunk_seed.py``'s own CLI-verb default)
+    regardless of which runner it was attributed to, while the runner fleet this
+    module registers uses ``workspace-{i:02d}`` — so a route's claimed workspace and
+    its own runner's registered workspace silently disagreed."""
+    scenario = _compose(9, stress=True)
+    registrations = {
+        row.values["runner_id"]: row.values["workspace_id"] for row in _rows_for(scenario.rows, "runner_registrations")
+    }
+    route_rows = _rows_for(scenario.rows, "route_created")
+    assert route_rows  # --chunks 9 covers running/delivering, so at least one route lands
+    for route in route_rows:
+        runner_id = route.values["runner_id"]
+        assert route.values["workspace_id"] == registrations[runner_id]
+
+
 # --- ceiling-paused runner ----------------------------------------------------
 
 

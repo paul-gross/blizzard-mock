@@ -40,6 +40,9 @@ def _tables(rows: list[FactRow]) -> set[str]:
     return {row.table for row in rows}
 
 
+_DEFAULT_WORKSPACE_ID = "workspace-seed"  # mirrors chunk_seed.py's own default
+
+
 def _compose(
     status: str,
     *,
@@ -48,6 +51,7 @@ def _compose(
     work_refs: Sequence[tuple[str, str]] = (),
     runner_id: str = "runner-seed",
     epoch: int = 1,
+    workspace_id: str = _DEFAULT_WORKSPACE_ID,
 ) -> ChunkSeed:
     return compose_chunk(
         status=status,
@@ -59,6 +63,7 @@ def _compose(
         work_refs=work_refs,
         runner_id=runner_id,
         epoch=epoch,
+        workspace_id=workspace_id,
     )
 
 
@@ -112,6 +117,16 @@ def test_running_lands_a_live_route_and_a_non_hub_transition() -> None:
     assert transition.values["to_node_id"] == "nd_build"
     assert not any(row.table == "route_released" for row in seed.rows)
     assert not any(row.table in ("chunk_stopped", "escalations", "questions", "chunk_pause_facts") for row in seed.rows)
+
+
+def test_running_route_carries_a_caller_supplied_workspace_id() -> None:
+    """Regression: ``route_created.workspace_id`` used to hardcode the module's own
+    default regardless of caller intent — a caller attributing the route to a
+    runner registered under a specific workspace (e.g. ``scenario_seed.py``) needs
+    the route to claim that same workspace, not a fixed placeholder."""
+    seed = _compose("running", workspace_id="workspace-07")
+    route = next(row for row in seed.rows if row.table == "route_created")
+    assert route.values["workspace_id"] == "workspace-07"
 
 
 def test_not_ready_lands_only_the_base_chunk_row() -> None:

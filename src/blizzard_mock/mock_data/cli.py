@@ -109,7 +109,7 @@ from blizzard_mock.mock_data.domain.scenario_seed import (
     compose_board_scenario,
 )
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
-from blizzard_mock.mock_data.domain.seeding import SeedService
+from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, SeedService
 from blizzard_mock.mock_data.domain.usage_seed import KINDS as USAGE_KINDS
 from blizzard_mock.mock_data.domain.usage_seed import UsageCompositionError, compose_usage
 from blizzard_mock.mock_data.internal.hub_runtime import HubRuntimeError, resolve_db_url
@@ -122,6 +122,7 @@ _SEVERITY_CHOICES = click.Choice(SEVERITIES)
 _CAUSE_CHOICES = click.Choice(CAUSES)
 _COMPOSITION_ERRORS = (
     SchemaDriftError,
+    SeedIntegrityError,
     ChunkCompositionError,
     GraphCompositionError,
     UsageCompositionError,
@@ -138,12 +139,21 @@ _COMPOSITION_ERRORS = (
 #: ``set_by``/``stopped_by`` when no more specific attribution applies.
 _DEFAULT_EVENT_RUNNER_ID = "mock-data"
 
-#: The instant ``scenario board --seed N`` pins its clock to — a fixed, non-wall
+#: The instant any ``--seed``\ ed verb pins its clock to — a fixed, non-wall
 #: instant, so two separate invocations at the same seed compose byte-identical
-#: timestamps (and hence ids) rather than drifting apart on real wall-clock
-#: reads a few milliseconds apart (``domain/scenario_seed.py``'s reproducibility
-#: contract). Unseeded runs keep the real ``SystemClock``.
-_SCENARIO_CLOCK_ANCHOR = datetime(2024, 1, 1, tzinfo=UTC)
+#: timestamps (and hence ids, since ``domain/ids.py``'s ULID leading bits are
+#: the mint instant) rather than drifting apart on real wall-clock reads a few
+#: milliseconds apart. Unseeded runs keep the real ``SystemClock``.
+_SEEDED_CLOCK_ANCHOR = datetime(2024, 1, 1, tzinfo=UTC)
+
+
+def _seeded_clock(seed: int | None) -> Clock:
+    """A clock pinned to :data:`_SEEDED_CLOCK_ANCHOR` under an explicit ``--seed``,
+    the real wall clock otherwise — every id-minting verb's ``--seed`` reproducibility
+    claim depends on this, not just ``seeded_rng``: ``ids.ulid`` draws its leading 48
+    bits from the clock, so a verb that seeds the RNG but keeps ``SystemClock()`` still
+    mints a different id on every run."""
+    return FixedClock(_SEEDED_CLOCK_ANCHOR) if seed is not None else SystemClock()
 
 
 def _resolve_url(store: str, url: str | None, runtime_dir: str | None) -> str:
@@ -351,7 +361,7 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
     if store != "hub":
         raise click.UsageError("'graph' lives in the hub store (--store hub)")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
-    minted = compose_graph(name, SystemClock(), seeded_rng(seed))
+    minted = compose_graph(name, _seeded_clock(seed), seeded_rng(seed))
     try:
         service.seed(minted.rows)
     except _COMPOSITION_ERRORS as exc:
@@ -367,7 +377,12 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
 @click.option(
     "--graph", "graph_name", default=None, help="Reuse an existing minted graph by this name, or mint one under it."
 )
-@click.option("--node", "node_name", default=None, help="The graph node the chunk's transition lands on.")
+@click.option(
+    "--node",
+    "node_name",
+    default=None,
+    help="The graph node the chunk's transition lands on (--status done: the node it lands from).",
+)
 @click.option("--work-ref", "work_refs", multiple=True, metavar="SOURCE#REF", help="A work ref to attach — repeatable.")
 @click.option("--runner-id", "runner_id", default="runner-seed", help="The runner id attributed to the chunk's facts.")
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch attributed to the chunk's facts.")
@@ -398,7 +413,7 @@ def create_chunk(
     if store != "hub":
         raise click.UsageError("'chunk' lives in the hub store (--store hub)")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
-    clock = SystemClock()
+    clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
         graph = _resolve_graph(service, graph_name, clock, rng)
@@ -480,24 +495,24 @@ def create_usage(
     if cost_usd is None and not no_cost:
         raise click.UsageError("pass exactly one of --cost-usd or --no-cost")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
-    resolved_node, resolved_epoch, resolved_runner = _resolve_usage_defaults(
-        service, chunk_id, node_name=node_name, epoch=epoch, runner_id=runner_id
-    )
-    row = compose_usage(
-        chunk_id=chunk_id,
-        node_id=resolved_node,
-        epoch=resolved_epoch,
-        runner_id=resolved_runner,
-        kind=kind,
-        model=model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cache_read_tokens=cache_read_tokens,
-        cache_create_tokens=cache_create_tokens,
-        cost_usd=None if no_cost else cost_usd,
-        recorded_at=SystemClock().now(),
-    )
     try:
+        resolved_node, resolved_epoch, resolved_runner = _resolve_usage_defaults(
+            service, chunk_id, node_name=node_name, epoch=epoch, runner_id=runner_id
+        )
+        row = compose_usage(
+            chunk_id=chunk_id,
+            node_id=resolved_node,
+            epoch=resolved_epoch,
+            runner_id=resolved_runner,
+            kind=kind,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_create_tokens=cache_create_tokens,
+            cost_usd=None if no_cost else cost_usd,
+            recorded_at=SystemClock().now(),
+        )
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
@@ -633,7 +648,7 @@ def create_question(
     if resumed and not delivered:
         raise click.UsageError("--resumed requires --delivered — there is no fact beyond delivery for a resume")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
-    clock = SystemClock()
+    clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
         seeded = compose_question(
@@ -689,8 +704,8 @@ def create_event(
     if store != "hub":
         raise click.UsageError("'event' lives in the hub store (--store hub)")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
-    resolved_runner_id = _resolve_event_runner_id(service, chunk_id, runner_id)
     try:
+        resolved_runner_id = _resolve_event_runner_id(service, chunk_id, runner_id)
         row = compose_event(
             kind=kind,
             severity=severity,
@@ -778,7 +793,7 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
     a hub-store concept, so there is no ``--store`` flag to get wrong."""
     resolved_url = _resolve_url("hub", url, runtime_dir)
     service = _seed_service(resolved_url)
-    clock: Clock = FixedClock(_SCENARIO_CLOCK_ANCHOR) if seed is not None else SystemClock()
+    clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
         scenario_seed = compose_board_scenario(chunks=chunks, clock=clock, rng=rng, stress=stress)

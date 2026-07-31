@@ -28,12 +28,27 @@ class ResetSummary:
     table_count: int
 
 
+class SeedIntegrityError(Exception):
+    """A composed row doesn't satisfy a constraint the drift guard can't see —
+    a foreign key naming a row that was never seeded (e.g. ``--chunk``/
+    ``--runner-id`` pointing at nothing), or a unique constraint the store
+    already carries (re-running ``scenario board`` without an intervening
+    ``reset``). The drift guard (``domain/schema_contract.py``) validates
+    column *shape* only; this is the seam's other failure mode, raised by
+    ``ISeedStore.write`` from the underlying constraint violation and named
+    actionably rather than surfacing as a raw traceback.
+    """
+
+
 class ISeedStore(Protocol):
     """The store operations a concept composition needs — owned by the domain."""
 
     def write(self, rows: Sequence[FactRow]) -> None:
         """Validate ``rows`` against the live schema, then insert them
-        transactionally, FK-safe (parents before children)."""
+        transactionally, FK-safe (parents before children). Raises
+        :class:`SeedIntegrityError` when a row violates a constraint the
+        schema drift guard doesn't check (a dangling foreign key, a unique
+        clash)."""
         ...
 
     def reset(self) -> ResetSummary:

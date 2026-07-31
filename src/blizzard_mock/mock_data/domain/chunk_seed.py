@@ -97,13 +97,19 @@ def compose_chunk(
     work_refs: Sequence[tuple[str, str]] = (),
     runner_id: str = "runner-seed",
     epoch: int = 1,
+    workspace_id: str = _DEFAULT_WORKSPACE_ID,
 ) -> ChunkSeed:
     """Compose one chunk minted onto ``graph``, landing at ``status``.
 
     ``node_name`` names the graph node the chunk's composed transition lands on
     (``--node``); status-dependent defaults apply where a transition is minted at
-    all (see the module docstring). Raises :class:`ChunkCompositionError` for an
-    unknown status, an unresolvable node name (via
+    all (see the module docstring). ``workspace_id`` is the ``route_created`` fact's
+    own attribution (``running``/``delivering`` only, where a route is minted at
+    all) — callers that also register the attributed ``runner_id`` under a specific
+    workspace (e.g. ``scenario_seed.py``) should pass the same id here, so a
+    chunk's live route doesn't claim a workspace its own runner isn't registered
+    under. Raises :class:`ChunkCompositionError` for an unknown status, an
+    unresolvable node name (via
     :meth:`~blizzard_mock.mock_data.domain.graph_seed.GraphContext.node`), or a
     ``--node``/``--status`` pairing that cannot reach the requested status.
     """
@@ -171,7 +177,7 @@ def compose_chunk(
                 "route_id": ids.mint(_ROUTE_PREFIX, clock, rng),
                 "chunk_id": minted_chunk_id,
                 "runner_id": runner_id,
-                "workspace_id": _DEFAULT_WORKSPACE_ID,
+                "workspace_id": workspace_id,
                 "created_at": at(offset_seconds),
                 "seq": 1,
             },

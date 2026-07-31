@@ -189,7 +189,9 @@ def _extend_graph_with_node(graph: GraphContext, name: str, clock: Clock, rng: R
     parameterized with a caller-chosen ``name`` (``--stress``'s long
     custom-node-name extreme; ``compose_graph`` itself mints only the two fixed
     node names, so this is the one place a third, differently-named node comes
-    from)."""
+    from). Deliberately mints no ``graph_choices``/``graph_edges`` for it — a
+    structural dead end (nothing transitions *out* of this node), harmless
+    because nothing in this tool's hydration path validates node reachability."""
     node_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     row = FactRow(
         table="graph_nodes",
@@ -246,6 +248,7 @@ def _compose_stress_extras(*, graph: GraphContext, clock: Clock, rng: Random) ->
         rng=rng,
         node_name=_STRESS_LONG_NODE_NAME,
         runner_id=long_runner_id,
+        workspace_id="workspace-stress",
     )
     rows.extend(long_node_seed.rows)
 
@@ -286,7 +289,9 @@ def compose_board_scenario(
     for i in range(chunks):
         status = _STATUS_ORDER[i % len(_STATUS_ORDER)]
         runner_id = f"runner-{i:02d}"
-        seeded_chunk = compose_chunk(status=status, graph=graph, clock=clock, rng=rng, runner_id=runner_id)
+        seeded_chunk = compose_chunk(
+            status=status, graph=graph, clock=clock, rng=rng, runner_id=runner_id, workspace_id=f"workspace-{i:02d}"
+        )
         rows.extend(seeded_chunk.rows)
         chunk_entries.append(ChunkCensusEntry(chunk_id=seeded_chunk.chunk_id, status=status))
         runner_ids.append(runner_id)
