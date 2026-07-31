@@ -19,6 +19,7 @@ from blizzard_mock.mock_data.domain.graph_seed import (
     compose_graph,
     hydrate_graph_context,
 )
+from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -78,3 +79,15 @@ def test_hydrate_graph_context_round_trips_a_minted_graph() -> None:
     ]
     hydrated = hydrate_graph_context(graph_row, node_rows)
     assert hydrated == minted.context
+
+
+def test_hydrate_graph_context_raises_schema_drift_not_key_error_for_a_missing_column() -> None:
+    """Regression: a row missing a column ``hydrate_graph_context`` reads by name
+    (a live schema drift on the *read* seam — the drift guard only ever ran on the
+    write path) used to raise a bare ``KeyError`` instead of the tool's own promised
+    ``SchemaDriftError`` naming the table and column."""
+    minted = compose_graph("g", FixedClock(_NOW), random.Random(7))
+    graph_row = {"graph_id": minted.context.graph_id, "entry_node_id": minted.context.entry_node_id}
+    node_rows = [{"name": "build", "node_id": "gn_1"}]  # missing "executor" — a drifted graph_nodes row
+    with pytest.raises(SchemaDriftError, match=r"graph_nodes.*executor"):
+        hydrate_graph_context(graph_row, node_rows)

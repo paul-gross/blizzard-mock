@@ -108,7 +108,7 @@ from blizzard_mock.mock_data.domain.scenario_seed import (
     ScenarioCompositionError,
     compose_board_scenario,
 )
-from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
+from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError, require_column
 from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, SeedService
 from blizzard_mock.mock_data.domain.usage_seed import KINDS as USAGE_KINDS
 from blizzard_mock.mock_data.domain.usage_seed import UsageCompositionError, compose_usage
@@ -183,8 +183,8 @@ def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: ra
     graph present reuses the newest one across the whole store."""
     existing = service.query("graphs", {"name": name} if name else None)
     if existing:
-        graph_row = max(existing, key=lambda row: str(row["created_at"]))
-        node_rows = service.query("graph_nodes", {"graph_id": graph_row["graph_id"]})
+        graph_row = max(existing, key=lambda row: str(require_column(row, "created_at", table="graphs")))
+        node_rows = service.query("graph_nodes", {"graph_id": require_column(graph_row, "graph_id", table="graphs")})
         return hydrate_graph_context(graph_row, node_rows)
     minted = compose_graph(name or DEFAULT_GRAPH_NAME, clock, rng)
     service.seed(minted.rows)
@@ -215,9 +215,17 @@ def _resolve_usage_defaults(
     if resolved_epoch is None or resolved_runner is None:
         leases = service.query("lease_facts", {"chunk_id": chunk_id})
         if leases:
-            newest = max(leases, key=lambda row: str(row["minted_at"]))
-            resolved_epoch = resolved_epoch if resolved_epoch is not None else int(newest["epoch"])  # type: ignore[arg-type]
-            resolved_runner = resolved_runner if resolved_runner is not None else str(newest["runner_id"])
+            newest = max(leases, key=lambda row: str(require_column(row, "minted_at", table="lease_facts")))
+            resolved_epoch = (
+                resolved_epoch
+                if resolved_epoch is not None
+                else int(require_column(newest, "epoch", table="lease_facts"))  # type: ignore[arg-type]
+            )
+            resolved_runner = (
+                resolved_runner
+                if resolved_runner is not None
+                else str(require_column(newest, "runner_id", table="lease_facts"))
+            )
     resolved_epoch = resolved_epoch if resolved_epoch is not None else 1
     resolved_runner = resolved_runner if resolved_runner is not None else "runner-seed"
 
@@ -225,8 +233,8 @@ def _resolve_usage_defaults(
     if resolved_node is None:
         transitions = service.query("transitions", {"chunk_id": chunk_id})
         if transitions:
-            newest = max(transitions, key=lambda row: str(row["recorded_at"]))
-            resolved_node = str(newest["to_node_id"])
+            newest = max(transitions, key=lambda row: str(require_column(row, "recorded_at", table="transitions")))
+            resolved_node = str(require_column(newest, "to_node_id", table="transitions"))
     if resolved_node is None:
         raise click.UsageError(
             f"--node not given and chunk {chunk_id!r} has no transitions to derive one from — pass --node explicitly"
@@ -244,8 +252,8 @@ def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_
     if chunk_id is not None:
         leases = service.query("lease_facts", {"chunk_id": chunk_id})
         if leases:
-            newest = max(leases, key=lambda row: str(row["minted_at"]))
-            return str(newest["runner_id"])
+            newest = max(leases, key=lambda row: str(require_column(row, "minted_at", table="lease_facts")))
+            return str(require_column(newest, "runner_id", table="lease_facts"))
     return _DEFAULT_EVENT_RUNNER_ID
 
 
@@ -336,7 +344,7 @@ def create_runner(
         )
     try:
         service.seed(rows)
-    except SchemaDriftError as exc:
+    except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"created runner {runner_id!r} in the hub store (paused={paused})")
 
@@ -346,7 +354,9 @@ def create_runner(
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
 @click.option("--name", "name", default=DEFAULT_GRAPH_NAME, help="The graph's name.")
-@click.option("--seed", "seed", type=int, default=None, help="Seed the id-minting RNG for reproducible ids.")
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
 def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str, seed: int | None) -> None:
     """Mint a synthetic workflow graph — a ``build`` (runner) node into a ``deliver``
     (hub) node into the reserved terminal (``domain/graph_seed.py``).
@@ -387,7 +397,9 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
 @click.option("--runner-id", "runner_id", default="runner-seed", help="The runner id attributed to the chunk's facts.")
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch attributed to the chunk's facts.")
 @click.option("--chunk-id", "chunk_id", default=None, help="Override the minted chunk id.")
-@click.option("--seed", "seed", type=int, default=None, help="Seed the id-minting RNG for reproducible ids.")
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
 def create_chunk(
     store: str,
     url: str | None,
@@ -615,7 +627,9 @@ def create_escalation(
 @click.option("--node", "node_name", default=None, help="The node id the worker parked at.")
 @click.option("--runner-id", "runner_id", default="runner-seed", help="The runner holding the parked session.")
 @click.option("--epoch", "epoch", type=int, default=1, help="The parked lease's fencing epoch.")
-@click.option("--seed", "seed", type=int, default=None, help="Seed the id-minting RNG for reproducible ids.")
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
 def create_question(
     store: str,
     url: str | None,

@@ -149,6 +149,8 @@ class ReflectedStore:
             raise SchemaDriftError(f"schema drift: table {table!r} does not exist in the live store — see {GUIDE}")
         stmt = select(reflected)
         for column, value in (where or {}).items():
+            if column not in reflected.c:
+                raise SchemaDriftError(f"schema drift: table {table!r} has no column {column!r} — see {GUIDE}")
             stmt = stmt.where(reflected.c[column] == value)
         with self._engine.connect() as conn:
             return [dict(row) for row in conn.execute(stmt).mappings().all()]

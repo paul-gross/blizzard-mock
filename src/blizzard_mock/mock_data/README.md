@@ -122,9 +122,12 @@ code path runs; only `--url` is spelled out per verb below.
   runner with a long identity, a chunk landed on a deliberately long custom
   node name, and a second `waiting_on_human` chunk carrying two extra
   independent question trails (multi-question). `--seed` seeds id-minting *and*
-  pins the clock to a fixed instant (not just the RNG, unlike the `create`
-  verbs), so two runs at the same seed compose byte-identical output — a
-  property `scenario board` needs that a single-concept `create` verb does not.
+  pins the clock to a fixed instant (`create graph`/`chunk`/`question` do the
+  same under `--seed` — `cli.py`'s shared `_seeded_clock` helper), so two runs
+  at the same seed compose byte-identical output. A `--seed`ed board's runners
+  all render offline (`last_seen_at` pinned to the fixed instant, well outside
+  any liveness window) and every timestamp reads as the fixed instant's date —
+  fine for a reproducible demo, but not a "just seeded, live-looking" board.
   Always the hub store; prints the store it wrote to and a per-chunk, per-status
   summary census.
 - The `fixture` subgroup — **stubbed** (clean "not implemented" exit). Named,

@@ -132,6 +132,22 @@ def test_write_rejects_before_inserting_any_row(tmp_path: Path) -> None:
         assert conn.execute(select(registrations)).all() == []
 
 
+# --- query (read-side drift) ---------------------------------------------------
+
+
+def test_query_rejects_a_where_clause_naming_an_unknown_column(tmp_path: Path) -> None:
+    """Regression: ``ReflectedStore.query``'s ``where``-clause lookup indexed
+    ``reflected.c[column]`` directly, so a caller naming a column the live schema no
+    longer has (a drift on the *read* seam) raised a bare ``KeyError`` instead of the
+    tool's own promised ``SchemaDriftError`` naming the table and column."""
+    url, *_ = _hub_store(tmp_path)
+    with pytest.raises(SchemaDriftError) as excinfo:
+        _store(url).query("runner_registrations", {"bogus_column": "nope"})
+    message = str(excinfo.value)
+    assert "runner_registrations" in message
+    assert "bogus_column" in message
+
+
 # --- FK-safe write order -------------------------------------------------------
 
 

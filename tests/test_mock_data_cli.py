@@ -1634,18 +1634,27 @@ def test_create_question_same_seed_mints_the_same_id_across_two_stores(tmp_path:
 def test_create_runner_pause_fleet_refuses_an_unregistered_runner(tmp_path: Path) -> None:
     """Regression: no referential-integrity precondition meant ``--runner-id`` naming
     a runner that was never registered landed a silently-orphaned
-    ``runner_pause_facts`` row (sqlite never enforced the FK by default)."""
+    ``runner_pause_facts`` row (sqlite never enforced the FK by default).
+
+    ``CliRunner.invoke`` captures an uncaught exception into ``result.exception``
+    rather than writing it to ``result.output`` (a bare ``exit_code != 0`` plus
+    ``"Traceback" not in result.output`` can never fail either way) — assert
+    ``result.exception`` is the click-driven ``SystemExit``, not a raw
+    ``IntegrityError``, the way the schema-drift regression tests above already do."""
     url, _meta = _full_hub_store(tmp_path)
     result = _runner().invoke(
         cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "ghost-runner", "--fleet"]
     )
     assert result.exit_code != 0
-    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert "ghost-runner" in result.output or "constraint violation" in result.output
 
 
 def test_create_usage_refuses_a_chunk_that_was_never_seeded(tmp_path: Path) -> None:
     """Same regression as above, for a ``--chunk`` naming a chunk that was never
-    ``create chunk``-ed."""
+    ``create chunk``-ed — see that test's docstring for why ``result.exception`` is
+    the assertion that actually proves a clean ``ClickException``, not a bare exit
+    code plus an output-string check."""
     url, _meta = _full_hub_store(tmp_path)
     result = _runner().invoke(
         cli,
@@ -1670,7 +1679,24 @@ def test_create_usage_refuses_a_chunk_that_was_never_seeded(tmp_path: Path) -> N
         ],
     )
     assert result.exit_code != 0
-    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert "constraint violation" in result.output
+
+
+def test_create_runner_refuses_a_duplicate_runner_id(tmp_path: Path) -> None:
+    """Regression: ``create_runner`` alone still caught only ``SchemaDriftError``,
+    the pre-``e5074f7`` pattern every sibling verb was upgraded away from — so a
+    duplicate ``--runner-id`` (a unique-constraint clash, not a schema drift) leaked
+    a raw ``sqlalchemy.exc.IntegrityError`` traceback instead of the clean
+    ``SeedIntegrityError`` message every other verb already gives that failure
+    mode."""
+    url, _meta = _full_hub_store(tmp_path)
+    first = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "dup-runner"])
+    assert first.exit_code == 0, first.output
+    second = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "dup-runner"])
+    assert second.exit_code != 0
+    assert isinstance(second.exception, SystemExit)
+    assert "constraint violation" in second.output
 
 
 def test_scenario_board_rerun_without_reset_is_a_clean_click_exception(tmp_path: Path) -> None:
@@ -1684,7 +1710,7 @@ def test_scenario_board_rerun_without_reset_is_a_clean_click_exception(tmp_path:
     assert first.exit_code == 0, first.output
     second = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
     assert second.exit_code != 0
-    assert "Traceback" not in second.output
+    assert isinstance(second.exception, SystemExit)
     assert "reset" in second.output.lower()
 
 

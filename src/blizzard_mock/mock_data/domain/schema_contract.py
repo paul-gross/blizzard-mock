@@ -65,6 +65,22 @@ class SchemaDriftError(Exception):
     """
 
 
+def require_column(row: Mapping[str, object], column: str, *, table: str) -> object:
+    """Read ``column`` off an already-queried ``row``, raising :class:`SchemaDriftError`
+    — never a bare ``KeyError`` — when the live store no longer carries it.
+
+    :func:`check_drift` guards the *write* seam; a row a query already returned can
+    still drift out from under a caller that reads it back by name (a renamed or
+    dropped column the caller's ``where`` clause never named), and that read has no
+    guard of its own without this — the mock-data contract's "fail loud, never crash
+    unhelpfully" property applies to both seams alike.
+    """
+    try:
+        return row[column]
+    except KeyError as exc:
+        raise SchemaDriftError(f"schema drift: table {table!r} has no column {column!r} — see {GUIDE}") from exc
+
+
 def check_drift(schema: Mapping[str, ReflectedTable], rows: Sequence[FactRow]) -> None:
     """Validate ``rows`` against ``schema`` before any of them is inserted.
 

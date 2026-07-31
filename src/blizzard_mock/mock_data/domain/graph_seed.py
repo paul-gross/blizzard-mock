@@ -31,6 +31,7 @@ from random import Random
 from blizzard_mock.clock import Clock
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
+from blizzard_mock.mock_data.domain.schema_contract import require_column
 
 #: The name ``create chunk``/``create graph`` mint under when the caller names none.
 DEFAULT_GRAPH_NAME = "mock-data-synthetic-graph"
@@ -209,9 +210,15 @@ def hydrate_graph_context(graph_row: Mapping[str, object], node_rows: Sequence[M
     ``graph_nodes`` rows — the read side of ``--graph <name>`` reuse. A pure function
     of already-loaded rows (``bzh:domain-takes-objects``): ``cli.py`` does the actual
     store read (``SeedService.query``), this only shapes what comes back."""
-    nodes = {str(row["name"]): NodeRef(node_id=str(row["node_id"]), executor=str(row["executor"])) for row in node_rows}
+    nodes = {
+        str(require_column(row, "name", table="graph_nodes")): NodeRef(
+            node_id=str(require_column(row, "node_id", table="graph_nodes")),
+            executor=str(require_column(row, "executor", table="graph_nodes")),
+        )
+        for row in node_rows
+    }
     return GraphContext(
-        graph_id=str(graph_row["graph_id"]),
-        entry_node_id=str(graph_row["entry_node_id"]),
+        graph_id=str(require_column(graph_row, "graph_id", table="graphs")),
+        entry_node_id=str(require_column(graph_row, "entry_node_id", table="graphs")),
         nodes=nodes,
     )
