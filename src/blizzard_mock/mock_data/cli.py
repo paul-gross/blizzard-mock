@@ -50,6 +50,17 @@ Implemented verbs (bootstrap P7W4 + P2 + P3, the service tier's seeding needs):
     (``domain/runner_pause_seed.py``); ``--fleet --reason`` fails loud rather than
     silently dropping the reason (``runner_pause_facts`` has no such column).
 
+- ``scenario`` is a **group** too — richer, multi-concept worlds composed purely from
+  ``create``'s own composers:
+
+  - ``scenario board [--chunks N] [--stress] [--seed S]`` — one command, one
+    ready-to-view board (``domain/scenario_seed.py``): a synthetic graph, ``N`` chunks
+    deterministically spread across all nine derived statuses, a varying cost spread
+    (at least one cost-partial usage fact), a ceiling-paused runner, a runner per
+    chunk, and a mixed-severity event log. ``--stress`` layers on four
+    narrow-viewport/overflow extremes. ``--seed`` also pins the clock (not just the
+    id-minting RNG), so two runs at the same seed compose byte-identical output.
+
 Every verb accepts a target store as ``--url``/``$DATABASE_URL`` or as ``--dir`` — a hub/
 runner runtime directory whose ``blizzard-hub.toml``/``blizzard-runner.toml`` names the
 ``db_url`` (``internal/hub_runtime.py``) — sugar for ``--url`` that resolves before the
@@ -59,18 +70,19 @@ Every write runs the drift guard (``domain/schema_contract.py``) first: a schema
 the live store has moved out from under this tool — fails loud, naming the table and
 column(s), never a silently-wrong row.
 
-Richer, multi-concept scenarios (a consistent world across the hub store, the forge, and
-git state at once) are the ``fixture`` subgroup's job — it remains a stub.
+Richer-still, cross-store scenarios (a consistent world across the hub store, the forge,
+and git state at once) are the ``fixture`` subgroup's job — it remains a stub.
 """
 
 from __future__ import annotations
 
 import random
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 
-from blizzard_mock.clock import Clock, SystemClock
+from blizzard_mock.clock import Clock, FixedClock, SystemClock
 from blizzard_mock.mock_data.domain.chunk_seed import STATUSES, ChunkCompositionError, compose_chunk
 from blizzard_mock.mock_data.domain.escalation_seed import (
     CAUSE_RETRIES,
@@ -91,6 +103,11 @@ from blizzard_mock.mock_data.domain.ids import seeded_rng
 from blizzard_mock.mock_data.domain.lease_seed import compose_lease_row
 from blizzard_mock.mock_data.domain.question_seed import QuestionCompositionError, compose_question
 from blizzard_mock.mock_data.domain.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
+from blizzard_mock.mock_data.domain.scenario_seed import (
+    DEFAULT_CHUNKS,
+    ScenarioCompositionError,
+    compose_board_scenario,
+)
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 from blizzard_mock.mock_data.domain.seeding import SeedService
 from blizzard_mock.mock_data.domain.usage_seed import KINDS as USAGE_KINDS
@@ -112,6 +129,7 @@ _COMPOSITION_ERRORS = (
     QuestionCompositionError,
     EventCompositionError,
     RunnerPauseCompositionError,
+    ScenarioCompositionError,
 )
 
 #: The fallback ``event_log.runner_id`` (NOT NULL on the real table) when ``create
@@ -119,6 +137,13 @@ _COMPOSITION_ERRORS = (
 #: names one — the same "mock-data" placeholder ``create chunk``'s own facts use for
 #: ``set_by``/``stopped_by`` when no more specific attribution applies.
 _DEFAULT_EVENT_RUNNER_ID = "mock-data"
+
+#: The instant ``scenario board --seed N`` pins its clock to — a fixed, non-wall
+#: instant, so two separate invocations at the same seed compose byte-identical
+#: timestamps (and hence ids) rather than drifting apart on real wall-clock
+#: reads a few milliseconds apart (``domain/scenario_seed.py``'s reproducibility
+#: contract). Unseeded runs keep the real ``SystemClock``.
+_SCENARIO_CLOCK_ANCHOR = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def _resolve_url(store: str, url: str | None, runtime_dir: str | None) -> str:
@@ -713,6 +738,65 @@ def create_runner_pause(
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"created {'local' if local else 'fleet'} pause fact for runner {runner_id!r}")
+
+
+@cli.group()
+def scenario() -> None:
+    """Compose a whole, consistent multi-concept world in one invocation.
+
+    Where ``create``'s ten verbs each land one concept, ``scenario``'s verbs
+    are pure composition on top of them (``domain/scenario_seed.py``) — one
+    command, one realistic board.
+    """
+
+
+@scenario.command("board")
+@click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
+@click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
+@click.option(
+    "--chunks", "chunks", type=int, default=DEFAULT_CHUNKS, show_default=True, help="How many chunks to seed."
+)
+@click.option(
+    "--stress",
+    "stress",
+    is_flag=True,
+    default=False,
+    help="Also seed the four narrow-viewport/overflow extremes (long identity, long node name, multi-question chunk).",
+)
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
+def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress: bool, seed: int | None) -> None:
+    """Seed one whole, ready-to-view board: a synthetic graph, ``--chunks``
+    chunks spread across all nine derived statuses, a cost spread (including
+    at least one cost-partial usage fact), a ceiling-paused runner, a runner
+    per chunk, and a mixed-severity event log — see
+    ``domain/scenario_seed.py``'s module docstring for the exact, deterministic
+    status-distribution algorithm. ``--stress`` layers on four extremes a
+    narrow-viewport/overflow UI check needs on demand. Prints the store it
+    wrote to and a summary census. Always the hub store — a scenario board is
+    a hub-store concept, so there is no ``--store`` flag to get wrong."""
+    resolved_url = _resolve_url("hub", url, runtime_dir)
+    service = _seed_service(resolved_url)
+    clock: Clock = FixedClock(_SCENARIO_CLOCK_ANCHOR) if seed is not None else SystemClock()
+    rng = seeded_rng(seed)
+    try:
+        scenario_seed = compose_board_scenario(chunks=chunks, clock=clock, rng=rng, stress=stress)
+        service.seed(scenario_seed.rows)
+    except _COMPOSITION_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    census = scenario_seed.census
+    assert census is not None  # compose_board_scenario always returns one
+    click.echo(f"scenario board seeded into the hub store: {resolved_url}")
+    click.echo(f"graph: {scenario_seed.graph_id}")
+    click.echo(f"chunks: {census.chunk_count}")
+    for entry in census.chunk_entries:
+        click.echo(f"  chunk {entry.chunk_id} status={entry.status}")
+    click.echo(f"status census: {dict(sorted(census.status_counts.items()))}")
+    click.echo(f"runners: {census.runner_count} (ceiling-paused: {census.ceiling_paused_runner_id!r})")
+    click.echo(f"usage facts: {census.usage_fact_count} (cost-partial: {census.cost_partial_count})")
+    click.echo(f"stress extras: {'included' if stress else 'not included'}")
 
 
 @cli.group()

@@ -22,14 +22,14 @@ forge state (`blizzard_mock.forge`), and git state
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
 verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`, `usage`,
-`lease`, `escalation`, `question`, `event`, `runner-pause`), and the `fixture`
-subgroup (`list`, `apply`).
+`lease`, `escalation`, `question`, `event`, `runner-pause`), `scenario` (a group
+of its own: `board`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Ten `create` verbs live (P7W4 + P2 + P3), `fixture` still stubbed.** The service
-tier needs to seed and clean the real hub/runner stores, so the workhorse verbs are
-implemented.
+**Ten `create` verbs plus `scenario board` live (P7W4 + P2 + P3 + P4), `fixture`
+still stubbed.** The service tier needs to seed and clean the real hub/runner
+stores, so the workhorse verbs are implemented.
 
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
   live schema and deletes every row from every table in FK-safe order (children
@@ -95,8 +95,26 @@ implemented.
   **no** `reason` column — `--fleet --reason` fails loud naming the missing column
   rather than silently dropping it). Exactly one of `--local`/`--fleet` is
   required.
+- `scenario board [--chunks N] [--stress] [--seed S] [--url ... | --dir ...]` —
+  **implemented**. One command, one ready-to-view board (`domain/scenario_seed.py`),
+  composed purely from the ten `create` verbs' own composers — no new fact shape
+  of its own. Mints a graph, spreads `N` chunks (default 6) across the nine
+  derived statuses by a fixed, deterministic algorithm (see the module
+  docstring), lands a varying cost spread with at least one cost-partial usage
+  fact, a ceiling-paused runner (`runner_local_pause_facts`, not a `--cause cap`
+  escalation — the module docstring explains why), a runner per chunk, and a
+  mixed-severity event log. `--stress` layers on four narrow-viewport/overflow
+  extremes: a runner with a long identity, a chunk landed on a deliberately long
+  custom node name, and a second `waiting_on_human` chunk carrying two extra
+  independent question trails (multi-question). `--seed` seeds id-minting *and*
+  pins the clock to a fixed instant (not just the RNG, unlike the `create`
+  verbs), so two runs at the same seed compose byte-identical output — a
+  property `scenario board` needs that a single-concept `create` verb does not.
+  Always the hub store; prints the store it wrote to and a per-chunk, per-status
+  summary census.
 - The `fixture` subgroup — **stubbed** (clean "not implemented" exit). Named,
-  versioned scenarios composing several concepts at once land in a later phase.
+  versioned scenarios composing several concepts *and* stores (hub, forge, git)
+  at once land in a later phase — `scenario` stays within the hub store alone.
 
 ## Design
 
@@ -118,4 +136,6 @@ implemented.
 - Owns test files `tests/test_mock_data_cli.py` (every implemented verb exercised
   against a real sqlite store whose schema mirrors the hub's own DDL), and one
   `tests/test_mock_data_<concept>_seed.py` per composer module (each composer's
-  pure per-shape fact set, no store).
+  pure per-shape fact set, no store) — including
+  `tests/test_mock_data_scenario_seed.py` for `domain/scenario_seed.py`, the one
+  composer built purely on top of the others rather than against raw tables.

@@ -10,6 +10,7 @@ pinned too.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -317,7 +318,7 @@ def _table(meta: MetaData, name: str) -> Table:
 def test_root_help_describes_contract() -> None:
     result = _runner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for verb in ("reset", "create", "fixture"):
+    for verb in ("reset", "create", "scenario", "fixture"):
         assert verb in result.output
 
 
@@ -335,6 +336,8 @@ def test_verbs_expose_help() -> None:
         ["create", "question", "--help"],
         ["create", "event", "--help"],
         ["create", "runner-pause", "--help"],
+        ["scenario", "--help"],
+        ["scenario", "board", "--help"],
         ["fixture", "--help"],
         ["fixture", "apply", "--help"],
     ):
@@ -1250,6 +1253,190 @@ def test_create_runner_pause_requires_exactly_one_of_local_fleet(tmp_path: Path)
     )
     assert both.exit_code != 0
     assert "exactly one" in both.output
+
+
+# --- scenario board (implemented) --------------------------------------------
+
+_SCENARIO_CHUNK_LINE = re.compile(r"^\s*chunk (\S+) status=(\S+)$", re.MULTILINE)
+
+
+def _scenario_chunk_statuses(output: str) -> list[tuple[str, str]]:
+    return _SCENARIO_CHUNK_LINE.findall(output)
+
+
+def test_scenario_board_seeds_the_deterministic_six_chunk_census(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+
+    pairs = _scenario_chunk_statuses(result.output)
+    assert [status for _chunk_id, status in pairs] == [
+        "ready",
+        "running",
+        "needs_human",
+        "waiting_on_human",
+        "done",
+        "paused",
+    ]
+    assert "stress extras: not included" in result.output
+
+    with create_engine(url).begin() as conn:
+        chunk_rows = conn.execute(select(_table(meta, "chunks"))).all()
+    assert len(chunk_rows) == 6
+
+    for chunk_id, status in pairs:
+        expected_table = _STATUS_EXPECTATIONS[status]
+        assert expected_table is not None, status
+        with create_engine(url).begin() as conn:
+            rows = conn.execute(
+                select(_table(meta, expected_table)).where(_table(meta, expected_table).c.chunk_id == chunk_id)
+            ).all()
+        assert rows, (chunk_id, status)
+
+
+def test_scenario_board_default_chunk_count_is_six(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        chunk_rows = conn.execute(select(_table(meta, "chunks"))).all()
+    assert len(chunk_rows) == 6
+
+
+def test_scenario_board_lands_at_least_one_cost_partial_usage_fact(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        usage_rows = conn.execute(select(_table(meta, "usage_facts"))).all()
+    assert len(usage_rows) >= 2
+    assert any(row.cost_usd is None for row in usage_rows)
+    assert any(row.cost_usd is not None for row in usage_rows)
+
+
+def test_scenario_board_lands_a_ceiling_paused_runner_with_a_reason(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        pause_rows = conn.execute(select(_table(meta, "runner_local_pause_facts"))).all()
+    assert len(pause_rows) == 1
+    assert pause_rows[0].paused is True
+    assert pause_rows[0].reason
+    assert "ceiling" in pause_rows[0].reason
+
+
+def test_scenario_board_registers_a_runner_per_chunk(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        registration_rows = conn.execute(select(_table(meta, "runner_registrations"))).all()
+    assert len(registration_rows) == 6
+
+
+def test_scenario_board_populates_a_mixed_event_log(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        event_rows = conn.execute(select(_table(meta, "event_log"))).all()
+    assert len(event_rows) >= 3
+    assert {row.severity for row in event_rows} >= {"info", "warning", "critical"}
+
+
+def test_scenario_board_nine_or_more_chunks_covers_every_status(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "9", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    pairs = _scenario_chunk_statuses(result.output)
+    assert {status for _chunk_id, status in pairs} == set(_STATUS_EXPECTATIONS)
+
+
+def test_scenario_board_stress_adds_the_four_extremes(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1", "--stress"])
+    assert result.exit_code == 0, result.output
+    assert "stress extras: included" in result.output
+
+    with create_engine(url).begin() as conn:
+        registration_rows = conn.execute(select(_table(meta, "runner_registrations"))).all()
+        node_rows = conn.execute(select(_table(meta, "graph_nodes"))).all()
+        question_rows = conn.execute(select(_table(meta, "questions"))).all()
+
+    # 1. a runner with a long identity
+    assert any(len(row.runner_id) > 100 for row in registration_rows)
+    # 2. an extra waiting_on_human chunk (base six already carries one at --chunks 6)
+    pairs = _scenario_chunk_statuses(result.output)
+    assert [status for _chunk_id, status in pairs].count("waiting_on_human") == 2
+    # 3. a chunk landed on a deliberately long custom node name
+    long_nodes = [row for row in node_rows if len(row.name) > 100]
+    assert long_nodes
+    # 4. a multi-question chunk: 2+ distinct question ids under one chunk_id
+    chunk_ids = [row.chunk_id for row in question_rows]
+    assert any(chunk_ids.count(chunk_id) >= 2 for chunk_id in set(chunk_ids))
+
+
+def test_scenario_board_without_stress_omits_the_extras(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "6", "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    assert "stress extras: not included" in result.output
+    with create_engine(url).begin() as conn:
+        registration_rows = conn.execute(select(_table(meta, "runner_registrations"))).all()
+    assert len(registration_rows) == 6
+    assert all(len(row.runner_id) < 100 for row in registration_rows)
+
+
+def test_scenario_board_same_seed_is_byte_identical_across_two_fresh_stores(tmp_path: Path) -> None:
+    store_a, store_b = tmp_path / "a", tmp_path / "b"
+    store_a.mkdir()
+    store_b.mkdir()
+    url_a, meta_a = _full_hub_store(store_a)
+    url_b, meta_b = _full_hub_store(store_b)
+    result_a = _runner().invoke(cli, ["scenario", "board", "--url", url_a, "--chunks", "6", "--seed", "7", "--stress"])
+    result_b = _runner().invoke(cli, ["scenario", "board", "--url", url_b, "--chunks", "6", "--seed", "7", "--stress"])
+    assert result_a.exit_code == 0, result_a.output
+    assert result_b.exit_code == 0, result_b.output
+    # every line matches except the "seeded into ... <url>" line, which necessarily
+    # names each store's own path.
+    lines_a, lines_b = result_a.output.splitlines(), result_b.output.splitlines()
+    assert len(lines_a) == len(lines_b)
+    for line_a, line_b in zip(lines_a, lines_b, strict=True):
+        if line_a.startswith("scenario board seeded into"):
+            continue
+        assert line_a == line_b
+
+    with create_engine(url_a).begin() as conn:
+        chunk_ids_a = sorted(r.chunk_id for r in conn.execute(select(_table(meta_a, "chunks"))).all())
+        graph_ids_a = sorted(r.graph_id for r in conn.execute(select(_table(meta_a, "graphs"))).all())
+    with create_engine(url_b).begin() as conn:
+        chunk_ids_b = sorted(r.chunk_id for r in conn.execute(select(_table(meta_b, "chunks"))).all())
+        graph_ids_b = sorted(r.graph_id for r in conn.execute(select(_table(meta_b, "graphs"))).all())
+    assert chunk_ids_a == chunk_ids_b
+    assert graph_ids_a == graph_ids_b
+
+
+def test_scenario_board_different_seed_differs(tmp_path: Path) -> None:
+    store_a, store_b = tmp_path / "a", tmp_path / "b"
+    store_a.mkdir()
+    store_b.mkdir()
+    url_a, _meta_a = _full_hub_store(store_a)
+    url_b, _meta_b = _full_hub_store(store_b)
+    a = _runner().invoke(cli, ["scenario", "board", "--url", url_a, "--chunks", "6", "--seed", "1"])
+    b = _runner().invoke(cli, ["scenario", "board", "--url", url_b, "--chunks", "6", "--seed", "2"])
+    assert a.exit_code == 0, a.output
+    assert b.exit_code == 0, b.output
+    a_ids = _scenario_chunk_statuses(a.output)
+    b_ids = _scenario_chunk_statuses(b.output)
+    assert [chunk_id for chunk_id, _status in a_ids] != [chunk_id for chunk_id, _status in b_ids]
+
+
+def test_scenario_board_zero_chunks_is_refused(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--chunks", "0"])
+    assert result.exit_code != 0
+    assert "--chunks" in result.output
 
 
 # --- still-stubbed verbs ----------------------------------------------------
