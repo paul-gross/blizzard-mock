@@ -140,3 +140,40 @@ def test_fixture_apply_is_stub() -> None:
     result = _runner().invoke(cli, ["fixture", "apply", "parked-on-question"])
     assert result.exit_code == 1
     assert "not implemented" in result.output
+
+
+# --- schema drift surfaces as a clean CLI error -----------------------------
+
+
+def test_create_runner_against_a_drifted_schema_is_a_clean_click_exception(tmp_path: Path) -> None:
+    """A table missing the columns ``create runner`` supplies fails as a ``ClickException``
+    naming the drift — not a raw SQLAlchemy traceback."""
+    url = f"sqlite:///{tmp_path / 'hub.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    # `runner_registrations` exists but is missing `workspace_id` — a schema drift.
+    Table("runner_registrations", meta, Column("runner_id", String, primary_key=True))
+    meta.create_all(engine)
+
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "r1"])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "runner_registrations" in result.output
+    assert "workspace_id" in result.output
+    assert "Traceback" not in result.output
+
+
+# --- --dir resolves a runtime config's db_url -------------------------------
+
+
+def test_reset_accepts_a_runtime_dir_in_place_of_url(tmp_path: Path) -> None:
+    store_dir = tmp_path / "store"
+    store_dir.mkdir()
+    url, *_ = _hub_store(store_dir)
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "blizzard-hub.toml").write_text(f'db_url = "{url}"\n')
+
+    result = _runner().invoke(cli, ["reset", "--store", "hub", "--dir", str(runtime_dir)])
+    assert result.exit_code == 0, result.output
+    assert "cleared 0 row(s)" in result.output
