@@ -27,9 +27,15 @@ of its own: `board`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Ten `create` verbs plus `scenario board` live (P7W4 + P2 + P3 + P4), `fixture`
+**Nine `create` verbs plus `scenario board` live (P7W4 + P2 + P3 + P4), `fixture`
 still stubbed.** The service tier needs to seed and clean the real hub/runner
 stores, so the workhorse verbs are implemented.
+
+Every verb below takes its target store as `--url <sqlite path|postgres dsn>`
+(or `$DATABASE_URL`), or as `--dir <runtime dir>` — sugar that reads a
+hub/runner runtime's `blizzard-hub.toml`/`blizzard-runner.toml` `db_url`
+(`internal/hub_runtime.py`) and resolves to the same `--url` before the same
+code path runs; only `--url` is spelled out per verb below.
 
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
   live schema and deletes every row from every table in FK-safe order (children
@@ -97,7 +103,7 @@ stores, so the workhorse verbs are implemented.
   required.
 - `scenario board [--chunks N] [--stress] [--seed S] [--url ... | --dir ...]` —
   **implemented**. One command, one ready-to-view board (`domain/scenario_seed.py`),
-  composed purely from the ten `create` verbs' own composers — no new fact shape
+  composed purely from the nine `create` verbs' own composers — no new fact shape
   of its own. Mints a graph, spreads `N` chunks (default 6) across the nine
   derived statuses by a fixed, deterministic algorithm (see the module
   docstring), lands a varying cost spread with at least one cost-partial usage
@@ -126,6 +132,13 @@ stores, so the workhorse verbs are implemented.
 - Store access uses the pre-declared `sqlalchemy` + `psycopg` deps against the
   portable-SQL store surface (`bzh:sql-portable`); resolve the target store from
   `--store` + `--url`/`$DATABASE_URL`.
+- **The drift guard runs before any insert** (`domain/schema_contract.py`): every
+  composed `FactRow` is checked, table by table, against the live store's
+  *reflected* schema — the table exists, every supplied column key is a real
+  column, and every reflected NOT-NULL/no-default/non-autoincrement-PK column is
+  supplied. A miss is a schema drift — the live store moved out from under this
+  tool — and raises `SchemaDriftError` naming the table and the offending
+  column(s), never a silently-wrong row. Guide: `blizzard-context:/tooling/store-seeding.md`.
 - The concept composers (one `domain/*_seed.py` module per concept) are pure
   functions of already-loaded data (`bzh:domain-takes-objects`) returning a
   `FactRow`/`list[FactRow]` — no SQLAlchemy, no store read of their own. `cli.py`

@@ -744,7 +744,7 @@ def create_runner_pause(
 def scenario() -> None:
     """Compose a whole, consistent multi-concept world in one invocation.
 
-    Where ``create``'s ten verbs each land one concept, ``scenario``'s verbs
+    Where ``create``'s nine verbs each land one concept, ``scenario``'s verbs
     are pure composition on top of them (``domain/scenario_seed.py``) — one
     command, one realistic board.
     """
