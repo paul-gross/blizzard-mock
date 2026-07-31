@@ -20,7 +20,7 @@ contract.
 | [`blizzard_mock.forge`](src/blizzard_mock/forge/README.md) | `blizzard-mock-forge` | Mock GitHub forge — the work-source + delivery seams over one vendor surface, backed by bare git repos. |
 | [`blizzard_mock.fixture_workspace`](src/blizzard_mock/fixture_workspace/README.md) | `blizzard-mock-fixture` | Fixture-workspace scaffold — mints bare `file://` origins + a real winter workspace for the runner-under-test to drive. |
 | [`blizzard_mock.harness`](src/blizzard_mock/harness/README.md) | `mock-claude-code` (+ future codex / opencode facades) | Mock coding-harness engine — *the prompt is the program*: the shared `exec()` engine plus the per-harness CLI/wire facades the adapters are tested against. |
-| [`blizzard_mock.mock_data`](src/blizzard_mock/mock_data/README.md) | `blizzard-mock-data` | Mock-data CLI — creates / resets domain-model state and instantiates named, versioned fixture scenarios in the hub and runner stores. |
+| [`blizzard_mock.mock_data`](src/blizzard_mock/mock_data/README.md) | `blizzard-mock-data` | Mock-data CLI — creates / resets domain-model state in the hub and runner stores, and composes whole ready-to-view boards in one command (`scenario board`). Named, versioned fixture scenarios across stores (`fixture`) remain a stub. |
 
 ## Toolchain
 
