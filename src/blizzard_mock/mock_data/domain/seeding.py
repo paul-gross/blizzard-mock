@@ -5,11 +5,15 @@ operations a concept composition needs, owned inward; ``internal/reflected_store
 implements it. ``SeedService`` is the ``concept -> list[FactRow]`` orchestrator
 Phase 2+ concept composers hand their rows to; Phase 1 has no composer yet, so
 ``cli.py`` exercises the same seam directly for ``create runner``.
+
+Phase 2 adds the read half, ``query`` — ``create chunk --graph <name>``'s "reuse an
+existing minted graph, or mint one" lookup needs to read the store before deciding
+whether to write, the one place this tool reads its own prior writes back.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -36,6 +40,13 @@ class ISeedStore(Protocol):
         """Delete every row from every table, FK-safe (children before parents)."""
         ...
 
+    def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
+        """Read ``table``'s rows, filtered by an equality ``where`` (every row when
+        ``where`` is falsy) — the read half a concept composer's "reuse if present"
+        lookup needs (e.g. ``create chunk --graph <name>`` finding an existing
+        minted graph before deciding whether to mint one)."""
+        ...
+
 
 class SeedService:
     """Orchestrates ``concept -> list[FactRow]`` composition against a store."""
@@ -50,3 +61,8 @@ class SeedService:
     def reset(self) -> ResetSummary:
         """Return the store to a known-clean state."""
         return self._store.reset()
+
+    def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
+        """Read a table's rows through the store, for a concept composer's
+        existence lookup (see :meth:`ISeedStore.query`)."""
+        return self._store.query(table, where)

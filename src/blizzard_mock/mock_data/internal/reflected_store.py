@@ -12,9 +12,9 @@ piece of the drift check; the rules themselves live in the domain.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
-from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, insert
+from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, insert, select
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.schema_contract import (
@@ -105,6 +105,17 @@ class ReflectedStore:
             for table in reversed(meta.sorted_tables):  # children before parents (FK-safe)
                 deleted += conn.execute(delete(table)).rowcount or 0
         return ResetSummary(rows_deleted=deleted, table_count=len(meta.tables))
+
+    def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
+        meta = self._reflect()
+        reflected = meta.tables.get(table)
+        if reflected is None:
+            raise SchemaDriftError(f"schema drift: table {table!r} does not exist in the live store — see {GUIDE}")
+        stmt = select(reflected)
+        for column, value in (where or {}).items():
+            stmt = stmt.where(reflected.c[column] == value)
+        with self._engine.connect() as conn:
+            return [dict(row) for row in conn.execute(stmt).mappings().all()]
 
 
 # Typecheck-time Protocol/adapter conformance sentinel (bzh:dependency-inversion) — pyright
