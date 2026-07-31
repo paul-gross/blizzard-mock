@@ -705,6 +705,102 @@ def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_re
 
 
 # --------------------------------------------------------------------------- #
+# Whole-message mode (blizzard-mock issue #8): the entire message is the script
+# --------------------------------------------------------------------------- #
+
+
+def test_whole_message_execs_the_entire_body_with_no_tag(fenced_repo) -> None:
+    code, result = _run("verdict('pass', 'ran')", fenced_repo, whole_message=True)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
+
+
+def test_whole_message_ignores_a_behavior_script_tag_mention_on_its_own_line(fenced_repo) -> None:
+    """Whole-message mode does no sentinel scanning at all: a `<behavior-script>`
+    mention alone on a line — the exact shape that ends a *tagged* block early — is
+    just more script text here, even though it is itself invalid as a standalone
+    statement outside of a string."""
+    script = (
+        "marks = []\n"
+        "text = '''\n"
+        f"{engine.BEHAVIOR_SCRIPT_OPEN}\n"
+        "marks.append('should not run as code')\n"
+        f"{engine.BEHAVIOR_SCRIPT_CLOSE}\n"
+        "'''\n"
+        "marks.append('real')\n"
+        "verdict('pass', ','.join(marks))\n"
+    )
+
+    code, result = _run(script, fenced_repo, whole_message=True)
+
+    assert code == 0
+    assert result.subtype == "success"
+    # The tag lines inside the string literal are inert data, not delimiters — the
+    # whole body ran as one program, including the line right after the string.
+    assert "real" in (result.text or "")
+    assert "should not run as code" not in (result.text or "")
+
+
+def test_whole_message_does_not_consult_the_preamble_split(fenced_repo) -> None:
+    """A message that happens to contain a preamble-shaped facts table is still
+    exec'd wholesale — whole-message mode never calls `split_worker_preamble`."""
+    cwd, _ = fenced_repo
+    script = (
+        f"table = '| Field | Value |\\n|-------|-------|\\n| environment workdir | `{cwd}` |'\n"
+        "verdict('pass', 'ran despite the table-shaped string')\n"
+    )
+
+    code, result = _run(script, fenced_repo, whole_message=True)
+
+    assert code == 0
+    assert "ran despite the table-shaped string" in (result.text or "")
+
+
+def test_whole_message_resume_execs_the_entire_body_wholesale(fenced_repo) -> None:
+    _run("ask('proceed?')", fenced_repo, session_id="sess-whole-resume", whole_message=True)
+
+    code, result = _run(
+        "verdict('pass', answer())",
+        fenced_repo,
+        session_id="sess-whole-resume",
+        is_resume=True,
+        whole_message=True,
+    )
+
+    assert code == 0
+    # Untagged and whole-message alike, a resume is code end to end — `answer()`
+    # returns the resume message verbatim, never inferred prose.
+    assert "verdict('pass', answer())" in (result.text or "")
+
+
+@pytest.mark.parametrize(
+    "script",
+    ["", "   \n\n", "# just a comment\n# nothing to run\n"],
+    ids=["empty", "whitespace-only", "comments-only"],
+)
+def test_a_whole_message_script_with_an_empty_module_body_fails_loudly(script: str, fenced_repo) -> None:
+    """Well-formed-but-empty is the same rot as malformed: exit 0 with no verdict and
+    no side effects is exactly what a test cannot notice."""
+    code, result = _run(script, fenced_repo, whole_message=True)
+
+    assert code == 1
+    assert result.is_error
+    assert result.subtype == "error_during_execution"
+    assert "empty whole-message behavior script" in result.text
+
+
+def test_whole_message_defaults_to_off_and_leaves_tagged_prompts_alone(fenced_repo) -> None:
+    # Without whole_message=True, a <behavior-script>-tagged prompt still splits.
+    code, result = _run(_tagged("verdict('pass', 'ran')"), fenced_repo)
+
+    assert code == 0
+    assert result.subtype == "success"
+    assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
+
+
+# --------------------------------------------------------------------------- #
 # The acquired worktree (blizzard issue #17: cwd is the workspace root)
 # --------------------------------------------------------------------------- #
 

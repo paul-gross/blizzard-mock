@@ -14,7 +14,25 @@ environment. A test mints a workflow graph whose node prompts are behavior
 scripts, and the code rides the real pipeline (hub envelope → runner → adapter →
 spawn), including per-attempt variation via judgement `prompt_addendum` (D-071).
 
-**…but say which part of it.** A `<behavior-script>…</behavior-script>` tag marks
+**Whole-message mode is the preferred contract for a caller that composes the
+whole message itself** — test tiers, scripted journeys, fixture scenarios.
+`engine.run_prompt(..., whole_message=True)` execs the entire prompt (or, on
+resume, the entire resume message) with **no sentinel scanning at all**: no
+`<behavior-script>` tag lookup, no preamble split. A mention of the tag anywhere
+in the script — including inside a string literal a script builds or inspects —
+is just more script text, never a delimiter, which closes the residual the tag
+approach below cannot: a tag-shaped line inside a string still ends a tagged
+block early, because the line-anchored scan below has no notion of Python syntax.
+A whole-message script that parses to an empty module body (blank, or
+comments-only) fails the turn loudly (`EmptyBehaviorScriptError`) rather than
+exiting 0 with no verdict. Use whole-message mode whenever the caller controls
+the entire message; reach for the tag below only when a message mixes
+script-author-owned code with prose the caller does not fully control (an
+operator preamble, a quoted work item) and cannot cleanly separate the two
+before calling the engine.
+
+**…or, for mixed prose+script composition, say which part of it.** A
+`<behavior-script>…</behavior-script>` tag marks
 the program — the same tagged-text idiom the mock uses on the *output* side
 (`<Choice>`, `<Ask>`), turned around onto the input. Only the tagged blocks are
 `exec`'d, several concatenating in order; everything around them is prose the
@@ -306,7 +324,8 @@ Each facade registers a `[project.scripts]` binary:
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
-legacy, malformed — and the Claude Code JSON envelope + fence-refusal exit) and
-`tests/test_harness_hooks.py` (the hook seam: the lifecycle fire points, the
-exits that fire nothing, and real `--settings` hook execution against stub shell
-commands).
+legacy, malformed — whole-message mode — including a tag mention inert inside a
+string literal, and an empty module body failing loudly — and the Claude Code
+JSON envelope + fence-refusal exit) and `tests/test_harness_hooks.py` (the hook
+seam: the lifecycle fire points, the exits that fire nothing, and real
+`--settings` hook execution against stub shell commands).

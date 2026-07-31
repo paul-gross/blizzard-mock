@@ -15,10 +15,14 @@ Responsibilities owned here:
   in the worktree tree). It can never pass as a real harness binding.
 - **The exec.** Treat the prompt's behavior script (or, on resume, the resume
   message's) as Python source and :func:`exec` it in the worktree with the
-  :mod:`blizzard_mock.harness.helpers` surface bound as globals. Which part of the
-  prompt *is* the program is said explicitly by a ``<behavior-script>`` tag
-  (:func:`split_behavior_script`); an untagged prompt falls back to the positional
-  :func:`split_worker_preamble` and execs everything after the preamble.
+  :mod:`blizzard_mock.harness.helpers` surface bound as globals. A caller that
+  controls the whole message declares **whole-message mode** (``run_prompt(...,
+  whole_message=True)``) and the entire body execs with no sentinel scanning at
+  all — the preferred contract for a driver that composes the message itself.
+  Otherwise, which part of the prompt *is* the program is said explicitly by a
+  ``<behavior-script>`` tag (:func:`split_behavior_script`); an untagged prompt
+  falls back to the positional :func:`split_worker_preamble` and execs everything
+  after the preamble.
 - **Session state.** Persist a per-session file so a resumed script can read what
   it asked and act on the answer it was resumed with.
 
@@ -28,6 +32,7 @@ The engine owns *what* is emitted (a :class:`RunResult`); a facade's
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import contextvars
 import os
@@ -108,6 +113,17 @@ class BehaviorScriptTagError(ValueError):
     mode designed out here: a typo'd tag must never fall back to the legacy
     exec-everything path or quietly succeed as a no-op turn, because a script that
     stops running while its tests keep passing rots them invisibly.
+    """
+
+
+class EmptyBehaviorScriptError(ValueError):
+    """A whole-message behavior script parses to an empty module body.
+
+    Raised inside :func:`run_prompt`'s whole-message path so the turn ends as an
+    ``error_during_execution`` — the same silent-no-op rot
+    :class:`BehaviorScriptTagError` closes for an empty tagged block, closed here
+    for a message that is blank or comments-only (which parses to no statements at
+    all, so an unguarded exec would exit 0 with no verdict).
     """
 
 
@@ -407,6 +423,21 @@ def split_behavior_script(prompt: str) -> TaggedPrompt | None:
     return TaggedPrompt(script=script, prose=re.sub(r"\n{3,}", "\n\n", "\n".join(prose)).strip())
 
 
+def _parses_to_empty_module(source: str) -> bool:
+    """True iff ``source`` compiles to a module with no statements at all.
+
+    Blank or whitespace-only source is the obvious case; comments-only source also
+    parses to an empty body, which is exactly the silent no-verdict rot
+    :class:`EmptyBehaviorScriptError` exists to catch for whole-message mode. A
+    genuine syntax error is *not* reported as empty — that already fails loudly of
+    its own accord once :func:`exec` reaches it.
+    """
+    try:
+        return len(ast.parse(source).body) == 0
+    except SyntaxError:
+        return False
+
+
 def split_worker_preamble(prompt: str) -> tuple[str, str]:
     """Split a spawn prompt into ``(preamble, behavior_script)``.
 
@@ -537,6 +568,7 @@ def run_prompt(
     hooks: IHookRunner | None = None,
     model: str | None = None,
     effort: str | None = None,
+    whole_message: bool = False,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
@@ -546,10 +578,18 @@ def run_prompt(
     resume message — which *also arrives as code* and is what gets executed,
     with the persisted session state (prior asks) available to it.
 
-    Spawn and resume read the prompt the same way: a ``<behavior-script>``-tagged
-    prompt execs its blocks alone (:func:`split_behavior_script`), an untagged one
-    execs everything past the preamble (:func:`split_worker_preamble`), and a
-    malformed tag fails the turn as an ``error_during_execution``.
+    Spawn and resume read the prompt the same way: under ``whole_message=True``
+    the entire body execs with no sentinel scanning at all (no
+    ``<behavior-script>`` scan, no preamble split) — the mode for a caller that
+    composes the whole message itself (test tiers, scripted journeys, fixture
+    scenarios), where a mention of the tag anywhere in the script, including
+    inside a string literal, must stay inert. Otherwise, a ``<behavior-script>``-
+    tagged prompt execs its blocks alone (:func:`split_behavior_script`), an
+    untagged one execs everything past the preamble
+    (:func:`split_worker_preamble`), and a malformed tag fails the turn as an
+    ``error_during_execution``. A whole-message script that parses to an empty
+    module body (blank, or comments-only) fails the same way instead of exiting 0
+    with no verdict (:class:`EmptyBehaviorScriptError`).
 
     ``model``/``effort`` (issue #144) are the flags this invocation was launched with —
     recorded onto the session state as an :class:`~blizzard_mock.harness.session.Invocation`
@@ -587,26 +627,41 @@ def run_prompt(
 
     assert_fenced(cwd, env)
 
-    # Which part of the prompt is the program? A `<behavior-script>` block says so
-    # outright; without one, the runner's preamble still rides ahead of the envelope on
-    # a spawn — prose for an agent to read, not code to run — so the positional split
-    # decides. A malformed tag is neither: it is carried into the run below and raised
-    # there, so the turn fails loudly instead of degrading to either quiet path.
+    # Which part of the prompt is the program? Under whole-message mode the caller
+    # has already answered that question — the entire body is the program, no
+    # scanning at all, so a `<behavior-script>` mention anywhere inside it (even in
+    # a string literal) is inert data rather than a delimiter. Otherwise, a
+    # `<behavior-script>` block says so outright; without one, the runner's preamble
+    # still rides ahead of the envelope on a spawn — prose for an agent to read, not
+    # code to run — so the positional split decides. A malformed tag, or a
+    # whole-message script with an empty module body, is neither: it is carried
+    # into the run below and raised there, so the turn fails loudly instead of
+    # degrading to a quiet path.
     tag_error: BehaviorScriptTagError | None = None
+    empty_error: EmptyBehaviorScriptError | None = None
     tagged: TaggedPrompt | None = None
-    try:
-        tagged = split_behavior_script(prompt)
-    except BehaviorScriptTagError as exc:
-        tag_error = exc
-
     preamble, script = "", ""
-    if tagged is not None:
-        script = tagged.script
-    elif tag_error is None:
-        preamble, script = split_worker_preamble(prompt)
+    if whole_message:
+        script = prompt
+        if _parses_to_empty_module(script):
+            empty_error = EmptyBehaviorScriptError(
+                "empty whole-message behavior script: the message parses to an empty module body"
+            )
+    else:
+        try:
+            tagged = split_behavior_script(prompt)
+        except BehaviorScriptTagError as exc:
+            tag_error = exc
+
+        if tagged is not None:
+            script = tagged.script
+        elif tag_error is None:
+            preamble, script = split_worker_preamble(prompt)
+    script_error: Exception | None = tag_error or empty_error
     # What the *human* said this turn: a tagged prompt's prose, else the whole raw
-    # message (an untagged resume is code end to end, and `answer()` has always
-    # returned it verbatim). This is what a resumed script reads back as its answer.
+    # message (an untagged resume, and a whole-message resume alike, are code end to
+    # end, and `answer()` has always returned it verbatim). This is what a resumed
+    # script reads back as its answer.
     message = tagged.prose if tagged is not None else prompt
 
     store = SessionStore(_state_root(env, cwd))
@@ -648,14 +703,15 @@ def run_prompt(
         session_id=session_id,
         resume=is_resume,
         cwd=str(cwd),
+        whole_message=whole_message,
         tagged=tagged is not None,
         preamble_stripped=bool(preamble),
     )
     token = _CURRENT.set(ctx)
     started = time.monotonic()
     try:
-        if tag_error is not None:
-            raise tag_error  # a bad tag fails the turn as an error run, never silently
+        if script_error is not None:
+            raise script_error  # a bad tag or an empty whole-message script fails the turn, never silently
         with _chdir(cwd):
             exec(compile(script, "<behavior-script>", "exec"), _script_globals(ctx))
         result = ctx.result or RunResult(session_id=session_id, subtype="success")
