@@ -12,7 +12,7 @@ resolves a store URL, wires the domain seam (``domain/seeding.SeedService`` over
 ``internal/reflected_store.ReflectedStore`` adapter) with a real clock, calls it, and
 echoes the result — no SQLAlchemy or store logic lives here.
 
-Implemented verbs (bootstrap P7W4 + P2 + P3, the service tier's seeding needs):
+Implemented verbs (the service tier's seeding needs):
 
 - ``reset --store hub|runner`` — return a store to a **known-clean** state: delete every
   row from every table in FK-safe order. The workhorse — every service scenario starts

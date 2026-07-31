@@ -27,14 +27,18 @@ of its own: `board`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Nine `create` verbs plus `scenario board` live (P7W4 + P2 + P3 + P4), `fixture`
-still stubbed.** The service tier needs to seed and clean the real hub/runner
-stores, so the workhorse verbs are implemented.
+**Nine `create` verbs plus `scenario board` live, `fixture` still stubbed.**
+The service tier needs to seed and clean the real hub/runner stores, so the
+workhorse verbs are implemented.
 
-Every verb below takes its target store as `--url <sqlite path|postgres dsn>`
-(or `$DATABASE_URL`), or as `--dir <runtime dir>` — sugar that reads a
-hub/runner runtime's `blizzard-hub.toml`/`blizzard-runner.toml` `db_url`
-(`internal/hub_runtime.py`) and resolves to the same `--url` before the same
+Every `create` verb also takes `--store hub` (required — every seedable
+concept today lives in the hub store; there is no `runner`-store concept yet,
+so this is never anything but `hub` in practice, but the flag is real and
+omitting it is a `UsageError`) and its target store as
+`--url <sqlite path|postgres dsn>` (or `$DATABASE_URL`), or as
+`--dir <runtime dir>` — sugar that reads a hub/runner runtime's
+`blizzard-hub.toml`/`blizzard-runner.toml` `db_url` (`internal/hub_runtime.py`)
+and resolves to the same `--url` before the same
 code path runs; only `--url` is spelled out per verb below.
 
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
@@ -58,17 +62,17 @@ code path runs; only `--url` is spelled out per verb below.
   column). Auto-mints a graph (`create graph`'s own logic) when the store holds
   none, or reuses one by `--graph NAME`. Prints the minted chunk id, alone, on
   stdout — pipeable into a sibling verb.
-- `create usage --chunk ID --kind {spawn,resume,judge,nudge} --model M --input-tokens N [--output-tokens N] [--cache-read-tokens N] [--cache-create-tokens N] (--cost-usd X | --no-cost) [--node NAME] [--epoch N] [--runner-id R]`
+- `create usage --store hub --chunk ID --kind {spawn,resume,judge,nudge} --model M --input-tokens N [--output-tokens N] [--cache-read-tokens N] [--cache-create-tokens N] (--cost-usd X | --no-cost) [--node NAME] [--epoch N] [--runner-id R]`
   — **implemented**. Lands one `usage_facts` row (`domain/usage_seed.py`).
   `--no-cost` lands a genuine SQL `NULL` `cost_usd`, never a fabricated `0.0` — the
   hub's cost derivation reads a `NULL` row as a lower bound (`cost_partial`).
   `--node`/`--epoch`/`--runner-id` default from the chunk's own newest
   transition/lease when omitted.
-- `create lease --chunk ID --runner-id R [--epoch N]` — **implemented**. Lands one
+- `create lease --store hub --chunk ID --runner-id R [--epoch N]` — **implemented**. Lands one
   `lease_facts` row (`domain/lease_seed.py`) — the same row shape `create chunk
   --status running/delivering` composes internally, which imports it rather than
   re-deriving the shape.
-- `create escalation --chunk ID [--epoch N] [--takeover-command TEXT] [--cause {cap,retries}]`
+- `create escalation --store hub --chunk ID [--epoch N] [--takeover-command TEXT] [--cause {cap,retries}]`
   — **implemented**. Lands one `escalations` row (`domain/escalation_seed.py`);
   `needs_human` derives from an open one. `--cause cap` composes a takeover command
   carrying recognizable spend-cap wording (mirroring
@@ -79,7 +83,7 @@ code path runs; only `--url` is spelled out per verb below.
   also write an `event_log` row — an open escalation is synthesized into the
   read-time event feed (`derive_event_feed`), so `create escalation` alone is
   sufficient for it to show up there.
-- `create question --chunk ID --text T [--option TEXT]... [--answer A --answered-by W] [--delivered] [--resumed] [--node NAME] [--runner-id R] [--epoch N] [--seed N]`
+- `create question --store hub --chunk ID --text T [--option TEXT]... [--answer A --answered-by W] [--delivered] [--resumed] [--node NAME] [--runner-id R] [--epoch N] [--seed N]`
   — **implemented**. Lands one open-or-answered `questions` trail
   (`domain/question_seed.py`); `waiting_on_human` derives from an open one.
   `--answer`/`--answered-by` (required together) also land a `question_answers`
@@ -88,13 +92,13 @@ code path runs; only `--url` is spelled out per verb below.
   has no dedicated "resumed" row beyond the delivery. Each call mints its own
   question id, so a chunk can carry several independent trails. Prints the minted
   question id, alone, on stdout.
-- `create event --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
+- `create event --store hub --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
   — **implemented**. Lands one `event_log` row (`domain/event_seed.py`), the
   operational event feed. `--runner-id` (NOT NULL on the real table) defaults to
   `--chunk`'s newest lease's runner, or the `"mock-data"` placeholder absent
   either. `--detail` is opaque JSON, round-tripped only — validated to parse, never
   interpreted.
-- `create runner-pause --runner-id R (--local | --fleet) [--reason TEXT]` —
+- `create runner-pause --store hub --runner-id R (--local | --fleet) [--reason TEXT]` —
   **implemented**. Lands one pause fact, engaged (`domain/runner_pause_seed.py`):
   `--local` on the runner's own brake (`runner_local_pause_facts`, `--reason`
   nullable there), `--fleet` on the fleet's brake (`runner_pause_facts`, which has
@@ -109,9 +113,10 @@ code path runs; only `--url` is spelled out per verb below.
   docstring), lands a varying cost spread with at least one cost-partial usage
   fact, a ceiling-paused runner (`runner_local_pause_facts`, not a `--cause cap`
   escalation — the module docstring explains why), a runner per chunk, and a
-  mixed-severity event log. `--stress` layers on four narrow-viewport/overflow
-  extremes: a runner with a long identity, a chunk landed on a deliberately long
-  custom node name, and a second `waiting_on_human` chunk carrying two extra
+  mixed-severity event log. `--stress` layers on four deliberately extreme
+  properties across three additional rows (see the module docstring): a
+  runner with a long identity, a chunk landed on a deliberately long custom
+  node name, and a second `waiting_on_human` chunk carrying two extra
   independent question trails (multi-question). `--seed` seeds id-minting *and*
   pins the clock to a fixed instant (not just the RNG, unlike the `create`
   verbs), so two runs at the same seed compose byte-identical output — a

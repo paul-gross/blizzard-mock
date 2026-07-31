@@ -37,9 +37,10 @@ the deterministic census). The ceiling-pause fact is independent of chunk
 status entirely, so it composes cleanly alongside the fixed distribution
 above.
 
-``--stress`` layers four additional, deliberately extreme rows on top (see
-:func:`_compose_stress_extras`): a runner with a long identity, a chunk with a
-long custom node name, and one more ``waiting_on_human`` chunk carrying two
+``--stress`` layers four deliberately extreme properties across three
+additional rows on top (see :func:`_compose_stress_extras`): a runner with a
+long identity, a chunk with a long custom node name, and one more
+``waiting_on_human`` chunk carrying two
 *additional* independent question trails (multi-question) beyond the one
 ``chunk_seed`` itself lands for that status — the same chunk carries both the
 "waiting_on_human" and the "multi-question" extremes, deliberately: attaching
