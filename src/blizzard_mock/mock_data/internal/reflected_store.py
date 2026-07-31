@@ -35,6 +35,15 @@ from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary, See
 # when the URL names the sqlite dialect.
 _SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 
+#: Alembic's own bookkeeping table, reflected alongside every domain table since
+#: reflection has no notion of "ours vs. the daemon's." ``reset`` must never touch it:
+#: deleting its one row un-stamps the store's migration state without dropping or
+#: recreating a single table, so the *next* ``blizzard hub init``/``migrate`` sees no
+#: current revision, replays every migration from scratch, and dies on the first
+#: ``CREATE TABLE`` that already exists. Reproduced empirically: `reset` then a daemon
+#: restart against the same store.
+_MIGRATION_TRACKING_TABLE = "alembic_version"
+
 
 def _enable_sqlite_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
     """Turn on FK enforcement for this sqlite connection — off by default per
@@ -126,11 +135,12 @@ class ReflectedStore:
             raise SchemaDriftError(
                 f"the store has no tables — is it migrated? (run the daemon's `migrate`) — see {GUIDE}"
             )
+        reset_tables = [table for table in meta.sorted_tables if table.name != _MIGRATION_TRACKING_TABLE]
         deleted = 0
         with self._engine.begin() as conn:
-            for table in reversed(meta.sorted_tables):  # children before parents (FK-safe)
+            for table in reversed(reset_tables):  # children before parents (FK-safe)
                 deleted += conn.execute(delete(table)).rowcount or 0
-        return ResetSummary(rows_deleted=deleted, table_count=len(meta.tables))
+        return ResetSummary(rows_deleted=deleted, table_count=len(reset_tables))
 
     def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
         meta = self._reflect()

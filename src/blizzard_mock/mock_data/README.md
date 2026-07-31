@@ -42,10 +42,14 @@ and resolves to the same `--url` before the same
 code path runs; only `--url` is spelled out per verb below.
 
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
-  live schema and deletes every row from every table in FK-safe order (children
-  before parents). Store-agnostic: it never imports `blizzard`, so it works
-  against whatever the daemon's Alembic tree migrated. The workhorse — every
-  service scenario starts from a clean store.
+  live schema and deletes every row from every domain table in FK-safe order
+  (children before parents), skipping Alembic's own `alembic_version` bookkeeping
+  table — deleting its row would un-stamp the store's migration state without
+  dropping a single table, so the *next* daemon boot would replay every
+  migration from scratch and die on the first `CREATE TABLE` that already
+  exists. Store-agnostic: it never imports `blizzard`, so it works against
+  whatever the daemon's Alembic tree migrated. The workhorse — every service
+  scenario starts from a clean store.
 - `create runner --store hub --runner-id R [--paused] [--workspace-id W]` —
   **implemented**. Seeds one registered runner into the hub fleet registry
   (`runner_registrations`), and with `--paused` also lands a pause fact

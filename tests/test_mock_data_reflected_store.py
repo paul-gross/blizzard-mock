@@ -24,6 +24,7 @@ from sqlalchemy import (
     Table,
     create_engine,
     select,
+    text,
 )
 
 from blizzard_mock.mock_data.domain.facts import FactRow
@@ -203,3 +204,27 @@ def test_reset_rejects_an_unmigrated_store(tmp_path: Path) -> None:
     create_engine(url).connect().close()  # create the file with zero tables
     with pytest.raises(SchemaDriftError, match="no tables"):
         _store(url).reset()
+
+
+def test_reset_leaves_the_migration_tracking_table_alone(tmp_path: Path) -> None:
+    """A real Alembic-migrated store carries an ``alembic_version`` row alongside every
+    domain table; reflection has no notion of "ours vs. the daemon's" so it comes back
+    with everything else. ``reset`` must skip it: deleting that one row un-stamps the
+    store's migration state without touching a single domain table, so the *next*
+    ``blizzard hub init``/``migrate`` against the same file sees no current revision,
+    replays every migration from scratch, and dies on the first ``CREATE TABLE`` that
+    already exists — reproduced empirically against a live hub runtime."""
+    url, _registrations, _pause = _hub_store(tmp_path)
+    engine = create_engine(url)
+    meta = MetaData()
+    Table("alembic_version", meta, Column("version_num", String, primary_key=True))
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('some_revision')"))
+
+    summary = _store(url).reset()
+
+    assert summary.table_count == 2  # runner_registrations + runner_pause_facts — alembic_version excluded
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT version_num FROM alembic_version")).all()
+    assert [row[0] for row in rows] == ["some_revision"]
