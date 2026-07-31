@@ -21,13 +21,15 @@ forge state (`blizzard_mock.forge`), and git state
 ## Binary
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
-verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`), and the
-`fixture` subgroup (`list`, `apply`).
+verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`, `usage`,
+`lease`, `escalation`, `question`, `event`, `runner-pause`), and the `fixture`
+subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Four verbs live (P7W4 + P2), `fixture` still stubbed.** The service tier needs to
-seed and clean the real hub/runner stores, so the workhorse verbs are implemented.
+**Ten `create` verbs live (P7W4 + P2 + P3), `fixture` still stubbed.** The service
+tier needs to seed and clean the real hub/runner stores, so the workhorse verbs are
+implemented.
 
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
   live schema and deletes every row from every table in FK-safe order (children
@@ -50,6 +52,49 @@ seed and clean the real hub/runner stores, so the workhorse verbs are implemente
   column). Auto-mints a graph (`create graph`'s own logic) when the store holds
   none, or reuses one by `--graph NAME`. Prints the minted chunk id, alone, on
   stdout — pipeable into a sibling verb.
+- `create usage --chunk ID --kind {spawn,resume,judge,nudge} --model M --input-tokens N [--output-tokens N] [--cache-read-tokens N] [--cache-create-tokens N] (--cost-usd X | --no-cost) [--node NAME] [--epoch N] [--runner-id R]`
+  — **implemented**. Lands one `usage_facts` row (`domain/usage_seed.py`).
+  `--no-cost` lands a genuine SQL `NULL` `cost_usd`, never a fabricated `0.0` — the
+  hub's cost derivation reads a `NULL` row as a lower bound (`cost_partial`).
+  `--node`/`--epoch`/`--runner-id` default from the chunk's own newest
+  transition/lease when omitted.
+- `create lease --chunk ID --runner-id R [--epoch N]` — **implemented**. Lands one
+  `lease_facts` row (`domain/lease_seed.py`) — the same row shape `create chunk
+  --status running/delivering` composes internally, which imports it rather than
+  re-deriving the shape.
+- `create escalation --chunk ID [--epoch N] [--takeover-command TEXT] [--cause {cap,retries}]`
+  — **implemented**. Lands one `escalations` row (`domain/escalation_seed.py`);
+  `needs_human` derives from an open one. `--cause cap` composes a takeover command
+  carrying recognizable spend-cap wording (mirroring
+  `_park_on_cost_cap`'s log-only reason string — never actually written to the real
+  schema, since the real `takeover_command` column is cause-agnostic; see the
+  module docstring); `--cause retries` (the default) composes the plain generic
+  placeholder. `--takeover-command` overrides either default verbatim. Does **not**
+  also write an `event_log` row — an open escalation is synthesized into the
+  read-time event feed (`derive_event_feed`), so `create escalation` alone is
+  sufficient for it to show up there.
+- `create question --chunk ID --text T [--option TEXT]... [--answer A --answered-by W] [--delivered] [--resumed] [--node NAME] [--runner-id R] [--epoch N] [--seed N]`
+  — **implemented**. Lands one open-or-answered `questions` trail
+  (`domain/question_seed.py`); `waiting_on_human` derives from an open one.
+  `--answer`/`--answered-by` (required together) also land a `question_answers`
+  row; `--delivered` (requires `--answer`) also lands an `answer_deliveries` row.
+  `--resumed` requires `--delivered` and lands no fact of its own — the real schema
+  has no dedicated "resumed" row beyond the delivery. Each call mints its own
+  question id, so a chunk can carry several independent trails. Prints the minted
+  question id, alone, on stdout.
+- `create event --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
+  — **implemented**. Lands one `event_log` row (`domain/event_seed.py`), the
+  operational event feed. `--runner-id` (NOT NULL on the real table) defaults to
+  `--chunk`'s newest lease's runner, or the `"mock-data"` placeholder absent
+  either. `--detail` is opaque JSON, round-tripped only — validated to parse, never
+  interpreted.
+- `create runner-pause --runner-id R (--local | --fleet) [--reason TEXT]` —
+  **implemented**. Lands one pause fact, engaged (`domain/runner_pause_seed.py`):
+  `--local` on the runner's own brake (`runner_local_pause_facts`, `--reason`
+  nullable there), `--fleet` on the fleet's brake (`runner_pause_facts`, which has
+  **no** `reason` column — `--fleet --reason` fails loud naming the missing column
+  rather than silently dropping it). Exactly one of `--local`/`--fleet` is
+  required.
 - The `fixture` subgroup — **stubbed** (clean "not implemented" exit). Named,
   versioned scenarios composing several concepts at once land in a later phase.
 
@@ -58,17 +103,19 @@ seed and clean the real hub/runner stores, so the workhorse verbs are implemente
 - **No `blizzard` import.** The CLI reflects the target store's schema at runtime
   (SQLAlchemy `MetaData.reflect`), so a hub/runner schema change never forces a
   mock-repo edit — exactly as the forge mirrors GitHub without importing octokit.
-  `domain/graph_seed.py`/`domain/chunk_seed.py` independently mirror the id-prefix
-  and status vocabulary they need, the same precedent `domain/ids.py` set.
+  Each `domain/*_seed.py` composer independently mirrors the id-prefix/status/kind
+  vocabulary it needs, the same precedent `domain/ids.py` set.
 - Store access uses the pre-declared `sqlalchemy` + `psycopg` deps against the
   portable-SQL store surface (`bzh:sql-portable`); resolve the target store from
   `--store` + `--url`/`$DATABASE_URL`.
-- The concept composers (`domain/graph_seed.py`, `domain/chunk_seed.py`) are pure
-  functions of already-loaded data (`bzh:domain-takes-objects`) returning
-  `list[FactRow]` — no SQLAlchemy, no store read of their own. `cli.py` (the
-  composition root) does the one read a composer needs — `--graph NAME` reuse —
-  via `ISeedStore.query`, then hands the composed rows to `SeedService.seed`.
+- The concept composers (one `domain/*_seed.py` module per concept) are pure
+  functions of already-loaded data (`bzh:domain-takes-objects`) returning a
+  `FactRow`/`list[FactRow]` — no SQLAlchemy, no store read of their own. `cli.py`
+  (the composition root) does the reads a composer needs — `--graph NAME` reuse,
+  and `create usage`/`create event`'s "derive from the chunk's own rows when a
+  flag is omitted" lookups — via `ISeedStore.query`, then hands the composed rows
+  to `SeedService.seed`.
 - Owns test files `tests/test_mock_data_cli.py` (every implemented verb exercised
-  against a real sqlite store whose schema mirrors the hub's own DDL),
-  `tests/test_mock_data_graph_seed.py`, and `tests/test_mock_data_chunk_seed.py`
-  (the composers' pure per-status/per-shape fact sets, no store).
+  against a real sqlite store whose schema mirrors the hub's own DDL), and one
+  `tests/test_mock_data_<concept>_seed.py` per composer module (each composer's
+  pure per-shape fact set, no store).

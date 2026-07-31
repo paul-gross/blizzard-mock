@@ -48,6 +48,7 @@ from blizzard_mock.clock import Clock
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.graph_seed import BUILD_NODE_NAME, DELIVER_NODE_NAME, GraphContext
+from blizzard_mock.mock_data.domain.lease_seed import compose_lease_row
 
 STOPPED = "stopped"
 DONE = "done"
@@ -159,14 +160,8 @@ def compose_chunk(
         )
 
     def lease(offset_seconds: int) -> FactRow:
-        return FactRow(
-            table="lease_facts",
-            values={
-                "chunk_id": minted_chunk_id,
-                "epoch": epoch,
-                "runner_id": runner_id,
-                "minted_at": at(offset_seconds),
-            },
+        return compose_lease_row(
+            chunk_id=minted_chunk_id, epoch=epoch, runner_id=runner_id, minted_at=at(offset_seconds)
         )
 
     def route_created(offset_seconds: int) -> FactRow:

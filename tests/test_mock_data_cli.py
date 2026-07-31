@@ -18,6 +18,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     MetaData,
@@ -236,6 +237,72 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("released_at", DateTime, nullable=False),
         Column("seq", Integer, nullable=False),
     )
+    Table(
+        "usage_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
+        Column("node_id", String, nullable=False),
+        Column("epoch", Integer, nullable=False),
+        Column("runner_id", String, nullable=False),
+        Column("kind", String, nullable=False),
+        Column("model", String, nullable=False),
+        Column("input_tokens", Integer, nullable=False),
+        Column("output_tokens", Integer, nullable=False),
+        Column("cache_read_tokens", Integer, nullable=False),
+        Column("cache_create_tokens", Integer, nullable=False),
+        Column("cost_usd", Float, nullable=True),
+        Column("recorded_at", DateTime, nullable=False),
+    )
+    Table(
+        "answer_deliveries",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("question_id", String, ForeignKey("questions.question_id"), nullable=False),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
+        Column("delivered_at", DateTime, nullable=False),
+    )
+    Table(
+        "runner_registrations",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("workspace_id", String, nullable=False),
+        Column("registered_at", DateTime, nullable=False),
+        Column("last_seen_at", DateTime, nullable=False),
+    )
+    Table(
+        "runner_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, ForeignKey("runner_registrations.runner_id"), nullable=False),
+        Column("paused", Boolean, nullable=False),
+        Column("set_at", DateTime, nullable=False),
+        Column("set_by", String, nullable=False),
+    )
+    Table(
+        "runner_local_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=False),
+        Column("paused", Boolean, nullable=False),
+        Column("set_at", DateTime, nullable=False),
+        Column("set_by", String, nullable=False),
+        Column("reason", Text, nullable=True),
+    )
+    Table(
+        "event_log",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("recorded_at", DateTime, nullable=False),
+        Column("severity", String, nullable=False),
+        Column("kind", String, nullable=False),
+        Column("runner_id", String, nullable=False),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=True),
+        Column("lease_id", String, nullable=True),
+        Column("node_name", String, nullable=True),
+        Column("message", Text, nullable=False),
+        Column("detail", Text, nullable=True),
+    )
     meta.create_all(engine)
     return url, meta
 
@@ -262,6 +329,12 @@ def test_verbs_expose_help() -> None:
         ["create", "runner", "--help"],
         ["create", "graph", "--help"],
         ["create", "chunk", "--help"],
+        ["create", "usage", "--help"],
+        ["create", "lease", "--help"],
+        ["create", "escalation", "--help"],
+        ["create", "question", "--help"],
+        ["create", "event", "--help"],
+        ["create", "runner-pause", "--help"],
         ["fixture", "--help"],
         ["fixture", "apply", "--help"],
     ):
@@ -271,7 +344,7 @@ def test_verbs_expose_help() -> None:
 def test_create_group_help_lists_every_subcommand() -> None:
     result = _runner().invoke(cli, ["create", "--help"])
     assert result.exit_code == 0
-    for subcommand in ("runner", "graph", "chunk"):
+    for subcommand in ("runner", "graph", "chunk", "usage", "lease", "escalation", "question", "event", "runner-pause"):
         assert subcommand in result.output
 
 
@@ -509,6 +582,674 @@ def test_create_chunk_ready_refuses_a_node(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "mints no transition" in result.output
+
+
+# --- create usage (implemented) ---------------------------------------------
+
+
+def test_create_usage_lands_a_cost_fact(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_result = runner.invoke(cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"])
+    assert chunk_result.exit_code == 0, chunk_result.output
+    chunk_id = chunk_result.output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "spawn",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "100",
+            "--output-tokens",
+            "50",
+            "--cost-usd",
+            "1.23",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(
+            select(_table(meta, "usage_facts")).where(_table(meta, "usage_facts").c.chunk_id == chunk_id)
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].cost_usd == 1.23
+    assert rows[0].input_tokens == 100
+    assert rows[0].output_tokens == 50
+
+
+def test_create_usage_no_cost_lands_a_genuine_null(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "resume",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "10",
+            "--no-cost",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        cost = conn.execute(
+            select(_table(meta, "usage_facts").c.cost_usd).where(_table(meta, "usage_facts").c.chunk_id == chunk_id)
+        ).scalar()
+    assert cost is None
+
+
+def test_create_usage_requires_exactly_one_of_cost_flags(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]
+    ).output.strip()
+    base = [
+        "create",
+        "usage",
+        "--store",
+        "hub",
+        "--url",
+        url,
+        "--chunk",
+        chunk_id,
+        "--kind",
+        "spawn",
+        "--model",
+        "claude-x",
+        "--input-tokens",
+        "1",
+    ]
+    neither = runner.invoke(cli, base)
+    assert neither.exit_code != 0
+    assert "exactly one" in neither.output
+    both = runner.invoke(cli, [*base, "--cost-usd", "1.0", "--no-cost"])
+    assert both.exit_code != 0
+    assert "mutually exclusive" in both.output
+
+
+def test_create_usage_defaults_node_epoch_runner_from_the_chunks_lease_and_transition(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli,
+        [
+            "create",
+            "chunk",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--status",
+            "running",
+            "--runner-id",
+            "r-usage",
+            "--epoch",
+            "3",
+        ],
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "judge",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "1",
+            "--no-cost",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        row = conn.execute(
+            select(_table(meta, "usage_facts")).where(_table(meta, "usage_facts").c.chunk_id == chunk_id)
+        ).one()
+        transitions = _table(meta, "transitions")
+        newest_node = conn.execute(select(transitions.c.to_node_id).where(transitions.c.chunk_id == chunk_id)).scalar()
+    assert row.epoch == 3
+    assert row.runner_id == "r-usage"
+    assert row.node_id == newest_node
+
+
+def test_create_usage_refuses_when_no_node_is_derivable(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "spawn",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "1",
+            "--no-cost",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--node" in result.output
+
+
+# --- create lease (implemented) ----------------------------------------------
+
+
+def test_create_lease_lands_a_lease_fact(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "lease",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--runner-id",
+            "r-lease",
+            "--epoch",
+            "5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(
+            select(_table(meta, "lease_facts")).where(_table(meta, "lease_facts").c.chunk_id == chunk_id)
+        ).all()
+    assert [(r.runner_id, r.epoch) for r in rows] == [("r-lease", 5)]
+
+
+# --- create escalation (implemented) -----------------------------------------
+
+
+def test_create_escalation_default_cause_composes_the_generic_placeholder(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(cli, ["create", "escalation", "--store", "hub", "--url", url, "--chunk", chunk_id])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        takeover = conn.execute(
+            select(_table(meta, "escalations").c.takeover_command).where(
+                _table(meta, "escalations").c.chunk_id == chunk_id
+            )
+        ).scalar()
+    assert takeover == f"cd <workdir> && <resume {chunk_id}>"
+
+
+def test_create_escalation_cause_cap_composes_recognizable_spend_cap_wording(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli, ["create", "escalation", "--store", "hub", "--url", url, "--chunk", chunk_id, "--cause", "cap"]
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        takeover = conn.execute(
+            select(_table(meta, "escalations").c.takeover_command).where(
+                _table(meta, "escalations").c.chunk_id == chunk_id
+            )
+        ).scalar()
+    assert takeover is not None
+    assert takeover.startswith("spend cap ")
+    assert "reached" in takeover
+    assert takeover.endswith(f"cd <workdir> && <resume {chunk_id}>")
+
+
+def test_create_escalation_explicit_takeover_command_overrides_the_cause_default(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "escalation",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--cause",
+            "cap",
+            "--takeover-command",
+            "cd /custom && claude --resume abc",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        takeover = conn.execute(
+            select(_table(meta, "escalations").c.takeover_command).where(
+                _table(meta, "escalations").c.chunk_id == chunk_id
+            )
+        ).scalar()
+    assert takeover == "cd /custom && claude --resume abc"
+
+
+# --- create question (implemented) -------------------------------------------
+
+
+def test_create_question_lands_an_open_question(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "question",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--text",
+            "which way?",
+            "--option",
+            "a",
+            "--option",
+            "b",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    question_id = result.output.strip()
+    assert question_id.startswith("qn_")
+    with create_engine(url).begin() as conn:
+        question_rows = conn.execute(select(_table(meta, "questions"))).all()
+        answer_rows = conn.execute(select(_table(meta, "question_answers"))).all()
+    assert [q.question_id for q in question_rows] == [question_id]
+    assert question_rows[0].options == '["a", "b"]'
+    assert answer_rows == []
+
+
+def test_create_question_with_answer_lands_the_answer_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "question",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--text",
+            "which way?",
+            "--answer",
+            "left",
+            "--answered-by",
+            "operator-1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    question_id = result.output.strip()
+    with create_engine(url).begin() as conn:
+        answer_rows = conn.execute(select(_table(meta, "question_answers"))).all()
+    assert [(r.question_id, r.answer, r.answered_by) for r in answer_rows] == [(question_id, "left", "operator-1")]
+
+
+def test_create_question_delivered_lands_the_delivery_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "question",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--text",
+            "which way?",
+            "--answer",
+            "left",
+            "--answered-by",
+            "operator-1",
+            "--delivered",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    question_id = result.output.strip()
+    with create_engine(url).begin() as conn:
+        delivery_rows = conn.execute(select(_table(meta, "answer_deliveries"))).all()
+    assert [(r.question_id, r.chunk_id) for r in delivery_rows] == [(question_id, chunk_id)]
+
+
+def test_create_question_twice_on_the_same_chunk_lands_two_independent_trails(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    first = runner.invoke(
+        cli, ["create", "question", "--store", "hub", "--url", url, "--chunk", chunk_id, "--text", "q1"]
+    )
+    second = runner.invoke(
+        cli, ["create", "question", "--store", "hub", "--url", url, "--chunk", chunk_id, "--text", "q2"]
+    )
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    first_id, second_id = first.output.strip(), second.output.strip()
+    assert first_id != second_id
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(
+            select(_table(meta, "questions").c.question_id).where(_table(meta, "questions").c.chunk_id == chunk_id)
+        ).all()
+    assert {r.question_id for r in rows} == {first_id, second_id}
+
+
+def test_create_question_delivered_without_answer_is_refused(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli, ["create", "question", "--store", "hub", "--url", url, "--chunk", chunk_id, "--text", "q", "--delivered"]
+    )
+    assert result.exit_code != 0
+    assert "--answer" in result.output
+
+
+def test_create_question_answer_without_answered_by_is_refused(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        ["create", "question", "--store", "hub", "--url", url, "--chunk", chunk_id, "--text", "q", "--answer", "left"],
+    )
+    assert result.exit_code != 0
+    assert "--answered-by" in result.output
+
+
+def test_create_question_resumed_without_delivered_is_refused(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli, ["create", "question", "--store", "hub", "--url", url, "--chunk", chunk_id, "--text", "q", "--resumed"]
+    )
+    assert result.exit_code != 0
+    assert "--resumed" in result.output
+
+
+# --- create event (implemented) -----------------------------------------------
+
+
+def test_create_event_lands_a_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "runner.registered",
+            "--severity",
+            "info",
+            "--message",
+            "hello",
+            "--runner-id",
+            "r-1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "event_log"))).all()
+    assert len(rows) == 1
+    assert rows[0].runner_id == "r-1"
+    assert rows[0].severity == "info"
+
+
+def test_create_event_with_chunk_defaults_runner_id_from_the_chunks_newest_lease(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running", "--runner-id", "r-lease-holder"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "chunk.noticed",
+            "--severity",
+            "warning",
+            "--message",
+            "hi",
+            "--chunk",
+            chunk_id,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        runner_id = conn.execute(
+            select(_table(meta, "event_log").c.runner_id).where(_table(meta, "event_log").c.chunk_id == chunk_id)
+        ).scalar()
+    assert runner_id == "r-lease-holder"
+
+
+def test_create_event_with_chunk_and_no_lease_falls_back_to_the_placeholder(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "chunk.noticed",
+            "--severity",
+            "info",
+            "--message",
+            "hi",
+            "--chunk",
+            chunk_id,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        runner_id = conn.execute(
+            select(_table(meta, "event_log").c.runner_id).where(_table(meta, "event_log").c.chunk_id == chunk_id)
+        ).scalar()
+    assert runner_id == "mock-data"
+
+
+def test_create_event_detail_must_parse_as_json(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "chunk.noticed",
+            "--severity",
+            "info",
+            "--message",
+            "hi",
+            "--runner-id",
+            "r-1",
+            "--detail",
+            "{not json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "JSON" in result.output
+
+
+# --- create runner-pause (implemented) ----------------------------------------
+
+
+def test_create_runner_pause_local_lands_a_reason(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner-pause",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "r-1",
+            "--local",
+            "--reason",
+            "ceiling",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "runner_local_pause_facts"))).all()
+    assert [(r.runner_id, r.paused, r.reason) for r in rows] == [("r-1", True, "ceiling")]
+
+
+def test_create_runner_pause_fleet_lands_no_reason_column(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "r-1", "--fleet"]
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "runner_pause_facts"))).all()
+    assert [(r.runner_id, r.paused) for r in rows] == [("r-1", True)]
+
+
+def test_create_runner_pause_fleet_with_reason_fails_loud(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "r-1", "--fleet", "--reason", "oops"],
+    )
+    assert result.exit_code != 0
+    assert "runner_pause_facts" in result.output
+    assert "reason" in result.output
+
+
+def test_create_runner_pause_requires_exactly_one_of_local_fleet(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    neither = runner.invoke(cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "r-1"])
+    assert neither.exit_code != 0
+    assert "exactly one" in neither.output
+    both = runner.invoke(
+        cli, ["create", "runner-pause", "--store", "hub", "--url", url, "--runner-id", "r-1", "--local", "--fleet"]
+    )
+    assert both.exit_code != 0
+    assert "exactly one" in both.output
 
 
 # --- still-stubbed verbs ----------------------------------------------------
