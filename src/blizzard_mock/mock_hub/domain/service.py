@@ -62,6 +62,7 @@ RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
+EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
 
 class ChunkNotFound(Exception):
@@ -352,9 +353,11 @@ class MockHubService:
         # usage.recorded and event.recorded (issue #125): neither is fenced or
         # route-token-gated at the real hub (deliberate); the mock has no usage ledger or
         # event log to post to, so accepting without modeling further is the honest minimum
-        # (issue #4). Any other kind is unrecognized — rejected, mirroring the real hub's
-        # fallthrough.
-        return kind in (USAGE_RECORDED, EVENT_RECORDED)
+        # (issue #4). external_subscription_usage.sampled (issue #218) is the same shape:
+        # runner-scoped, advisory-only, and the mock has no fleet-registry display field to
+        # refresh it into — accepted and no-op-stored. Any other kind is unrecognized —
+        # rejected, mirroring the real hub's fallthrough.
+        return kind in (USAGE_RECORDED, EVENT_RECORDED, EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED)
 
     # -- completion apply --------------------------------------------------
 

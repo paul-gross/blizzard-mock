@@ -539,6 +539,38 @@ def test_events_usage_recorded_is_accepted(client: TestClient) -> None:
     assert ack.json()["rejected"] == []
 
 
+def test_events_external_subscription_usage_sampled_is_accepted(client: TestClient) -> None:
+    """A sampled external-subscription-usage snapshot (issue #218) is runner-scoped and
+    advisory-only, mirroring ``usage.recorded``/``event.recorded``: the mock has no
+    fleet-registry display field to refresh it into, so accepting without modeling
+    further is the honest minimum."""
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "sampled_at": "2026-08-01T12:00:00+00:00",
+                        "windows": [
+                            {
+                                "window": "5h",
+                                "utilization_pct": 42.0,
+                                "resets_at": "2026-08-01T17:00:00+00:00",
+                                "window_seconds": 18000,
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+    assert ack.json()["rejected"] == []
+
+
 def test_events_known_kind_on_an_unknown_chunk_is_still_applied(client: TestClient) -> None:
     """The batched ``_apply`` carries no chunk-existence check on the real hub (unlike
     the direct ``/leases``/``/escalations`` routes) — a known kind naming a chunk the
