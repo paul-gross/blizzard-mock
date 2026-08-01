@@ -40,6 +40,11 @@ class CreateCommentBody(BaseModel):
     user: str = "octocat"
 
 
+class UpdateIssueStateBody(BaseModel):
+    state: str
+    state_reason: str | None = None
+
+
 class CreatePullBody(BaseModel):
     title: str
     head: str

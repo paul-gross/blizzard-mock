@@ -49,6 +49,7 @@ def issue_json(repo_full: str, issue: Issue, base_url: str, *, is_pull: bool = F
         "title": issue.title,
         "body": issue.body,
         "state": issue.state.value,
+        "state_reason": issue.state_reason,
         "user": _user(issue.user),
         "labels": issue_labels_json(issue.labels),
         "comments": len(issue.comments),

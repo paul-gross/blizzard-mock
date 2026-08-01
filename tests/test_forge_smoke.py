@@ -138,6 +138,50 @@ def test_blank_title_rejected(client: TestClient) -> None:
     assert client.post(f"/repos/{REPO}/issues", json={"title": "  "}).status_code == 422
 
 
+def test_close_issue_sets_state_and_reason(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+
+    closed = client.patch(f"/repos/{REPO}/issues/{number}", json={"state": "closed", "state_reason": "completed"})
+    assert closed.status_code == 200
+    assert closed.json()["state"] == "closed"
+    assert closed.json()["state_reason"] == "completed"
+
+    got = client.get(f"/repos/{REPO}/issues/{number}").json()
+    assert got["state"] == "closed"
+    assert got["state_reason"] == "completed"
+
+
+def test_reclose_issue_is_a_no_op(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    client.patch(f"/repos/{REPO}/issues/{number}", json={"state": "closed", "state_reason": "completed"})
+
+    reclosed = client.patch(f"/repos/{REPO}/issues/{number}", json={"state": "closed", "state_reason": "completed"})
+    assert reclosed.status_code == 200
+    assert reclosed.json()["state"] == "closed"
+    assert reclosed.json()["state_reason"] == "completed"
+
+
+def test_close_unknown_issue_is_404(client: TestClient) -> None:
+    assert client.patch(f"/repos/{REPO}/issues/999", json={"state": "closed"}).status_code == 404
+
+
+def test_close_issue_invalid_state_rejected(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    assert client.patch(f"/repos/{REPO}/issues/{number}", json={"state": "sideways"}).status_code == 422
+
+
+def test_closed_issue_moves_between_state_filters(client: TestClient) -> None:
+    number = client.post(f"/repos/{REPO}/issues", json={"title": "t"}).json()["number"]
+    assert number in [i["number"] for i in client.get(f"/repos/{REPO}/issues", params={"state": "open"}).json()]
+
+    client.patch(f"/repos/{REPO}/issues/{number}", json={"state": "closed", "state_reason": "completed"})
+
+    open_numbers = [i["number"] for i in client.get(f"/repos/{REPO}/issues", params={"state": "open"}).json()]
+    closed_numbers = [i["number"] for i in client.get(f"/repos/{REPO}/issues", params={"state": "closed"}).json()]
+    assert number not in open_numbers
+    assert number in closed_numbers
+
+
 # -- labels: repo-level definitions + issue assignment ----------------------
 
 
