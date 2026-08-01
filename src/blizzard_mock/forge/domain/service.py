@@ -182,6 +182,21 @@ class ForgeService:
         self._state.put_issue(repo.full_name, issue)
         return issue
 
+    def set_issue_state(self, owner: str, name: str, number: int, *, state: str, state_reason: str | None) -> Issue:
+        """Support ``PATCH .../issues/{n}`` closing an issue without a merge — the
+        delivery-time closure the work-source adapter drives (blizzard#216). Setting
+        the same state again (e.g. re-closing an already-closed issue) is a clean
+        no-op, mirroring GitHub's own PATCH."""
+        if state not in ("open", "closed"):
+            raise ValidationError(f"invalid state: {state}")
+        repo = self.get_repo(owner, name)
+        issue = self.get_issue(owner, name, number)
+        issue.state = State(state)
+        issue.state_reason = state_reason
+        issue.updated_at = self._clock.now()
+        self._state.put_issue(repo.full_name, issue)
+        return issue
+
     # -- pull requests -----------------------------------------------------
 
     def list_pulls(self, owner: str, name: str, state: str | None) -> list[PullView]:

@@ -12,7 +12,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.forge.api import serialization as ser
-from blizzard_mock.forge.api.deps import CreateCommentBody, CreateIssueBody, get_base_url, get_service
+from blizzard_mock.forge.api.deps import (
+    CreateCommentBody,
+    CreateIssueBody,
+    UpdateIssueStateBody,
+    get_base_url,
+    get_service,
+)
 from blizzard_mock.forge.domain.service import ForgeService
 
 router = APIRouter(tags=["issues"])
@@ -53,6 +59,19 @@ def create_issue(
 ) -> JSONResponse:
     issue = service.create_issue(owner, repo, title=body.title, body=body.body, user=body.user, labels=body.labels)
     return JSONResponse(status_code=201, content=ser.issue_json(f"{owner}/{repo}", issue, base_url))
+
+
+@router.patch("/repos/{owner}/{repo}/issues/{number}")
+def update_issue_state(
+    owner: str,
+    repo: str,
+    number: int,
+    body: UpdateIssueStateBody,
+    service: Annotated[ForgeService, Depends(get_service)],
+    base_url: Annotated[str, Depends(get_base_url)],
+) -> dict[str, Any]:
+    issue = service.set_issue_state(owner, repo, number, state=body.state, state_reason=body.state_reason)
+    return ser.issue_json(f"{owner}/{repo}", issue, base_url)
 
 
 @router.get("/repos/{owner}/{repo}/issues/{number}/comments")

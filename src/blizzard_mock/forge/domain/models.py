@@ -78,6 +78,7 @@ class Issue(BaseModel):
     title: str
     body: str
     state: State = State.OPEN
+    state_reason: str | None = None
     user: str
     labels: list[str] = Field(default_factory=list)
     created_at: datetime
