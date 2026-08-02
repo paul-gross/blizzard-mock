@@ -32,6 +32,7 @@ from blizzard_mock.forge.domain.levers import (
     LeverParams,
 )
 from blizzard_mock.forge.domain.models import (
+    CheckRun,
     Comment,
     Issue,
     Label,
@@ -391,9 +392,56 @@ class ForgeService:
         if self._levers.find(LeverKind.CHECKS_PENDING, repo.full_name, pull.number) is not None:
             # Content-mergeable but blocked by required checks/reviews.
             return True, MergeableState.BLOCKED
+        if self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pull.number) is not None:
+            # A red check run — an armed PR must be a coherent world, never a
+            # green PR with a red check (blizzard#232).
+            return True, MergeableState.BLOCKED
         if self._git.is_mergeable(repo, pull.base, pull.head):
             return True, MergeableState.CLEAN
         return False, MergeableState.DIRTY
+
+    def list_check_runs(self, owner: str, name: str, ref: str) -> list[CheckRun]:
+        """Live check runs against ``ref`` — derived from the active lever set the
+        same way ``_mergeability`` is, not stored (blizzard#232). ``checks_failed``
+        (armed for the PR whose head resolves to ``ref``) and ``base_checks_failed``
+        (armed for the repo, read against its default branch) both win over
+        ``checks_pending``; absent any lever, the ref reads green.
+
+        A real land script queries this by the PR's HEAD COMMIT SHA (GitHub's actual
+        check-runs endpoint takes any ref shape — SHA, branch, or tag), not by branch
+        name, so correlation resolves every open PR's head branch to its current sha
+        and compares against the resolved ``sha`` for ``ref`` — a branch-name ``ref``
+        still matches too, since it resolves to the same sha."""
+        repo = self.get_repo(owner, name)
+        sha = self._git.resolve_ref(repo, ref)
+        pull = self._find_pull_by_head_sha(repo, sha)
+        pr_number = pull.number if pull is not None else None
+        if pull is not None and self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pr_number) is not None:
+            return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
+        base_lever = self._levers.find(LeverKind.BASE_CHECKS_FAILED, repo.full_name, None)
+        if ref == repo.default_branch and base_lever is not None:
+            return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
+        if pull is not None and self._levers.find(LeverKind.CHECKS_PENDING, repo.full_name, pr_number) is not None:
+            return [self._synthetic_check_run(sha, status="in_progress", conclusion=None)]
+        return [self._synthetic_check_run(sha, status="completed", conclusion="success")]
+
+    def _find_pull_by_head_sha(self, repo: Repo, sha: str) -> PullRequest | None:
+        """The open PR whose head branch currently resolves to ``sha``, if any —
+        correlating a check-runs query (issued against a commit sha, like a real land
+        script issues it) to the PR it belongs to."""
+        for pull in self._state.list_pulls(repo.full_name, "open"):
+            if self._git.resolve_ref(repo, pull.head) == sha:
+                return pull
+        return None
+
+    def _synthetic_check_run(self, sha: str, *, status: str, conclusion: str | None) -> CheckRun:
+        return CheckRun(
+            id=abs(hash((sha, status, conclusion))) % (10**8),
+            name="ci",
+            status=status,
+            conclusion=conclusion,
+            head_sha=sha,
+        )
 
     def commit(self, owner: str, name: str, ref: str) -> GitCommit:
         repo = self.get_repo(owner, name)
