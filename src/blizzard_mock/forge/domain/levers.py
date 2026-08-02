@@ -42,6 +42,13 @@ class LeverKind(StrEnum):
     #: Forces ``mergeable_state: blocked`` — required checks/reviews not green yet;
     #: cleared explicitly to stand in for "CI went green".
     CHECKS_PENDING = "checks_pending"
+    #: Per PR: the PR head carries one completed/failure check run. Forces
+    #: ``mergeable_state: blocked`` too — an armed PR must be a coherent world,
+    #: never a green PR with a red check.
+    CHECKS_FAILED = "checks_failed"
+    #: Per repo: the base branch's own latest check run is completed/failure —
+    #: "the base gate was already red", independent of any PR.
+    BASE_CHECKS_FAILED = "base_checks_failed"
 
 
 #: Levers that persist as request-bending state until explicitly cleared.
@@ -54,6 +61,8 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.UNREACHABLE,
         LeverKind.STALE_BRANCH,
         LeverKind.CHECKS_PENDING,
+        LeverKind.CHECKS_FAILED,
+        LeverKind.BASE_CHECKS_FAILED,
     }
 )
 

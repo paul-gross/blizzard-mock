@@ -92,6 +92,21 @@ class Label(BaseModel):
     name: str
 
 
+class CheckRun(BaseModel):
+    """One check run against a commit — a CI job's status/conclusion.
+
+    Vendor-neutral (no ``url``/``html_url``); ``forge.api.serialization`` renders
+    the GitHub-shaped check-run JSON. ``conclusion`` is ``None`` while ``status``
+    is not yet ``"completed"``.
+    """
+
+    id: int
+    name: str
+    status: str
+    conclusion: str | None = None
+    head_sha: str
+
+
 class PullRequest(BaseModel):
     """A delivery item: a merge proposal of ``head`` into ``base`` (D-057…D-065).
 

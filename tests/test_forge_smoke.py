@@ -24,6 +24,7 @@ from blizzard_mock.forge import cli
 from blizzard_mock.forge.app import create_app
 from blizzard_mock.forge.config import ForgeConfig
 from blizzard_mock.forge.domain.clock import FixedClock
+from blizzard_mock.forge.domain.levers import LeverKind
 
 REPO = "octocat/hello"
 BARE_REL = Path("octocat/hello.git")
@@ -444,7 +445,17 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "unreachable",
         "stale_branch",
         "checks_pending",
+        "checks_failed",
+        "base_checks_failed",
     }
+
+
+def test_lever_catalog_covers_every_declared_kind(client: TestClient) -> None:
+    """The advertised catalog (not just ``state_levers``/``action_levers``) must
+    describe every ``LeverKind`` — a lever advertised as active but undocumented
+    in the catalog is a gap (blizzard#232)."""
+    body = client.get("/_levers").json()
+    assert set(body["catalog"]) == {kind.value for kind in LeverKind}
 
 
 # -- levers: per-PR delivery states ----------------------------------------
@@ -480,6 +491,53 @@ def test_checks_pending_lever_reads_blocked(client: TestClient) -> None:
     # clearing the lever stands in for "CI went green" — the PR reads clean again
     client.delete(f"/_levers/checks_pending?repo={REPO}&number={number}")
     assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "clean"
+
+
+# -- levers: check runs (blizzard#232) --------------------------------------
+
+
+def test_check_runs_read_green_when_no_lever(client: TestClient) -> None:
+    _open_pull(client, "feature")
+    body = client.get(f"/repos/{REPO}/commits/feature/check-runs").json()
+    assert body["total_count"] == 1
+    run = body["check_runs"][0]
+    assert run["status"] == "completed"
+    assert run["conclusion"] == "success"
+
+
+def test_checks_pending_lever_reads_in_progress_check_run(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/checks_pending", json={"repo": REPO, "number": number})
+
+    run = client.get(f"/repos/{REPO}/commits/feature/check-runs").json()["check_runs"][0]
+    assert run["status"] == "in_progress"
+    assert run["conclusion"] is None
+
+
+def test_checks_failed_lever_reads_failed_check_run_and_blocks_mergeability(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/checks_failed", json={"repo": REPO, "number": number})
+
+    body = client.get(f"/repos/{REPO}/commits/feature/check-runs").json()
+    assert body["total_count"] == 1
+    run = body["check_runs"][0]
+    assert run["status"] == "completed"
+    assert run["conclusion"] == "failure"
+
+    # an armed PR is a coherent world: never green with a red check.
+    assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "blocked"
+
+
+def test_base_checks_failed_lever_reads_failed_check_run_on_default_branch(client: TestClient) -> None:
+    client.post("/_levers/base_checks_failed", json={"repo": REPO})
+
+    base_run = client.get(f"/repos/{REPO}/commits/main/check-runs").json()["check_runs"][0]
+    assert base_run["status"] == "completed"
+    assert base_run["conclusion"] == "failure"
+
+    # the base gate is red independent of any PR — an unrelated branch is unaffected.
+    other_run = client.get(f"/repos/{REPO}/commits/feature2/check-runs").json()["check_runs"][0]
+    assert other_run["conclusion"] == "success"
 
 
 def test_stale_branch_lever_reads_behind_and_update_branch_self_heals(client: TestClient) -> None:

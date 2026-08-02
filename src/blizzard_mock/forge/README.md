@@ -69,6 +69,7 @@ armed.
 | `PUT /repos/{o}/{r}/pulls/{n}/update-branch` | Merge `base` into head (advances `head.sha`), clears `stale_branch` → 202; 409 stale `expected_head_sha` |
 | `GET /repos/{o}/{r}/pulls/{n}/merge` | Merged-check → 204 / 404 |
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
+| `GET /repos/{o}/{r}/commits/{ref}/check-runs` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`, derived live from the lever set |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `GET /healthz` | Liveness |
 
@@ -87,6 +88,8 @@ clear one it armed.
 | `merge_rejected` | state (per PR) | Merge → 405 with an optional `message` (branch policy) |
 | `stale_branch` | state (per PR) | `mergeable_state=behind` — base moved, no conflict; `PUT .../update-branch` clears it and advances the head → `clean` (the self-heal path) |
 | `checks_pending` | state (per PR) | `mergeable_state=blocked` — content-mergeable but required checks/reviews not green yet; cleared to stand in for "CI went green" |
+| `checks_failed` | state (per PR) | One `completed`/`failure` check run on the PR head; also forces `mergeable_state=blocked` — an armed PR is never green with a red check (blizzard#232) |
+| `base_checks_failed` | state (per repo) | One `completed`/`failure` check run read against the repo's default branch — "the base gate was already red", independent of any PR (blizzard#232) |
 | `rate_limited` | state (global/repo) | 403 + `X-RateLimit-*` headers; optional `remaining` self-expiry |
 | `token_rejected` | state (global/repo) | 401 `Bad credentials` |
 | `unreachable` | state (global/repo) | 503 |

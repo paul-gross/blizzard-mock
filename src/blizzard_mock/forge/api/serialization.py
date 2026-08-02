@@ -13,7 +13,7 @@ from typing import Any
 
 from blizzard_mock.forge.domain.git import GitCommit
 from blizzard_mock.forge.domain.levers import Lever
-from blizzard_mock.forge.domain.models import Comment, Issue, Label, Repo
+from blizzard_mock.forge.domain.models import CheckRun, Comment, Issue, Label, Repo
 from blizzard_mock.forge.domain.service import MergeResult, PullView
 
 
@@ -137,6 +137,17 @@ def ref_json(repo_full: str, ref_name: str, sha: str, base_url: str) -> dict[str
         "ref": ref_name,
         "url": f"{base_url}/repos/{repo_full}/git/{ref_name}",
         "object": {"sha": sha, "type": "commit"},
+    }
+
+
+def check_run_json(repo_full: str, run: CheckRun, base_url: str) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "name": run.name,
+        "status": run.status,
+        "conclusion": run.conclusion,
+        "details_url": f"{base_url}/{repo_full}/runs/{run.id}",
+        "head_sha": run.head_sha,
     }
 
 

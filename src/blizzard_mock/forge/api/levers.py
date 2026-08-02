@@ -28,6 +28,10 @@ _CATALOG: dict[str, str] = {
     LeverKind.RATE_LIMITED.value: "state (global/repo): requests → 403 rate-limit",
     LeverKind.TOKEN_REJECTED.value: "state (global/repo): requests → 401 bad credentials",
     LeverKind.UNREACHABLE.value: "state (global/repo): requests → 503 unreachable",
+    LeverKind.STALE_BRANCH.value: "state (per PR): mergeable_state=behind, self-heals via update-branch",
+    LeverKind.CHECKS_PENDING.value: "state (per PR): mergeable_state=blocked, required checks/reviews not green yet",
+    LeverKind.CHECKS_FAILED.value: "state (per PR): failed check run on the PR head; mergeable_state=blocked",
+    LeverKind.BASE_CHECKS_FAILED.value: "state (per repo): one completed/failure check run on the default branch",
 }
 
 
