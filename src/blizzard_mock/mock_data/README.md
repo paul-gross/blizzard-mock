@@ -83,12 +83,14 @@ code path runs; only `--url` is spelled out per verb below.
   `_park_on_cost_cap`'s log-only reason string — never actually written to the real
   schema, since the real `takeover_command` column is cause-agnostic; see the
   module docstring); `--cause retries` (the default) composes the plain generic
-  placeholder. `--takeover-command` overrides either default verbatim. `--cause`'s
-  wording applies to `takeover_command` only — `wrapped_takeover_command` (the
-  `blizzard runner takeover` entry point, issue #251) is always composed as a
-  cause-agnostic placeholder alongside it, mirroring the real runner's own
-  composition; `--wrapped-takeover-command` overrides that placeholder verbatim, the
-  same way `--takeover-command` overrides the raw one. Does **not**
+  placeholder. `--takeover-command` overrides either default verbatim. `--cause` also
+  selects `wrapped_takeover_command`'s default (the `blizzard runner takeover` entry
+  point, issue #251): `--cause retries` (the default) synthesizes a placeholder
+  `blizzard runner takeover` command alongside `takeover_command`, while `--cause cap`
+  leaves it `""` so the cap wording folded onto `takeover_command` stays the one
+  command a hand-seeded cap escalation surfaces. `--wrapped-takeover-command`
+  overrides that default verbatim either way, the same way `--takeover-command`
+  overrides the raw one. Does **not**
   also write an `event_log` row — an open escalation is synthesized into the
   read-time event feed (`derive_event_feed`), so `create escalation` alone is
   sufficient for it to show up there.

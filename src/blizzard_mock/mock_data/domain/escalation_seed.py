@@ -14,15 +14,14 @@ documented mock-only synthesis, not a literal reproduction of a real stored valu
 ``--cause retries`` (the default) carries no such prefix, matching the real schema's
 own retries-exhausted shape exactly.
 
-``wrapped_takeover_command`` (issue #251) mirrors the real runner's own composition
-(``_escalate`` composes it once, from the held lease's ``chunk_id`` and the runner's own
-runtime dir, independent of why the chunk parked): a plain ``--cause retries`` escalation
-(the default) and no explicit ``--wrapped-takeover-command`` gets a synthesized
-placeholder ``blizzard runner takeover`` command alongside ``takeover_command``. ``--cause
-cap`` leaves ``wrapped_takeover_command`` unset (``""``) by default instead, so its
-recognizable spend-cap wording (folded onto ``takeover_command``, see above) stays the
-one command a hand-seeded cap escalation surfaces — a caller can still pass
-``--wrapped-takeover-command`` explicitly to get both.
+``wrapped_takeover_command`` (issue #251) defaults ``cause``-dependently, same as
+``takeover_command`` above: a plain ``--cause retries`` escalation (the default) and no
+explicit ``--wrapped-takeover-command`` gets a synthesized placeholder ``blizzard runner
+takeover`` command alongside ``takeover_command``, while ``--cause cap`` leaves
+``wrapped_takeover_command`` unset (``""``) by default instead, so its recognizable
+spend-cap wording (folded onto ``takeover_command``, see above) stays the one command a
+hand-seeded cap escalation surfaces — a caller can still pass
+``--wrapped-takeover-command`` explicitly to get both regardless of ``cause``.
 """
 
 from __future__ import annotations

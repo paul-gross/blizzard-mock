@@ -90,9 +90,9 @@ def test_needs_human_lands_an_escalation_and_no_route_or_terminal() -> None:
 
 
 def test_needs_human_composes_a_wrapped_takeover_command_placeholder() -> None:
-    """The board renders ``wrapped_takeover_command`` as primary whenever present
-    (issue #251) — a non-empty placeholder here is what makes the seeded board render
-    the panel's primary path, not just its fallback."""
+    """``needs_human`` seeds a non-empty ``wrapped_takeover_command`` placeholder by
+    default (issue #251) — see blizzard's ``chunk-takeover.ts`` for the rendering rule
+    this exercises."""
     seed = _compose("needs_human", chunk_id="ch_fixed")
     escalation = next(row for row in seed.rows if row.table == "escalations")
     assert escalation.values["wrapped_takeover_command"] == "blizzard runner takeover ch_fixed --dir <runner-dir>"

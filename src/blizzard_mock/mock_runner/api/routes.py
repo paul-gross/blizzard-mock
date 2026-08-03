@@ -119,7 +119,9 @@ def drive_reset(service: Annotated[MockRunnerService, Depends(get_service)]) -> 
 
 @drive_router.post("/escalate")
 def drive_escalate(body: EscalateBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.escalate(body.chunk_id, body.takeover_command, body.wrapped_takeover_command)
+    return service.escalate(
+        body.chunk_id, takeover_command=body.takeover_command, wrapped_takeover_command=body.wrapped_takeover_command
+    )
 
 
 @drive_router.post("/decide")
