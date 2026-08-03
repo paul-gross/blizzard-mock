@@ -277,7 +277,7 @@ def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
         json={
             "chunk_id": chunk_id,
             "takeover_command": "git checkout -b rescue",
-            "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+            "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
         },
     ).json()
     assert out["drove"] is True and out["status"] == 202
@@ -285,7 +285,7 @@ def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
     assert detail["escalation"] == {
         "epoch": 1,
         "takeover_command": "git checkout -b rescue",
-        "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+        "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
     }
 
 

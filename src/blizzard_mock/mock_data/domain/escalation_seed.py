@@ -14,15 +14,15 @@ documented mock-only synthesis, not a literal reproduction of a real stored valu
 ``--cause retries`` (the default) carries no such prefix, matching the real schema's
 own retries-exhausted shape exactly.
 
-``wrapped_takeover_command`` (issue #251) is cause-agnostic, mirroring the real
-runner's own composition (``_escalate`` composes it once, from the held lease's
-``chunk_id`` and the runner's own runtime dir, independent of why the chunk parked):
-this module always composes a placeholder ``blizzard runner takeover`` command
-alongside ``takeover_command``, regardless of ``cause``. The board's takeover panel
-(``chunk-takeover.ts``, delegated to from ``chunk-awaiting-human.ts``) now prefers
-``wrapped_takeover_command`` as the primary copyable command whenever present, demoting
-``takeover_command`` — and with it, any ``--cause cap`` wording folded onto it — to a
-collapsed fallback disclosure rather than rendering it inline.
+``wrapped_takeover_command`` (issue #251) mirrors the real runner's own composition
+(``_escalate`` composes it once, from the held lease's ``chunk_id`` and the runner's own
+runtime dir, independent of why the chunk parked): a plain ``--cause retries`` escalation
+(the default) and no explicit ``--wrapped-takeover-command`` gets a synthesized
+placeholder ``blizzard runner takeover`` command alongside ``takeover_command``. ``--cause
+cap`` leaves ``wrapped_takeover_command`` unset (``""``) by default instead, so its
+recognizable spend-cap wording (folded onto ``takeover_command``, see above) stays the
+one command a hand-seeded cap escalation surfaces — a caller can still pass
+``--wrapped-takeover-command`` explicitly to get both.
 """
 
 from __future__ import annotations
@@ -45,8 +45,9 @@ _RETRIES_TAKEOVER_TEMPLATE = "cd <workdir> && <resume {chunk_id}>"
 #: (see module docstring) prefixed onto the generic resume-command placeholder.
 _CAP_TAKEOVER_TEMPLATE = "spend cap <cap> reached (spend <spend>) — cd <workdir> && <resume {chunk_id}>"
 
-#: The wrapped entry point's placeholder (issue #251) — cause-agnostic, the same shape
-#: regardless of ``cause``, mirroring the real runner's own composition.
+#: The wrapped entry point's placeholder (issue #251), mirroring the real runner's own
+#: composition. Only ``--cause retries``' default reaches this — ``--cause cap``'s
+#: default leaves ``wrapped_takeover_command`` unset instead (see module docstring).
 _WRAPPED_TAKEOVER_TEMPLATE = "blizzard runner takeover {chunk_id} --dir <runner-dir>"
 
 
@@ -70,8 +71,11 @@ def compose_escalation(
     verbatim. Otherwise ``cause`` selects the default: ``cap`` composes the
     recognizable spend-cap wording (see module docstring), ``retries`` (the default)
     the plain generic resume-command placeholder. ``wrapped_takeover_command``
-    explicitly supplied overrides its own cause-agnostic placeholder default the same
-    way. Raises :class:`EscalationCompositionError` for an unknown ``cause``.
+    explicitly supplied overrides its own default the same way; left unset, its default
+    is also ``cause``-dependent: ``retries`` synthesizes a placeholder ``blizzard runner
+    takeover`` command, ``cap`` leaves it ``""`` so the cap wording folded onto
+    ``takeover_command`` stays the one command a hand-seeded cap escalation surfaces.
+    Raises :class:`EscalationCompositionError` for an unknown ``cause``.
     """
     if cause not in CAUSES:
         raise EscalationCompositionError(f"unknown cause {cause!r} — one of {CAUSES}")
@@ -79,7 +83,7 @@ def compose_escalation(
         template = _CAP_TAKEOVER_TEMPLATE if cause == CAUSE_CAP else _RETRIES_TAKEOVER_TEMPLATE
         takeover_command = template.format(chunk_id=chunk_id)
     if wrapped_takeover_command is None:
-        wrapped_takeover_command = _WRAPPED_TAKEOVER_TEMPLATE.format(chunk_id=chunk_id)
+        wrapped_takeover_command = "" if cause == CAUSE_CAP else _WRAPPED_TAKEOVER_TEMPLATE.format(chunk_id=chunk_id)
     return FactRow(
         table="escalations",
         values={

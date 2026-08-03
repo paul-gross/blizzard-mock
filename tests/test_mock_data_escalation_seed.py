@@ -30,10 +30,17 @@ def test_default_composes_a_wrapped_takeover_command_placeholder() -> None:
     assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir <runner-dir>"
 
 
-def test_wrapped_takeover_command_placeholder_is_cause_agnostic() -> None:
-    retries = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="retries")
-    cap = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="cap")
-    assert retries.values["wrapped_takeover_command"] == cap.values["wrapped_takeover_command"]
+def test_cause_cap_leaves_the_wrapped_takeover_command_unset_by_default() -> None:
+    """``--cause cap``'s recognizable spend-cap wording (folded onto ``takeover_command``)
+    would otherwise be buried in the board's collapsed fallback by a synthesized
+    ``wrapped_takeover_command`` taking over as primary — see module docstring."""
+    row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="cap")
+    assert row.values["wrapped_takeover_command"] == ""
+
+
+def test_cause_retries_still_composes_the_wrapped_takeover_command_placeholder() -> None:
+    row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="retries")
+    assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir <runner-dir>"
 
 
 def test_explicit_wrapped_takeover_command_overrides_the_placeholder() -> None:

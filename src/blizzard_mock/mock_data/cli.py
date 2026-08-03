@@ -571,8 +571,9 @@ def create_lease(
     "--wrapped-takeover-command",
     "wrapped_takeover_command",
     default=None,
-    help="Override the composed wrapped (`blizzard runner takeover`) command verbatim — cause-agnostic, "
-    "symmetric with --takeover-command.",
+    help="Override the composed wrapped (`blizzard runner takeover`) command verbatim. Left unset, the "
+    "default is --cause-dependent: 'retries' synthesizes a placeholder, 'cap' leaves it empty "
+    "(domain/escalation_seed.py).",
 )
 @click.option(
     "--cause",
