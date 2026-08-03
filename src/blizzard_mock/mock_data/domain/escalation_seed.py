@@ -14,14 +14,11 @@ documented mock-only synthesis, not a literal reproduction of a real stored valu
 ``--cause retries`` (the default) carries no such prefix, matching the real schema's
 own retries-exhausted shape exactly.
 
-``wrapped_takeover_command`` (issue #251) defaults ``cause``-dependently, same as
-``takeover_command`` above: a plain ``--cause retries`` escalation (the default) and no
-explicit ``--wrapped-takeover-command`` gets a synthesized placeholder ``blizzard runner
-takeover`` command alongside ``takeover_command``, while ``--cause cap`` leaves
-``wrapped_takeover_command`` unset (``""``) by default instead, so its recognizable
-spend-cap wording (folded onto ``takeover_command``, see above) stays the one command a
-hand-seeded cap escalation surfaces — a caller can still pass
-``--wrapped-takeover-command`` explicitly to get both regardless of ``cause``.
+``wrapped_takeover_command`` defaults the same way regardless of ``cause``: a real
+spend-cap park reuses the identical ``_escalate`` composition a retries-exhausted park
+does (``runner/loop/steps.py``), so both ``--cause retries`` and ``--cause cap`` get a
+synthesized placeholder ``blizzard runner takeover`` command alongside
+``takeover_command`` unless ``--wrapped-takeover-command`` overrides it explicitly.
 """
 
 from __future__ import annotations
@@ -70,11 +67,10 @@ def compose_escalation(
     verbatim. Otherwise ``cause`` selects the default: ``cap`` composes the
     recognizable spend-cap wording (see module docstring), ``retries`` (the default)
     the plain generic resume-command placeholder. ``wrapped_takeover_command``
-    explicitly supplied overrides its own default the same way; left unset, its default
-    is also ``cause``-dependent: ``retries`` synthesizes a placeholder ``blizzard runner
-    takeover`` command, ``cap`` leaves it ``""`` so the cap wording folded onto
-    ``takeover_command`` stays the one command a hand-seeded cap escalation surfaces.
-    Raises :class:`EscalationCompositionError` for an unknown ``cause``.
+    explicitly supplied overrides its own default the same way; left unset, its
+    default is the synthesized placeholder ``blizzard runner takeover`` command
+    regardless of ``cause`` (see module docstring). Raises
+    :class:`EscalationCompositionError` for an unknown ``cause``.
     """
     if cause not in CAUSES:
         raise EscalationCompositionError(f"unknown cause {cause!r} — one of {CAUSES}")
@@ -82,7 +78,7 @@ def compose_escalation(
         template = _CAP_TAKEOVER_TEMPLATE if cause == CAUSE_CAP else _RETRIES_TAKEOVER_TEMPLATE
         takeover_command = template.format(chunk_id=chunk_id)
     if wrapped_takeover_command is None:
-        wrapped_takeover_command = "" if cause == CAUSE_CAP else _WRAPPED_TAKEOVER_TEMPLATE.format(chunk_id=chunk_id)
+        wrapped_takeover_command = _WRAPPED_TAKEOVER_TEMPLATE.format(chunk_id=chunk_id)
     return FactRow(
         table="escalations",
         values={

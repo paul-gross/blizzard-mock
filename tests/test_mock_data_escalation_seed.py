@@ -30,12 +30,12 @@ def test_default_composes_a_wrapped_takeover_command_placeholder() -> None:
     assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir <runner-dir>"
 
 
-def test_cause_cap_leaves_the_wrapped_takeover_command_unset_by_default() -> None:
-    """``--cause cap`` leaves ``wrapped_takeover_command`` unset so the cap's
-    recognizable spend-cap wording (folded onto ``takeover_command``) stays the one
-    command a hand-seeded cap escalation surfaces — see module docstring."""
+def test_cause_cap_also_composes_the_wrapped_takeover_command_placeholder() -> None:
+    """A real spend-cap park reuses the identical composition a retries-exhausted
+    park does, so ``--cause cap`` gets the same synthesized wrapped placeholder —
+    see module docstring."""
     row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="cap")
-    assert row.values["wrapped_takeover_command"] == ""
+    assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir <runner-dir>"
 
 
 def test_explicit_wrapped_takeover_command_overrides_the_placeholder() -> None:

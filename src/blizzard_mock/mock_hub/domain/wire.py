@@ -101,9 +101,9 @@ class RouteView(BaseModel):
 class EscalationView(BaseModel):
     epoch: int
     takeover_command: str
-    # The ``blizzard runner takeover`` wrapped entry point (issue #251); empty when the
-    # runner did not compose one — see blizzard's ``chunk-takeover.ts`` for the
-    # rendering rule this field feeds.
+    # The ``blizzard runner takeover`` wrapped entry point; empty whenever the runner
+    # didn't compose one — see ``blizzard-context:/domain/humans.md`` §Escalation for
+    # the full account of when each command is present.
     wrapped_takeover_command: str = ""
 
 
