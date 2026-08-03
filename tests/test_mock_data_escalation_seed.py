@@ -25,6 +25,24 @@ def test_default_cause_composes_the_generic_resume_placeholder() -> None:
     assert row.values["recorded_at"] == _NOW
 
 
+def test_default_composes_a_wrapped_takeover_command_placeholder() -> None:
+    row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW)
+    assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir <runner-dir>"
+
+
+def test_wrapped_takeover_command_placeholder_is_cause_agnostic() -> None:
+    retries = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="retries")
+    cap = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="cap")
+    assert retries.values["wrapped_takeover_command"] == cap.values["wrapped_takeover_command"]
+
+
+def test_explicit_wrapped_takeover_command_overrides_the_placeholder() -> None:
+    row = compose_escalation(
+        chunk_id="ch_1", epoch=1, recorded_at=_NOW, wrapped_takeover_command="blizzard runner takeover ch_1 --dir /x"
+    )
+    assert row.values["wrapped_takeover_command"] == "blizzard runner takeover ch_1 --dir /x"
+
+
 def test_cause_retries_is_the_same_as_the_default() -> None:
     row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, cause="retries")
     assert row.values["takeover_command"] == "cd <workdir> && <resume ch_1>"

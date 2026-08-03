@@ -568,6 +568,13 @@ def create_lease(
     help="Override the composed takeover command verbatim (overrides --cause's default either way).",
 )
 @click.option(
+    "--wrapped-takeover-command",
+    "wrapped_takeover_command",
+    default=None,
+    help="Override the composed wrapped (`blizzard runner takeover`) command verbatim — cause-agnostic, "
+    "symmetric with --takeover-command.",
+)
+@click.option(
     "--cause",
     "cause",
     type=_CAUSE_CHOICES,
@@ -581,6 +588,7 @@ def create_escalation(
     chunk_id: str,
     epoch: int,
     takeover_command: str | None,
+    wrapped_takeover_command: str | None,
     cause: str,
 ) -> None:
     """Land one ``escalations`` row against an already-seeded chunk — ``needs_human``
@@ -598,6 +606,7 @@ def create_escalation(
             recorded_at=SystemClock().now(),
             cause=cause,
             takeover_command=takeover_command,
+            wrapped_takeover_command=wrapped_takeover_command,
         )
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:

@@ -76,14 +76,19 @@ code path runs; only `--url` is spelled out per verb below.
   `lease_facts` row (`domain/lease_seed.py`) — the same row shape `create chunk
   --status running/delivering` composes internally, which imports it rather than
   re-deriving the shape.
-- `create escalation --store hub --chunk ID [--epoch N] [--takeover-command TEXT] [--cause {cap,retries}]`
+- `create escalation --store hub --chunk ID [--epoch N] [--takeover-command TEXT] [--wrapped-takeover-command TEXT] [--cause {cap,retries}]`
   — **implemented**. Lands one `escalations` row (`domain/escalation_seed.py`);
-  `needs_human` derives from an open one. `--cause cap` composes a takeover command
+  `needs_human` derives from an open one. `--cause cap` composes a `takeover_command`
   carrying recognizable spend-cap wording (mirroring
   `_park_on_cost_cap`'s log-only reason string — never actually written to the real
   schema, since the real `takeover_command` column is cause-agnostic; see the
   module docstring); `--cause retries` (the default) composes the plain generic
-  placeholder. `--takeover-command` overrides either default verbatim. Does **not**
+  placeholder. `--takeover-command` overrides either default verbatim. `--cause`'s
+  wording applies to `takeover_command` only — `wrapped_takeover_command` (the
+  `blizzard runner takeover` entry point, issue #251) is always composed as a
+  cause-agnostic placeholder alongside it, mirroring the real runner's own
+  composition; `--wrapped-takeover-command` overrides that placeholder verbatim, the
+  same way `--takeover-command` overrides the raw one. Does **not**
   also write an `event_log` row — an open escalation is synthesized into the
   read-time event feed (`derive_event_feed`), so `create escalation` alone is
   sufficient for it to show up there.

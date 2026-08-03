@@ -107,6 +107,10 @@ class EscalateBody(BaseModel):
 
     chunk_id: str
     takeover_command: str = ""
+    #: The ``blizzard runner takeover`` wrapped entry point (issue #251) — carried
+    #: alongside the raw ``takeover_command`` so a service test can drive the hub's
+    #: board-preferred primary command over the wire.
+    wrapped_takeover_command: str = ""
 
 
 class DecideBody(BaseModel):

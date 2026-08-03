@@ -9,11 +9,20 @@ ${cost:.2f})"``, ``_park_on_cost_cap``'s ``reason``) is **log-line prose only** 
 never written to any column, so there is no live-schema text this module could read
 back verbatim. ``--cause cap`` therefore folds that same reason phrasing (placeholder
 amounts, no flags name real ones) onto the front of the generic resume-command
-placeholder, so a chunk seeded this way is recognizable as a cap-park in the board's
-takeover-command display (``chunk-awaiting-human.ts`` renders ``takeover_command``
-verbatim, with no separate cause field) — a deliberate, documented mock-only synthesis,
-not a literal reproduction of a real stored value. ``--cause retries`` (the default)
-carries no such prefix, matching the real schema's own retries-exhausted shape exactly.
+placeholder, so a chunk seeded this way is recognizable as a cap-park — a deliberate,
+documented mock-only synthesis, not a literal reproduction of a real stored value.
+``--cause retries`` (the default) carries no such prefix, matching the real schema's
+own retries-exhausted shape exactly.
+
+``wrapped_takeover_command`` (issue #251) is cause-agnostic, mirroring the real
+runner's own composition (``_escalate`` composes it once, from the held lease's
+``chunk_id`` and the runner's own runtime dir, independent of why the chunk parked):
+this module always composes a placeholder ``blizzard runner takeover`` command
+alongside ``takeover_command``, regardless of ``cause``. The board's takeover panel
+(``chunk-takeover.ts``, delegated to from ``chunk-awaiting-human.ts``) now prefers
+``wrapped_takeover_command`` as the primary copyable command whenever present, demoting
+``takeover_command`` — and with it, any ``--cause cap`` wording folded onto it — to a
+collapsed fallback disclosure rather than rendering it inline.
 """
 
 from __future__ import annotations
@@ -36,6 +45,10 @@ _RETRIES_TAKEOVER_TEMPLATE = "cd <workdir> && <resume {chunk_id}>"
 #: (see module docstring) prefixed onto the generic resume-command placeholder.
 _CAP_TAKEOVER_TEMPLATE = "spend cap <cap> reached (spend <spend>) — cd <workdir> && <resume {chunk_id}>"
 
+#: The wrapped entry point's placeholder (issue #251) — cause-agnostic, the same shape
+#: regardless of ``cause``, mirroring the real runner's own composition.
+_WRAPPED_TAKEOVER_TEMPLATE = "blizzard runner takeover {chunk_id} --dir <runner-dir>"
+
 
 class EscalationCompositionError(Exception):
     """A ``--cause`` :func:`compose_escalation` cannot honor."""
@@ -48,6 +61,7 @@ def compose_escalation(
     recorded_at: datetime,
     cause: str = CAUSE_RETRIES,
     takeover_command: str | None = None,
+    wrapped_takeover_command: str | None = None,
     decision_id: str | None = None,
 ) -> FactRow:
     """One ``escalations`` row.
@@ -55,20 +69,24 @@ def compose_escalation(
     ``takeover_command`` explicitly supplied overrides either ``cause`` default
     verbatim. Otherwise ``cause`` selects the default: ``cap`` composes the
     recognizable spend-cap wording (see module docstring), ``retries`` (the default)
-    the plain generic resume-command placeholder. Raises
-    :class:`EscalationCompositionError` for an unknown ``cause``.
+    the plain generic resume-command placeholder. ``wrapped_takeover_command``
+    explicitly supplied overrides its own cause-agnostic placeholder default the same
+    way. Raises :class:`EscalationCompositionError` for an unknown ``cause``.
     """
     if cause not in CAUSES:
         raise EscalationCompositionError(f"unknown cause {cause!r} — one of {CAUSES}")
     if takeover_command is None:
         template = _CAP_TAKEOVER_TEMPLATE if cause == CAUSE_CAP else _RETRIES_TAKEOVER_TEMPLATE
         takeover_command = template.format(chunk_id=chunk_id)
+    if wrapped_takeover_command is None:
+        wrapped_takeover_command = _WRAPPED_TAKEOVER_TEMPLATE.format(chunk_id=chunk_id)
     return FactRow(
         table="escalations",
         values={
             "chunk_id": chunk_id,
             "epoch": epoch,
             "takeover_command": takeover_command,
+            "wrapped_takeover_command": wrapped_takeover_command,
             "decision_id": decision_id,
             "recorded_at": recorded_at,
         },

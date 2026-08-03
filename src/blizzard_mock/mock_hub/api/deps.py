@@ -86,6 +86,7 @@ class EscalationReportBody(BaseModel):
     epoch: int
     runner_id: str = "runner-mock"
     takeover_command: str = ""
+    wrapped_takeover_command: str = ""
 
 
 class AnswerControlBody(BaseModel):

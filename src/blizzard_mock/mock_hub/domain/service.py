@@ -201,7 +201,9 @@ class MockHubService:
         escalation = None
         if chunk.escalation is not None:
             escalation = EscalationView(
-                epoch=chunk.escalation.epoch, takeover_command=chunk.escalation.takeover_command
+                epoch=chunk.escalation.epoch,
+                takeover_command=chunk.escalation.takeover_command,
+                wrapped_takeover_command=chunk.escalation.wrapped_takeover_command,
             )
         questions = [self._question_view(q) for q in self._state.list_questions() if q.chunk_id == chunk_id]
         return ChunkDetail(
@@ -301,6 +303,7 @@ class MockHubService:
                     chunk,
                     epoch=int(payload.get("epoch", 0)),
                     takeover_command=str(payload.get("takeover_command", "")),
+                    wrapped_takeover_command=str(payload.get("wrapped_takeover_command", "")),
                 )
             return True
         if kind == QUESTION_ASKED:
@@ -414,14 +417,24 @@ class MockHubService:
         self._advance_fence(chunk, epoch)
         return {"chunk_id": chunk_id}
 
-    def report_escalation(self, chunk_id: str, *, epoch: int, runner_id: str, takeover_command: str) -> dict[str, Any]:
+    def report_escalation(
+        self,
+        chunk_id: str,
+        *,
+        epoch: int,
+        runner_id: str,
+        takeover_command: str,
+        wrapped_takeover_command: str = "",
+    ) -> dict[str, Any]:
         """``POST /chunks/{id}/escalations`` — the direct, non-buffered
         ``escalation.recorded`` report; records the escalation exactly as the batched
         ``/events`` path does (the shared ``_record_escalation`` helper). Mirrors the
         real hub's 202 ``{"chunk_id"}`` body (``blizzard.hub.api.fleet:431``) — no
         ``epoch`` in the response."""
         chunk = self._require(chunk_id)
-        self._record_escalation(chunk, epoch=epoch, takeover_command=takeover_command)
+        self._record_escalation(
+            chunk, epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
+        )
         return {"chunk_id": chunk_id}
 
     def hub_advance(self, chunk_id: str) -> HubAdvanceResponse:
@@ -517,10 +530,14 @@ class MockHubService:
         chunk.latest_epoch = max(chunk.latest_epoch, epoch)
         self._state.put_chunk(chunk)
 
-    def _record_escalation(self, chunk: ChunkState, *, epoch: int, takeover_command: str) -> None:
+    def _record_escalation(
+        self, chunk: ChunkState, *, epoch: int, takeover_command: str, wrapped_takeover_command: str = ""
+    ) -> None:
         """The ``escalation.recorded`` write, shared by the batched ``/events`` dispatch
         and the direct ``POST /chunks/{id}/escalations`` route."""
-        chunk.escalation = EscalationState(epoch=epoch, takeover_command=takeover_command)
+        chunk.escalation = EscalationState(
+            epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
+        )
         self._state.put_chunk(chunk)
 
     def _consult_chunk_unknown(self, chunk_id: str) -> None:

@@ -382,8 +382,35 @@ def test_report_escalation_is_readable_on_chunk_detail_and_404s_on_unknown_chunk
     )
     assert resp.status_code == 202
     detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert detail["escalation"] == {"epoch": 1, "takeover_command": "blizzard runner takeover ch_1"}
+    assert detail["escalation"] == {
+        "epoch": 1,
+        "takeover_command": "blizzard runner takeover ch_1",
+        "wrapped_takeover_command": "",
+    }
     assert client.post("/api/fleet/chunks/unknown/escalations", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
+
+
+def test_report_escalation_direct_route_carries_the_wrapped_takeover_command(client: TestClient) -> None:
+    """The DIRECT, non-buffered ``POST .../escalations`` route (issue #251) — the
+    counterpart to the batched ``/events`` case below."""
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    resp = client.post(
+        f"/api/fleet/chunks/{chunk_id}/escalations",
+        json={
+            "epoch": 1,
+            "runner_id": "r1",
+            "takeover_command": "cd <workdir> && claude --resume abc",
+            "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+        },
+    )
+    assert resp.status_code == 202
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] == {
+        "epoch": 1,
+        "takeover_command": "cd <workdir> && claude --resume abc",
+        "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+    }
 
 
 def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
@@ -434,7 +461,12 @@ def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestCli
                 {
                     "seq": 2,
                     "kind": "escalation.recorded",
-                    "payload": {"chunk_id": chunk_id, "epoch": 1, "takeover_command": "take it over"},
+                    "payload": {
+                        "chunk_id": chunk_id,
+                        "epoch": 1,
+                        "takeover_command": "take it over",
+                        "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+                    },
                 }
             ],
         },
@@ -443,6 +475,7 @@ def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestCli
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["escalation"] == {
         "epoch": 1,
         "takeover_command": "take it over",
+        "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
     }
 
 

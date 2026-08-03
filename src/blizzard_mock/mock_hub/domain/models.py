@@ -112,6 +112,11 @@ class EscalationState(BaseModel):
 
     epoch: int
     takeover_command: str = ""
+    #: The ``blizzard runner takeover`` wrapped entry point (issue #251) — primary over
+    #: the raw ``takeover_command`` whenever present; empty when the runner did not
+    #: compose one (a resolved runtime dir was unavailable, or an old runner/the hub
+    #: itself composed the escalation).
+    wrapped_takeover_command: str = ""
 
 
 class QuestionState(BaseModel):

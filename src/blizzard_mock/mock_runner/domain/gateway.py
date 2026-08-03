@@ -33,7 +33,7 @@ class IHubGateway(Protocol):
     def report_lease_via_events(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
 
     #: The dedicated ``POST /chunks/{id}/escalations`` route (``EscalationReport{epoch,
-    #: runner_id, takeover_command}``).
+    #: runner_id, takeover_command, wrapped_takeover_command}``).
     def report_escalation(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
 
     #: ``POST /chunks/{id}/decisions`` — a runner-config gate decision

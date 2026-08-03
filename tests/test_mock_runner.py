@@ -255,7 +255,38 @@ def test_drive_escalate_records_the_escalation_over_the_wire(stack: tuple[TestCl
     ).json()
     assert out["drove"] is True and out["status"] == 202
     detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert detail["escalation"] == {"epoch": 1, "takeover_command": "git checkout -b rescue"}
+    assert detail["escalation"] == {
+        "epoch": 1,
+        "takeover_command": "git checkout -b rescue",
+        "wrapped_takeover_command": "",
+    }
+
+
+def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """``/_drive/escalate`` forwards ``wrapped_takeover_command`` through
+    ``MockRunnerService.escalate`` to the hub gateway (issue #251) — a positional
+    forward at ``drive_escalate`` that drops the field would leave this empty even
+    though the request body carried it."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    out = runner.post(
+        "/_drive/escalate",
+        json={
+            "chunk_id": chunk_id,
+            "takeover_command": "git checkout -b rescue",
+            "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+        },
+    ).json()
+    assert out["drove"] is True and out["status"] == 202
+    detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] == {
+        "epoch": 1,
+        "takeover_command": "git checkout -b rescue",
+        "wrapped_takeover_command": "blizzard runner takeover ch_1 --dir /runner",
+    }
 
 
 def test_drive_decide_parks_the_chunk_at_the_gate(stack: tuple[TestClient, TestClient]) -> None:
