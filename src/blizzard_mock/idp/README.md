@@ -45,3 +45,49 @@ endpoint families together.
 
 In-memory only, one process-wide `Profile` + a fresh RS256 keypair minted at startup —
 no persistence. `blizzard-mock-idp` is restarted between scenario runs, never mid-run.
+
+## Standing instance — a running hub, a real browser, outside a test's lifetime
+
+The e2e tier (`tests/e2e/test_login_session_e2e.py` in `blizzard`) only proves the OAuth
+dance for a pytest fixture's lifetime. To point a **standing** hub — one left running for
+a human or an agent to click through by hand — at this IdP instead:
+
+```bash
+# 1. The IdP itself, on any free port
+uv run blizzard-mock-idp --host 127.0.0.1 --port <idp-port>
+
+# 2. A hub runtime dir — scratch, or any dir that is not $BZ_HUB_RUNTIME of a live
+#    per-env service you don't want to disturb
+BZ_OAUTH_SECRET=some-secret uv run blizzard-hub init <hub-dir>
+```
+
+Then edit `<hub-dir>/blizzard-hub.toml`'s `[auth]` table (`hub/config.py`'s
+`AUTH_MODE_OAUTH` — note the mode is `"oauth"`, not `"oidc"`; `oidc` is the *provider*
+`type` below) to:
+
+```toml
+[auth]
+mode = "oauth"
+
+[[auth.oauth.provider]]
+name = "oidc-standing"
+type = "oidc"
+display_name = "Standing Stub SSO"
+client_id = "cid"
+client_secret_env = "BZ_OAUTH_SECRET"
+issuer = "http://127.0.0.1:<idp-port>"
+```
+
+```bash
+# 3. Serve the built board and point a browser at it
+BZ_OAUTH_SECRET=some-secret uv run blizzard-hub host --dir <hub-dir> --host 127.0.0.1 --port <hub-port>
+```
+
+A browser hitting `http://127.0.0.1:<hub-port>/` reaches the `/login` gate with a
+`Standing Stub SSO` button; clicking it runs the real dance against this process and
+lands on the hub authenticated. `PUT /_levers/profile` before a login scripts which
+identity that dance resolves to — flip it between logins (fresh browser context, no
+cookie carried over) to drive distinct scripted identities without a UI. A role is set
+directly in `<hub-dir>/data/hub.db`'s `users` table (the same seam ahead of a
+role-assignment API) — reload the browser (same session cookie) to see the board render
+under the new role.
