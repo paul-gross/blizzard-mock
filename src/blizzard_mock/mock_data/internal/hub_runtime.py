@@ -8,8 +8,10 @@ daemons themselves read (``blizzard/hub/config.py``, ``blizzard/runner/config.py
 (the mock-data contract's first property): the toml shape is read independently,
 not via the daemon's own config loader. This also works for a postgres
 deployment, since it just reads back whatever ``db_url`` the runtime's config
-says. A missing config file or a config file with no ``db_url`` key both fail
-loud, naming which is missing.
+says. A config with no ``db_url`` key falls back to the daemons' own default —
+``sqlite:///<dir>/data/<store>.db`` — the pair with blizzard's issue-#234 change
+that stopped ``init`` baking the default's absolute path into the scaffold. A
+missing config file still fails loud, naming which file is missing.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import tomllib
 from pathlib import Path
 
 _CONFIG_FILENAMES = {"hub": "blizzard-hub.toml", "runner": "blizzard-runner.toml"}
+_STORE_DB_FILENAMES = {"hub": "hub.db", "runner": "runner.db"}
 
 
 class HubRuntimeError(Exception):
@@ -25,7 +28,13 @@ class HubRuntimeError(Exception):
 
 
 def resolve_db_url(runtime_dir: Path, *, store: str) -> str:
-    """Read ``<runtime_dir>/<store's config file>`` and return its ``db_url``."""
+    """Read ``<runtime_dir>/<store's config file>`` and return its ``db_url``.
+
+    A config with no ``db_url`` key resolves to the daemons' default,
+    ``sqlite:///<runtime_dir>/data/<store>.db`` — mirroring
+    ``HubConfig.load``/``RunnerConfig.load``, which scaffold no ``db_url`` line
+    when it would just restate that default.
+    """
     filename = _CONFIG_FILENAMES[store]
     path = runtime_dir / filename
     if not path.is_file():
@@ -36,5 +45,5 @@ def resolve_db_url(runtime_dir: Path, *, store: str) -> str:
     raw = tomllib.loads(path.read_text())
     db_url = raw.get("db_url")
     if not db_url:
-        raise HubRuntimeError(f"{path} has no `db_url` key — a {store} runtime config always sets one")
+        return f"sqlite:///{(runtime_dir / 'data' / _STORE_DB_FILENAMES[store]).resolve()}"
     return str(db_url)
