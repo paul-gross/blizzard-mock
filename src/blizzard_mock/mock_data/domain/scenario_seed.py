@@ -3,7 +3,7 @@
 ``compose_board_scenario`` mints one synthetic graph, spreads ``--chunks`` chunks
 across the nine derived statuses, attaches a realistic cost spread, a
 ceiling-paused runner, a runner fleet, and a mixed event log — pure composition
-**on top of** Phase 2/3's own composers (``graph_seed``, ``chunk_seed``,
+**on top of** the other domain composers (``graph_seed``, ``chunk_seed``,
 ``usage_seed``, ``question_seed``, ``event_seed``, ``runner_pause_seed``); this
 module derives no new fact shape of its own, the same discipline
 ``domain/chunk_seed.py`` already holds for ``lease_seed.compose_lease_row``.
@@ -26,29 +26,22 @@ cost-*partial* one (``cost_usd=None``, via ``usage_seed``'s ``--no-cost`` path),
 guaranteeing the "at least one cost-partial chunk" requirement independent of
 ``--chunks``.
 
-**Cap-park vs. ceiling-pause**: this module seeds a **ceiling-paused runner**
-(``runner_pause_seed.compose_runner_pause(local=True, ...)``, mirroring
-``check_spend_ceiling``'s own reason wording), not a ``--cause cap`` escalation.
-A cap escalation only reads back as meaningful on a chunk already at
-``needs_human`` (an escalation is what *makes* a chunk ``needs_human`` in the
-first place — landing a second one on top is redundant, and landing one on any
-other status would silently flip that chunk's derived status out from under
-the deterministic census). The ceiling-pause fact is independent of chunk
-status entirely, so it composes cleanly alongside the fixed distribution
-above.
+**Cap-park vs. ceiling-pause**: this module seeds a **ceiling-paused runner**, not a
+``--cause cap`` escalation. A second escalation on an already-``needs_human`` chunk is
+redundant, and one landed anywhere else would flip that chunk's derived status out from
+under the deterministic census; the ceiling-pause fact is independent of chunk status
+entirely (pinned by tests/test_mock_data_scenario_seed.py::
+test_a_runner_is_ceiling_paused_with_a_reason).
 
 ``--stress`` layers four deliberately extreme properties across three
 additional rows on top (see :func:`_compose_stress_extras`): a runner with a
 long identity, a chunk with a long custom node name, and one more
-``waiting_on_human`` chunk carrying two
-*additional* independent question trails (multi-question) beyond the one
-``chunk_seed`` itself lands for that status — the same chunk carries both the
-"waiting_on_human" and the "multi-question" extremes, deliberately: attaching
-extra open questions to a chunk of any *other* status would flip its derived
-status (an open question outranks everything but ``stopped``/``done``/
-``needs_human`` in ``derive_chunk_status``'s precedence), so keeping them on
-one already-``waiting_on_human`` chunk is the only self-consistent way to
-combine them.
+``waiting_on_human`` chunk carrying two *additional* independent question
+trails (multi-question). The same chunk carries both extremes deliberately: an
+open question outranks nearly every other status, so attaching extra open
+questions to a chunk of any other status would flip its derived status (pinned
+by tests/test_pin_mock.py::
+test_the_stress_multi_question_chunk_is_an_already_waiting_on_human_chunk).
 """
 
 from __future__ import annotations
@@ -166,7 +159,7 @@ class BoardScenario:
 
 def _runner_registration_row(runner_id: str, workspace_id: str, now: datetime) -> FactRow:
     """The same ``runner_registrations`` row shape ``cli.py``'s ``create runner``
-    builds inline — Phase 1 kept that verb's own shape rather than a
+    builds inline — ``create runner`` keeps that verb's own shape rather than a
     ``domain/*_seed.py`` composer, so this module follows the same seam."""
     return FactRow(
         table="runner_registrations",
@@ -221,8 +214,8 @@ def _compose_stress_extras(*, graph: GraphContext, clock: Clock, rng: Random) ->
     """The four ``--stress`` extremes (module docstring): a long-identity
     runner, a chunk landed on a deliberately long custom node name, and one
     ``waiting_on_human`` chunk carrying two extra independent question trails
-    (proving Phase 3's "two calls, two independent trails" property holds
-    here too)."""
+    (proving ``question_seed.py``'s "two calls, two independent trails" property
+    holds here too)."""
     rows: list[FactRow] = []
     now = clock.now()
     long_runner_id = _STRESS_LONG_RUNNER_ID

@@ -9,16 +9,15 @@ surface grows — see the real hub's OpenAPI subset for the source of truth.
 Controllers hold only the ``MockHubService`` (``bzh:controller-read-only``); every rule
 lives in the service.
 
-Two routers, mirroring the real hub's own partition (blizzard issue #87): ``router``
+Two routers, mirroring the real hub's own partition (issue #87): ``router``
 (``/api/health``, ``/api/ready``) is unauthenticated liveness, exempt from every lever and
 from request capture exactly as it is on the real hub; ``fleet_router`` (``/api/fleet``)
 is everything else — this mock never simulates the board/operator surface at all, so its
-entire hub-mirror API is runner-originating traffic, all of which moved under the fleet
-prefix in one block rather than splitting operator/fleet the way the real hub's routers
-did. The mock stays warn-tolerant by construction: it carries no ``require_runner_principal``
-check at all (a mock is not an enforcer) — a tokenless call is served exactly like a
-enrolled one; the header-inspection lever (``blizzard_mock.mock_hub.api.control``,
-issue #86b) is what makes a presented ``Authorization`` header assertable, not a gate.
+entire hub-mirror API is runner-originating traffic. The mock stays warn-tolerant by
+construction: it carries no ``require_runner_principal`` check at all (a mock is not an
+enforcer) — a tokenless call is served exactly like a enrolled one; the header-inspection
+lever (``blizzard_mock.mock_hub.api.control``, issue #86b) is what makes a presented
+``Authorization`` header assertable, not a gate.
 
 The ``drop_ack`` lever is realised *here* on the completions route: the service advances
 the real transition, then — the ack being "dropped" — the route answers 503, so the
@@ -45,8 +44,7 @@ from blizzard_mock.mock_hub.api.deps import (
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService, QuestionNotFound
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
-#: hub (``/api/health``, ``/api/ready`` sit outside both `chunks_router` and `fleet`
-#: there too).
+#: hub.
 router = APIRouter(prefix="/api", tags=["hub"])
 
 #: The runner-facing hub mirror (issue #87) — this mock carries no board/operator
@@ -117,9 +115,9 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
 
 
 @fleet_router.get("/chunks/{chunk_id}/work-items")
-# The real hub keeps `/pm-items` as a deprecated alias onto the same handler (blizzard
-# issue #55); a counterpart mock that served only one of the two would let a caller pass
-# here and 404 against the real thing, which is the divergence this mock exists to prevent.
+# Both the route and its deprecated `/pm-items` alias are served (blizzard issue #55):
+# serving only one would let a caller pass here and 404 against the real hub (pinned by
+# tests/test_pin_mock.py::test_work_items_are_served_under_both_the_route_and_the_pm_items_alias).
 @fleet_router.get("/chunks/{chunk_id}/pm-items")
 def get_work_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:

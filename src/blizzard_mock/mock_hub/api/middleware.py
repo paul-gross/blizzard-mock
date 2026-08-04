@@ -9,8 +9,7 @@ gate on startup even while the API is "down".
 
 ``RequestCaptureMiddleware`` is the header-inspection lever (issue #86b): it records
 every ``/api/*`` request's method, path, and headers, independent of what the lever
-middleware does with it — a service test reads them back via ``GET /_captured`` to
-assert a real runner's outbound ``Authorization`` header reached the hub.
+middleware does with it.
 """
 
 from __future__ import annotations
@@ -27,10 +26,10 @@ _EXEMPT_PREFIXES = ("/_levers", "/_seed", "/_captured", "/api/health", "/api/rea
 
 
 def _chunk_from_path(path: str) -> str | None:
-    """The ``chunk_id`` a ``.../chunks/{id}/...`` path names, if any — ``.../api/chunks/{id}``
-    or, since issue #87 moved the whole hub mirror under the fleet prefix,
-    ``.../api/fleet/chunks/{id}``. Either shape's ``chunks/{id}`` tail resolves the same
-    way, so a per-chunk lever (``unreachable``, ``delay``) still targets the right chunk."""
+    """The ``chunk_id`` a ``.../chunks/{id}/...`` path names, if any — matches both
+    ``.../api/chunks/{id}`` and ``.../api/fleet/chunks/{id}`` (issue #87). Either shape's
+    ``chunks/{id}`` tail resolves the same way, so a per-chunk lever (``unreachable``,
+    ``delay``) still targets the right chunk."""
     parts = [p for p in path.split("/") if p]
     for i in range(len(parts) - 1):
         if parts[i] == "chunks":
@@ -66,9 +65,8 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-#: Liveness paths a test's own setup polls repeatedly (``_await_http`` in the service
-#: tier's process helpers) — never a runner-fleet call, so excluded from capture exactly
-#: as they are exempted from the transport-edge levers above.
+#: Excluded from capture for the same reason they're exempt from the transport-edge
+#: levers above — never a runner-fleet call.
 _CAPTURE_EXEMPT_PREFIXES = ("/api/health", "/api/ready")
 
 

@@ -1,12 +1,10 @@
 """Composes one ``event_log`` row — the operational event feed
 (``blizzard/hub/store/schema.py``, issue #125, ``bzh:facts-not-status``).
 
-Independent of ``escalations`` by design: an open escalation is synthesized into the
-read-time event feed by ``derive_event_feed`` (``blizzard/hub/domain/work.py``) —
-``GET /api/events`` unions it with this table — so ``create escalation`` alone is
-sufficient to make an escalation show up there. ``create event`` never writes a
-redundant ``event_log`` row for an escalation, and this module carries no implicit
-coupling to ``domain/escalation_seed.py``.
+Independent of ``escalations`` by design: the hub already synthesizes an open escalation
+into the read-time event feed, so this module composes exactly one ``event_log`` row and
+never a redundant one for an escalation (pinned by tests/test_mock_data_event_seed.py::
+test_compose_event_lands_the_supplied_fields).
 
 ``detail`` is opaque, round-tripped-only JSON on the real column — this module
 validates it *parses* as JSON before composing (fail loud, never a silently-malformed

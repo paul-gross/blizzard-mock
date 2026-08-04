@@ -28,30 +28,26 @@ from blizzard_mock.mock_data.domain.schema_contract import (
 )
 from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary, SeedIntegrityError
 
-# A live hub/runner daemon may hold the same sqlite file open — set a busy
-# timeout so a lock contends and *waits* rather than this tool immediately
-# raising "database is locked" (sqlite3's ``timeout`` connect arg is exactly
-# that DBAPI-level busy wait, in seconds). A no-op for postgres: only applied
-# when the URL names the sqlite dialect.
+# A live hub/runner daemon may hold the same sqlite file open — set a busy timeout so a
+# lock contends and *waits* rather than this tool immediately raising "database is
+# locked". A no-op for postgres (pinned by tests/test_pin_mock.py::
+# test_the_sqlite_seed_engine_sets_a_busy_timeout_and_postgres_does_not).
 _SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 
 #: Alembic's own bookkeeping table, reflected alongside every domain table since
 #: reflection has no notion of "ours vs. the daemon's." ``reset`` must never touch it:
-#: deleting its one row un-stamps the store's migration state without dropping or
-#: recreating a single table, so the *next* ``blizzard hub init``/``migrate`` sees no
-#: current revision, replays every migration from scratch, and dies on the first
-#: ``CREATE TABLE`` that already exists. Reproduced empirically: `reset` then a daemon
-#: restart against the same store.
+#: deleting its one row un-stamps the store's migration state and breaks the next daemon
+#: init/migrate (pinned by tests/test_mock_data_reflected_store.py::
+#: test_reset_leaves_the_migration_tracking_table_alone).
 _MIGRATION_TRACKING_TABLE = "alembic_version"
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
-    """Turn on FK enforcement for this sqlite connection — off by default per
-    connection, unlike postgres. Without it, an orphan ``--chunk``/
-    ``--runner-id`` (naming a row this tool never seeded) lands silently on
-    sqlite instead of raising the ``IntegrityError`` :func:`ReflectedStore.write`
-    translates into a :class:`SeedIntegrityError` — exactly the silent-wrong-row
-    failure mode the tool's drift guard exists to prevent for schema shape."""
+    """Turn on FK enforcement for this sqlite connection — off by default per connection,
+    unlike postgres. Without it an orphan ``--chunk``/``--runner-id`` lands silently
+    instead of raising the ``IntegrityError`` :func:`ReflectedStore.write` translates into
+    a :class:`SeedIntegrityError` (pinned by tests/test_mock_data_reflected_store.py::
+    test_write_rejects_a_dangling_foreign_key)."""
     del connection_record
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")

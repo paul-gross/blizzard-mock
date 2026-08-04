@@ -2,9 +2,9 @@
 
 A real coding harness persists a session so a headless ``--resume`` can pick a
 conversation back up; the mock does the same so a resumed behavior-script can
-read *what it asked* and act on the answer it was resumed with
-(``blizzard-discovery`` ``implementation/mocking.md``). State is a small JSON
-document keyed by session id — no ORM, no server, importable at the unit tier.
+read *what it asked* and act on the answer it was resumed with. State is a small
+JSON document keyed by session id — no ORM, no server, importable at the unit
+tier.
 """
 
 from __future__ import annotations
@@ -28,9 +28,8 @@ class Ask:
 class Invocation:
     """One turn's observed model/effort flags (issue #144).
 
-    ``None`` means the flag was **absent from argv** — which on a resume is the
-    assertion, not an absence of information: the mint-only model contract says a
-    resume passes no ``--model`` and leans on the harness restoring the session's own.
+    ``None`` means the flag was **absent from argv** — a recorded observation, not
+    an absence of information.
     """
 
     kind: str  # spawn | resume
@@ -50,11 +49,8 @@ class SessionState:
     ``asks``/``resumes`` to reconstruct context.
 
     ``invocations`` records the **model and effort flags each turn received**
-    (issue #144), one entry per turn in order, so a fleet-tier scenario can assert
-    the application contract off real observed argv: the mint carried the resolved
-    model, and every resume carried none. The facade sees only what it was handed,
-    which is what makes this a check of the *flag* and not of the effective model —
-    the gap the verifiability matrix records.
+    (issue #144), one entry per turn in order. The facade sees only what it was
+    handed, so this is a record of the *flag*, never of the effective model.
     """
 
     session_id: str
@@ -88,8 +84,7 @@ class SessionStore:
     """File-backed session persistence: one ``<session_id>.json`` per session.
 
     Kept dependency-free (plain files) so spawn and a later resume — two
-    separate processes — share state through the filesystem, exactly as a real
-    harness's session directory does.
+    separate processes — share state through the filesystem.
     """
 
     def __init__(self, root: Path) -> None:

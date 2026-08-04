@@ -9,9 +9,8 @@ daemons themselves read (``blizzard/hub/config.py``, ``blizzard/runner/config.py
 not via the daemon's own config loader. This also works for a postgres
 deployment, since it just reads back whatever ``db_url`` the runtime's config
 says. A config with no ``db_url`` key falls back to the daemons' own default —
-``sqlite:///<dir>/data/<store>.db`` — the pair with blizzard's issue-#234 change
-that stopped ``init`` baking the default's absolute path into the scaffold. A
-missing config file still fails loud, naming which file is missing.
+``sqlite:///<dir>/data/<store>.db`` (issue #234). A missing config file still
+fails loud, naming which file is missing.
 """
 
 from __future__ import annotations

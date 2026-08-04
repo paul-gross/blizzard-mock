@@ -5,14 +5,13 @@ graph is minted lazily, on first ingest — so ``create chunk`` needs a graph of
 own to pin a chunk to and transition into. This module mints the **minimal** one: two
 nodes, ``build`` (``executor: runner``) and ``deliver`` (``executor: hub``), joined by
 one choice/edge each, entry at ``build``, ``deliver``'s own choice reaching the
-reserved terminal ``done``. The one required shape constraint (``blizzard/hub/domain/
-work.py``'s ``_newest_transition_enters_hub_node``) is the hub node: without one, no
-composed chunk could ever derive ``delivering``.
+reserved terminal ``done``. The hub node is the one required shape constraint: without
+one, no composed chunk could ever derive ``delivering`` (pinned by
+tests/test_mock_data_graph_seed.py::test_compose_graph_mints_a_runner_node_and_a_hub_node).
 
-``graphs.definition_yaml`` is audit-only (a mint-if-changed comparison reads it, never
-re-parsed to hydrate — the ``graph_nodes``/``graph_choices``/``graph_edges`` rows are
-what the hub actually hydrates from), so the inlined text here only needs to read as
-valid-enough YAML, not round-trip through the real graph-authoring parser.
+``graphs.definition_yaml`` is audit-only — the hub re-parses it for a mint-if-changed
+comparison, never to hydrate — so the inlined text only needs to read as valid-enough
+YAML, not round-trip through the real graph-authoring parser.
 
 :class:`GraphContext` is the **read side** — a graph's shape, however it was
 obtained (freshly minted here, or hydrated from an existing store row by

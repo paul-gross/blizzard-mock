@@ -2,8 +2,7 @@
 
 Time flows through this abstraction so tests pin a fixed instant and assert
 deterministic timestamps rather than reading the wall clock. Wired once at each
-mock's composition root (``app.create_app``). The mock forge predates this module
-and keeps its own equivalent under ``forge.domain.clock``; new mocks share this one.
+mock's composition root (``app.create_app``).
 """
 
 from __future__ import annotations

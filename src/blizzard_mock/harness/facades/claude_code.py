@@ -1,9 +1,9 @@
 """Mock Claude Code facade (``mock-claude-code``).
 
-Presents Claude Code's non-interactive CLI/wire surface to the runner's adapter
-and turns the received prompt into behavior by ``exec``'ing it as Python in the
-acquired worktree — *the prompt is the program*. Only the CLI shape and the
-output format live here; the behavior, fence, and session state are the shared
+Presents Claude Code's non-interactive CLI/wire surface and turns the received
+prompt into behavior by ``exec``'ing it as Python in the acquired worktree — *the
+prompt is the program*. Only the CLI shape and the output format live here; the
+behavior, fence, and session state are the shared
 :mod:`blizzard_mock.harness.engine`.
 
 Surface mimicked (``design/harness-adapters.md``):
@@ -13,8 +13,8 @@ Surface mimicked (``design/harness-adapters.md``):
 - Pre-assigned session: ``--session-id <uuid>`` (Claude Code honors the hint).
 - Automated follow-up: ``mock-claude-code -p --resume <sid> "<message>"`` — the
   resume message arrives as code, executed with the prior session state visible.
-- ``--output-format json`` emits the single ``{"type":"result", …}`` envelope the
-  adapter's ``verdict`` parses (``<Choice>{name}</Choice>`` rides ``result``).
+- ``--output-format json`` emits the single ``{"type":"result", …}`` envelope
+  (``<Choice>{name}</Choice>`` rides ``result``).
 - ``--settings <path>`` (the runner-owned worker hook file) is read, and the
   ``PostToolUse`` / ``SessionEnd`` commands it declares are executed as real
   subprocesses — see the package README's "Hook execution".
@@ -75,11 +75,10 @@ class ClaudeCodeWire:
         if self._format != "json":
             return f"{text}\n"
         # Claude Code has no "ask" result subtype; a parked worker simply ends its
-        # turn successfully, the ask riding the result text for the adapter.
+        # turn successfully, the ask riding the result text.
         subtype = "success" if result.subtype == "ask" else result.subtype
         # A realistic `usage` + `total_cost_usd` (blizzard epic #57): deterministic,
-        # not tied to any real pricing (`_usage.py`) — proves the wire carries both
-        # fields for the runner adapter's `parse_usage` to read back.
+        # not tied to any real pricing (`_usage.py`).
         usage = synthesize_usage_tokens(text)
         envelope = {
             "type": "result",
@@ -108,9 +107,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
     )
-    # Both are RECORDED onto the session state (issue #144) and otherwise ignored — the
-    # mock is model- and effort-agnostic, but what each turn was launched with is the
-    # observable a fleet-tier scenario asserts the mint-only model contract against.
+    # Both are RECORDED onto the session state (issue #144) and otherwise ignored.
     parser.add_argument("--model", default=None, help="recorded onto the session, not acted on")
     parser.add_argument("--effort", default=None, help="recorded onto the session, not acted on")
     return parser
@@ -121,12 +118,10 @@ def _build_transcript_writer(
 ) -> ClaudeTranscriptWriter | None:
     """The Claude-shaped transcript writer for this run, else ``None``.
 
-    Only constructed when a session id is already known: the real runner always
-    pre-assigns one at spawn and honors it, and a resume always names one, so this
-    covers the fleet-driven path in full. A bare direct invocation that lets the
-    engine self-assign a uuid (no ``--session-id``/``--resume``) skips transcript
-    writing — that path has no session id to key the file on until the engine
-    mints one, and it is not how the runner drives this facade.
+    Only constructed when a session id is already known. A bare direct invocation
+    that lets the engine self-assign a uuid (no ``--session-id``/``--resume``) skips
+    transcript writing — that path has no session id to key the file on until the
+    engine mints one.
 
     ``cwd``/``env`` are resolved once by :func:`main` and passed in, so the writer
     and the hook runner cannot disagree about which worktree this run acquired.
@@ -167,9 +162,7 @@ def main(argv: list[str] | None = None) -> None:
         is_resume=is_resume,
         transcript=transcript,
         hooks=hooks,
-        # Recorded onto the session state, not acted on (issue #144): the mock is model-
-        # and effort-agnostic, but a fleet-tier scenario needs the observed flags to prove
-        # the mint-only model contract off real argv.
+        # Recorded onto the session state, not acted on (issue #144).
         model=args.model,
         effort=args.effort,
     )

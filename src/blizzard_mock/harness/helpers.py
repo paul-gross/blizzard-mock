@@ -9,9 +9,8 @@ raise (there is no ambient context).
 
 Everything downstream of the harness seam runs for real: :func:`commit` makes a
 real git commit in the acquired worktree, :func:`apply_diff` mutates real files.
-:func:`ask` and :func:`verdict` record on the session and stage the wire result
-the facade renders; :func:`ask` then exits the turn (ask-and-exit,
-``design/ask-answer.md``).
+:func:`ask` and :func:`verdict` record on the session and stage the wire result;
+:func:`ask` then exits the turn (ask-and-exit, ``design/ask-answer.md``).
 """
 
 from __future__ import annotations
@@ -75,9 +74,8 @@ def tool_call(name: str, tool_input: dict[str, object] | None = None, output: st
 
     ``apply_diff``/``commit`` are tool calls that also do real work, so a script
     wanting a *timeline* of tool calls ("three calls, then ``hang()``") would
-    otherwise have to make commits it does not want. This is that timeline, in one
-    line per beat: the transcript pair and the ``PostToolUse`` hook fire, with the
-    tool ``name`` whatever the script says it is.
+    otherwise have to make commits it does not want. Here the transcript pair and
+    the ``PostToolUse`` hook fire, with ``name`` whatever the script says it is.
     """
     ctx = current_context()
     _record_tool_turn(ctx, name, dict(tool_input or {}), output=output)
@@ -87,9 +85,8 @@ def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object],
     """The effects of one tool call: the transcript pair, and the ``PostToolUse`` hooks.
 
     Two independent seams, deliberately: the transcript pair is minted **when a
-    writer is wired** (every facade but claude_code passes none), and the hooks fire
-    **regardless** — a run with hooks and no transcript still beats. See the package
-    README's "Conversation transcripts" for which helpers call this.
+    writer is wired**, and the hooks fire **regardless** — a run with hooks and no
+    transcript still beats.
     """
     if ctx.transcript is not None:
         tool_use_id = ctx.transcript.record_tool_call(name, tool_input)
@@ -101,10 +98,10 @@ def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object],
 def verdict(choice: str, assessment: str = "") -> None:
     """Emit the structured completion verdict in the facade's output format.
 
-    Renders as the tagged ``<Choice>{choice}</Choice>`` shape the runner's
-    adapter parses (``design/harness-adapters.md``), with any ``assessment``
-    payload following. Staged on the context; the facade wraps it in its native
-    envelope (Claude Code JSON, Codex JSONL, …) when the turn ends.
+    Renders as the tagged ``<Choice>{choice}</Choice>`` shape
+    (``design/harness-adapters.md``), with any ``assessment`` payload following.
+    Staged on the context; the facade wraps it in its native envelope when the turn
+    ends.
     """
     ctx = current_context()
     text = f"{CHOICE_OPEN}{choice}{CHOICE_CLOSE}"
@@ -115,11 +112,10 @@ def verdict(choice: str, assessment: str = "") -> None:
 
 
 def hang() -> None:
-    """Block forever, so the runner's stall/heartbeat/REAP handling can be exercised.
+    """Block forever, so a caller's stall/heartbeat/reap handling can be exercised.
 
-    Never returns and never emits — a hung worker makes no tool calls, its lease
-    goes stale, and the supervisor reaps it. Tests bound this with a subprocess
-    timeout and assert the timeout fired.
+    Never returns and never emits. Tests bound this with a subprocess timeout and
+    assert the timeout fired.
     """
     while True:
         time.sleep(3600)
@@ -153,7 +149,6 @@ def answer() -> str | None:
 
     The *answer*, not the script that carries it: on a ``<behavior-script>``-tagged
     resume this is the message's prose with its blocks elided, so a script never
-    reads its own source back. An untagged resume is code end to end and returns
-    the whole raw message, as it always has.
+    reads its own source back. An untagged resume returns the whole raw message.
     """
     return current_context().session.last_answer

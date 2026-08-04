@@ -110,11 +110,11 @@ class MockRunnerService:
         """Submit the held node-step's completion, distorted by any armed lever.
 
         ``artifacts`` (the submission's ``produces:`` artifacts, ``SubmittedArtifact``
-        dicts) default empty — the historical behaviour — so only a produces-aware
-        service test passes them, to drive the hub's ``produces_mode`` backstop.
-        ``check_results`` (the runner-executed check facts, ``CheckResult`` dicts, issue
-        #114) default empty likewise — a checks-gate service test sets them to drive the
-        hub's ``requires_checks`` backstop over the wire."""
+        dicts) default empty, so only a produces-aware service test passes them, to
+        drive the hub's ``produces_mode`` backstop. ``check_results`` (the
+        runner-executed check facts, ``CheckResult`` dicts, issue #114) default empty
+        likewise — a checks-gate service test sets them to drive the hub's
+        ``requires_checks`` backstop over the wire."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -179,8 +179,7 @@ class MockRunnerService:
         ``lease_id`` (issue #143, Phase 3) — the mock's own structural sibling of the real
         runner's ``GitCommitDeclarationService.declare``. Append-and-read-newest per
         ``(lease_id, repo)``, no hub call: the served route and the ``/_drive/*`` lever
-        both land here, exactly as the real store backs both the CLI-driven route and
-        (in the real runner) nothing else this phase."""
+        both land here."""
         self._git_commit_declarations.setdefault(lease_id, {})[repo] = {
             "forge": forge,
             "repo": repo,
@@ -306,11 +305,8 @@ class MockRunnerService:
     ) -> dict[str, Any]:
         """Push one ``event.recorded`` operational-event fact via ``/events`` (issue #125).
 
-        The wire counterpart to the real runner's failure-event emission (its Phase 3
-        `_fail_attempt`/per-adapter sites): the hub folds this into its append-only
-        ``event_log`` and re-broadcasts it as ``event-logged``. ``chunk_id`` is optional —
-        a runner-scoped event names none, exactly like ``pause``/``resume``. Not
-        fence-advancing, so no held lease is required."""
+        ``chunk_id`` is optional — a runner-scoped event names none, exactly like
+        ``pause``/``resume``. Not fence-advancing, so no held lease is required."""
         self._apply_delay(chunk_id)
         self._runner_seq += 1
         payload: dict[str, Any] = {"severity": severity, "kind": kind, "message": message}
@@ -348,13 +344,12 @@ class MockRunnerService:
     def _report_lease(self, chunk_id: str, epoch: int) -> None:
         """Advance the hub's fence for the held chunk.
 
-        Not lever-distorted for correctness — the report itself is always genuine,
-        because a completion test's setup depends on the fence landing regardless of
-        which drive-level lever is armed (see ``complete``'s docstring history). Only
-        the *transport path* is lever-selectable: by default this hits the dedicated
-        ``/chunks/{id}/leases`` route, mirroring the real runner; ``lease_via_events``
-        routes the identical report through the batched ``/events`` fact-push instead —
-        the mock's original path, retained so a test can still exercise it.
+        Never lever-distorted for correctness — a completion test's own setup depends on
+        the fence landing regardless of which drive-level lever is armed. Only the
+        *transport path* is lever-selectable: the dedicated ``/chunks/{id}/leases`` route
+        by default, or the batched ``/events`` fact-push under ``lease_via_events``
+        (pinned by tests/test_mock_runner.py::
+        test_lever_lease_via_events_routes_the_report_through_events).
         """
         held = self._held.get(chunk_id)
         if self._pull(RunnerLever.LEASE_VIA_EVENTS, chunk_id):
@@ -362,12 +357,11 @@ class MockRunnerService:
             if held is not None:
                 held.seq = seq
             payload: dict[str, Any] = {"chunk_id": chunk_id, "epoch": epoch}
-            # Stamp the held claim's own route token (issue #84b) — always, not
-            # lever-controlled: this is the genuine fence-advancing report a completion
-            # test's own setup depends on, so it must keep landing under
-            # ``route_token_mode=enforce`` exactly as the real runner's does. The
-            # route-token drive levers (above) distort only the driven ``/_drive/complete``
-            # call, the surface a service test actually exercises.
+            # Stamp the held claim's own route token (issue #84b) — always, never
+            # lever-controlled, so this genuine report keeps landing under
+            # ``route_token_mode=enforce``; the route-token levers distort only the driven
+            # ``/_drive/complete`` call (pinned by tests/test_pin_mock.py::
+            # test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token_armed).
             if held is not None and held.route_token is not None:
                 payload["route_token"] = held.route_token
             self._gw.report_lease_via_events(

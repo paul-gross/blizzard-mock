@@ -110,8 +110,6 @@ class FixtureWorkspaceService:
         self._git.clone_local(self._winter_source, layout.workspace)
         self._write_config(layout)
 
-        # Drive the real winter CLI against the fixture: clone the toy project
-        # repos from their file:// origins into projects/.
         self._winter.ensure_ready(layout.workspace)
         self._winter.run(layout.workspace, ["ws", "init"])
 

@@ -42,20 +42,16 @@ class CompleteBody(BaseModel):
     """POST /_drive/complete — complete the held node-step with a judgement choice.
 
     ``artifacts`` are the submission's ``produces:`` artifacts, each a wire
-    ``SubmittedArtifact`` dict (``{name, kind, content, attached}``). A real runner's
-    completion assembly (``_collect_asset_artifacts``) fills this from explicit
-    ``blizzard runner attach`` writes (``attached=True``) and assessment fallbacks
-    (``attached=False``); the mock lets a service test set them directly, so the hub's
-    ``produces_mode=enforce`` backstop (issue #113 phase 5) can be driven over the wire —
-    the produces analogue of the ``stale_route_token``/``omit_route_token`` levers. Default
-    empty: every existing driver keeps submitting a completion with no artifacts.
+    ``SubmittedArtifact`` dict (``{name, kind, content, attached}``); the mock lets a
+    service test set them directly, so the hub's ``produces_mode=enforce`` backstop
+    (issue #113 phase 5) can be driven over the wire — the produces analogue of the
+    ``stale_route_token``/``omit_route_token`` levers.
 
     ``check_results`` are the node's runner-executed check facts (issue #114), each a wire
     ``CheckResult`` dict (``{command, passed}`` — the ``output_tail`` stays runner-local and
-    never rides the wire). A real runner fills this from its own ``check_results`` store; the
-    mock lets a service test set them directly, so the hub's ``requires_checks`` gate backstop
-    can be driven over the wire — the checks analogue of ``artifacts`` above. Default empty:
-    every existing driver keeps submitting a completion with no check results."""
+    never rides the wire); the mock lets a service test set them directly, so the hub's
+    ``requires_checks`` gate backstop can be driven over the wire — the checks analogue of
+    ``artifacts`` above."""
 
     chunk_id: str
     choice: str
@@ -116,8 +112,8 @@ class EscalateBody(BaseModel):
 class DecideBody(BaseModel):
     """POST /_drive/decide — submit a decision at the held node (a runner-config gate
     parks the chunk). ``choice`` is accepted for drive-body symmetry but is cosmetic:
-    the real ``DecisionSubmission`` carries no choice — resolution happens later,
-    through the board's own decision-resolve action — mirroring ``ClaimBody.environment_ids``."""
+    the real ``DecisionSubmission`` carries no choice — mirroring
+    ``ClaimBody.environment_ids``."""
 
     chunk_id: str
     choice: str | None = None

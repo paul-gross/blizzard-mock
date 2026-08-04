@@ -2,9 +2,9 @@
 
 A **lever** is an explicit, first-class control an agent or test pulls to steer a mock
 into a named edge state instead of contriving it (``implementation/mocking.md``). The
-mock forge shipped the proven shape (``forge.domain.levers``); this module generalises
-it so the hub and runner mocks share one arm/clear/find store and one ``/_levers`` wire
-shape, each supplying only its own ``kind`` vocabulary and catalog.
+hub and runner mocks share one arm/clear/find store and one ``/_levers`` wire shape
+(see ``forge.domain.levers``), each supplying only its own ``kind`` vocabulary and
+catalog.
 
 A lever is scoped ``(chunk_id)`` where meaningful; a lever with no chunk is global. A
 lever may **self-expire** after ``remaining`` affected requests — the mechanism behind

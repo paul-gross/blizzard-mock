@@ -3,12 +3,12 @@
 The domain declares ``ISeedStore`` (``bzh:dependency-inversion``): the store
 operations a concept composition needs, owned inward; ``internal/reflected_store.py``
 implements it. ``SeedService`` is the ``concept -> list[FactRow]`` orchestrator
-Phase 2+ concept composers hand their rows to; Phase 1 has no composer yet, so
-``cli.py`` exercises the same seam directly for ``create runner``.
+concept composers hand their rows to; ``create runner`` has no composer of its own,
+so ``cli.py`` exercises the same seam directly for it.
 
-Phase 2 adds the read half, ``query`` — ``create chunk --graph <name>``'s "reuse an
-existing minted graph, or mint one" lookup needs to read the store before deciding
-whether to write, the one place this tool reads its own prior writes back.
+``query`` is the read half — ``create chunk --graph <name>``'s "reuse an existing
+minted graph, or mint one" lookup needs to read the store before deciding whether to
+write, the one place this tool reads its own prior writes back.
 """
 
 from __future__ import annotations

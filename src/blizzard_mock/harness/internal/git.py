@@ -2,10 +2,9 @@
 
 Everything downstream of the harness seam runs for real
 (``implementation/verification.md``): ``commit`` makes an actual commit in the
-acquired worktree and ``apply_diff`` mutates real files, so the push to the
-``file://`` origin, the PR, and the merge queue all have real refs to act on.
-Thin subprocess wrappers over ``git`` — no gitpython object graph needed for the
-two operations a mock agent performs.
+acquired worktree and ``apply_diff`` mutates real files. Thin subprocess wrappers
+over ``git`` — no gitpython object graph needed for the two operations a mock
+agent performs.
 """
 
 from __future__ import annotations

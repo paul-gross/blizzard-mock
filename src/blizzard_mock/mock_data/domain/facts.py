@@ -1,7 +1,7 @@
 """``FactRow`` — one row destined for one named table.
 
 The domain vocabulary this tool composes in (``bzh:domain-core``): a concept
-composer (Phase 2+) turns a seedable concept into ``list[FactRow]``, never a
+composer turns a seedable concept into ``list[FactRow]``, never a
 status column — the hub derives status from facts, so this tool only ever
 composes fact sets (``bzh:facts-not-status``). Naming a table is a deliberate,
 bounded exception to keeping the domain schema-agnostic: this tool's whole

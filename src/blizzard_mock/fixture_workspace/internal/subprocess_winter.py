@@ -6,10 +6,10 @@ via ``mise exec -- uv run``, with the process CWD pinned to ``tools/winter-cli``
 
 Two subtleties this must honor, both encoded in the shim:
 
-- **Root resolution.** winter-cli finds the workspace root by walking up from
-  ``Path.cwd()`` for ``.winter/config.toml``. Pinning CWD to ``<fixture>/tools/winter-cli``
-  makes it resolve the *fixture* (walking up two levels), never the outer workspace
-  the mock itself runs in — exactly the isolation the fixture needs.
+- **Root resolution.** CWD is pinned to ``<fixture>/tools/winter-cli`` so winter's own
+  root-walk resolves the *fixture*, never the outer workspace the mock itself runs in
+  (pinned by ``tests/test_pin_mock.py::
+  test_the_winter_cli_subprocess_runs_with_cwd_pinned_to_the_fixtures_own_cli``).
 - **mise trust.** A freshly *cloned* ``tools/winter-cli/mise.toml`` is untrusted, so
   ``ensure_ready`` trusts it once before the first ``run``.
 """

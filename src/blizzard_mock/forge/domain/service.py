@@ -273,9 +273,10 @@ class ForgeService:
         The self-heal a ``behind`` PR needs: advances the head with the latest base
         (a real merge commit, so ``head.sha`` moves — mirroring GitHub) and clears any
         ``stale_branch`` lever so the PR next reads ``clean``. Guarded on
-        ``expected_head_sha`` like the real API — a mismatch is a 409 (``HeadMismatch``),
-        so a caller that stacked reads never double-updates a moved head. ``behind``
-        implies mergeable, so the update itself never conflicts in the mock."""
+        ``expected_head_sha`` — a mismatch is a 409 (``HeadMismatch``), so a caller that
+        stacked reads never double-updates a moved head (pinned by
+        tests/test_forge_smoke.py::test_update_branch_stale_expected_head_is_409);
+        ``behind`` implies mergeable, so the update itself never conflicts."""
         repo = self.get_repo(owner, name)
         pull = self._require_pull(repo, number)
         if pull.merged or pull.state is State.CLOSED:
@@ -407,11 +408,10 @@ class ForgeService:
         (armed for the repo, read against its default branch) both win over
         ``checks_pending``; absent any lever, the ref reads green.
 
-        A real land script queries this by the PR's HEAD COMMIT SHA (GitHub's actual
-        check-runs endpoint takes any ref shape — SHA, branch, or tag), not by branch
-        name, so correlation resolves every open PR's head branch to its current sha
-        and compares against the resolved ``sha`` for ``ref`` — a branch-name ``ref``
-        still matches too, since it resolves to the same sha."""
+        Correlation is by resolved commit sha, not branch name, because a real land
+        script queries by the PR's head commit sha; a branch-name ``ref`` still matches,
+        since it resolves to the same sha (pinned by tests/test_pin_mock.py::
+        test_check_runs_correlate_a_pr_by_its_head_commit_sha_not_its_branch_name)."""
         repo = self.get_repo(owner, name)
         sha = self._git.resolve_ref(repo, ref)
         pull = self._find_pull_by_head_sha(repo, sha)

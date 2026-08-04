@@ -3,8 +3,7 @@
 Shares the exec engine with every other facade and differs only in Codex's wire
 shape (``design/harness-adapters.md``): ``codex exec --json`` emits a **JSONL
 event stream**, sessions are self-assigned (the id rides ``thread.started``), and
-automated follow-ups are ``codex exec resume <id>`` / ``--last``. Adding this
-facade touched nothing in the engine — the whole point of the split.
+automated follow-ups are ``codex exec resume <id>`` / ``--last``.
 """
 
 from __future__ import annotations
@@ -68,8 +67,7 @@ def _resolve(args: argparse.Namespace) -> tuple[str | None, str | None, bool]:
         script = positionals[2] if len(positionals) > 2 else _common.read_script(None)
         return script, session_id, True
     if args.last:
-        # exec --last "<script>": resume the most recent session; the runner
-        # always passes an explicit id in practice, so --last has no id to bind.
+        # exec --last "<script>": resume the most recent session, so no id to bind.
         script = positionals[0] if positionals else _common.read_script(None)
         return script, None, True
     script = positionals[0] if positionals else _common.read_script(None)

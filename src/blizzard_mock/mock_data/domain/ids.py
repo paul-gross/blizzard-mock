@@ -27,9 +27,8 @@ _RAND_CHARS = 16  # 80 bits of randomness
 _ULID_CHARS = _TIME_CHARS + _RAND_CHARS
 
 # The id-prefix registry — kept in step by hand with ``blizzard.foundation.ids``
-# (no import: this tool never imports ``blizzard``). Phase 1 seeds no concept
-# that mints one of these; the registry exists so a later phase's chunk/graph/
-# etc. composer mints an id that looks native alongside a real one.
+# (no import: this tool never imports ``blizzard``), so a composer mints an id
+# that looks native alongside a real one.
 CHUNK_PREFIX = "ch"
 GRAPH_PREFIX = "gr"
 NODE_PREFIX = "nd"

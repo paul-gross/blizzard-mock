@@ -3,12 +3,11 @@ the runner's own local brake (``runner_local_pause_facts``), two separate tables
 separate authors (``blizzard/hub/store/schema.py``'s module comment above each).
 
 ``runner_pause_facts`` carries **no ``reason`` column** — only
-``runner_local_pause_facts`` does (nullable there; issue #61's spend-ceiling brake
-composes ``f"spend ceiling ${cap:.2f} reached over the trailing {window_hours:g}h
-(spend ${spend:.2f})"`` into it, ``blizzard.runner.loop.steps.check_spend_ceiling``).
-Supplying a reason for the fleet brake is a genuine schema mismatch, not a detail to
-drop silently — :func:`compose_runner_pause` fails loud naming the missing column,
-never a silently-dropped value.
+``runner_local_pause_facts`` does (nullable there). Supplying a reason for the fleet
+brake is a genuine schema mismatch, not a detail to drop silently, so
+:func:`compose_runner_pause` fails loud naming the missing column (pinned by
+tests/test_mock_data_runner_pause_seed.py::
+test_fleet_with_a_reason_fails_loud_naming_the_missing_column).
 """
 
 from __future__ import annotations

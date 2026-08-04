@@ -2,18 +2,11 @@
 
 The mock stands in for a real coding harness, so it must emit the same two usage
 carriers a real Claude Code run does — a result envelope's ``usage`` + ``total_cost_usd``,
-and per-message ``usage`` on every assistant transcript record — so the runner
-adapter's ``parse_usage``/``sum_transcript_usage`` seam (``blizzard/runner/harness/
-internal/claude_code_adapter.py``) is exercised against realistic shapes with no
-tokens spent.
+and per-message ``usage`` on every assistant transcript record — with no tokens spent.
 
-The **figures themselves are illustrative, not a pricing table**: blizzard's own
-architecture rule is that cost always comes from the harness's own ``total_cost_usd``,
-never a locally-maintained schedule — this module's rates exist only so the mock's
-envelope carries *a* dollar figure to prove the wire, and are deliberately **not**
-shared with, or asserted equal to, any real Claude pricing. Deterministic (a pure
-function of the rendered text's length, no randomness), so successive calls in one
-run vary slightly rather than repeating an identical constant, and a test asserting
+The figures are illustrative, not a pricing table: they exist only so the envelope
+carries *a* dollar figure, and are tied to no real Claude pricing. Deterministic (a
+pure function of the rendered text's length, no randomness), so a test asserting
 against them is reproducible.
 
 Not a coding-harness facade itself; shared plumbing for :mod:`.claude_code`'s wire
@@ -48,8 +41,7 @@ def synthesize_usage_tokens(text: str, *, base_input: int = 200, base_output: in
     """Token counts for ``text``, scaled by its length off the given bases.
 
     ``base_input``/``base_output`` let a smaller mid-turn tool-call record read as
-    cheaper than the turn's final text record, mirroring how a real turn's later
-    tool calls see a shorter completion than its closing message.
+    cheaper than the turn's final text record.
     """
     return {
         "input_tokens": base_input + len(text) // 4,
@@ -63,10 +55,8 @@ def synthesize_cost_usd(usage: Mapping[str, int]) -> float:
     """A deterministic, illustrative dollar figure off ``usage``'s token counts.
 
     Rounded to the same six-decimal precision real ``total_cost_usd`` figures use.
-    Only the result-envelope wire carries a cost figure at all — a per-message
-    transcript record never does (real Claude Code messages carry no per-message
-    cost), so callers minting a transcript record use
-    :func:`synthesize_usage_tokens` alone.
+    Only the result-envelope wire carries a cost figure at all, so callers minting a
+    transcript record use :func:`synthesize_usage_tokens` alone.
     """
     cost = (
         usage["input_tokens"] * _INPUT_RATE_USD

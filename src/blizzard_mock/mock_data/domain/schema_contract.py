@@ -29,8 +29,6 @@ from dataclasses import dataclass
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 
-# Phase 6 (blizzard-context tooling) builds this guide; the path is referenced
-# now so a drift message already points the reader at it once that phase lands.
 GUIDE = "blizzard-context:/tooling/store-seeding.md"
 
 

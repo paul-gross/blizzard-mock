@@ -1,9 +1,8 @@
 """The mock-hub state seam — chunk rows and the runner registry.
 
-Git-truth-free: unlike the forge, the hub mock is pure in-memory state (the real hub is
-too, modulo its sqlite facts). Split read/write per ``bzh:repository-split`` is overkill
-for one in-process map, so this is a single seam the ``MockHubService`` writes through and
-the ``internal`` adapter implements; the routers never touch it (``bzh:controller-read-only``).
+Split read/write per ``bzh:repository-split`` is overkill for one in-process map, so this
+is a single seam the ``MockHubService`` writes through and the ``internal`` adapter
+implements; the routers never touch it (``bzh:controller-read-only``).
 """
 
 from __future__ import annotations
@@ -31,8 +30,7 @@ class RunnerRow:
         self.registered_at = at
         self.last_seen_at = at
         # The runner's optional federation identity (issue #95) — reported on every
-        # (re-)registration, mirroring the real hub's own unconditional-overwrite
-        # upsert (``blizzard.hub.domain.registry``).
+        # (re-)registration (``blizzard.hub.domain.registry``).
         self.url = url
         self.redirect_uris = redirect_uris
         self.paused = False
@@ -62,8 +60,8 @@ class IHubState(Protocol):
     ) -> bool:
         """Register/heartbeat a runner; return ``True`` on first registration.
 
-        ``url``/``redirect_uris`` (issue #95) mirror the real hub's own registration
-        extension — overwritten unconditionally on every call, like ``workspace_id``."""
+        ``url``/``redirect_uris`` (issue #95) are overwritten unconditionally on every
+        call, like ``workspace_id``."""
         ...
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...

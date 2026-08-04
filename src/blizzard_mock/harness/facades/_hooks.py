@@ -1,30 +1,22 @@
 """``--settings`` hook execution — only the ``claude_code`` facade uses it.
 
-Real Claude Code runs the hook commands declared in its ``--settings`` document
-as real subprocesses; this is the mock's equivalent, so a runner-owned hook
-travels its actual path — command → subprocess → whatever that command does —
-instead of being synthesized by whoever wanted the signal. Only Claude Code has a
-hook mechanism (and only ``claude_code`` is passed ``--settings``), so only
-:mod:`~blizzard_mock.harness.facades.claude_code` constructs one; the engine's
-``hooks`` parameter (:class:`~blizzard_mock.harness.engine.IHookRunner`) is left
-``None`` everywhere else and the shared engine no-ops.
+Runs the hook commands a ``--settings`` document declares as real subprocesses,
+so a caller-owned hook travels its actual path — command → subprocess → whatever
+that command does — instead of being synthesized by whoever wanted the signal.
 
 Implements :class:`~blizzard_mock.harness.engine.IHookRunner`: the engine calls
 into it at two defined lifecycle points and constructs no payload itself. Settings
 parsing and payload construction live here and nowhere else.
 
 **This module stays blizzard-free.** It executes whatever command string the
-settings document names and never imports or assumes ``blizzard``; that the
-deployment's document happens to name ``blizzard runner heartbeat`` is the
-runner's business, not the mock's.
+settings document names and never imports or assumes ``blizzard``.
 
 Degrading rather than failing is deliberate throughout: a missing file,
 unreadable JSON, an absent ``hooks`` key, a malformed entry, a nonzero exit, or a
-wedged command all leave the turn intact. The runner writes this document, and a
-mock that hard-failed on a bad one would turn a settings typo into a dead fleet —
-so the failures are logged (stderr-routed structlog) and swallowed. See the
-package README's "Hook execution" for what that costs a reader debugging a hook
-that never fires.
+wedged command all leave the turn intact — a mock that hard-failed on a bad
+document would turn a settings typo into a dead fleet, so the failures are logged
+(stderr-routed structlog) and swallowed. See the package README's "Hook
+execution" for what that costs a reader debugging a hook that never fires.
 """
 
 from __future__ import annotations
@@ -40,9 +32,9 @@ from blizzard_mock.harness.internal.logging import get_logger
 _log = get_logger(__name__)
 
 #: Per-hook wall-clock budget, in seconds — real Claude Code's own default. A
-#: constructor argument rather than a flag or env var: the runner's settings
-#: document declares bare ``command`` entries with no per-hook ``timeout``, so
-#: there is no document field for it to shadow.
+#: constructor argument rather than a flag or env var, because the settings document
+#: declares no per-hook ``timeout`` field for it to shadow (pinned by
+#: tests/test_harness_hooks.py::test_a_wedged_hook_is_abandoned_at_the_timeout).
 DEFAULT_HOOK_TIMEOUT_SECONDS = 60.0
 
 #: The two hook events wired here. The payload's ``hook_event_name`` discriminates,
@@ -50,10 +42,10 @@ DEFAULT_HOOK_TIMEOUT_SECONDS = 60.0
 POST_TOOL_USE = "PostToolUse"
 SESSION_END = "SessionEnd"
 
-#: ``SessionEnd``'s ``reason``. Claude Code's vocabulary is ``clear`` / ``logout`` /
-#: ``prompt_input_exit`` / ``other``, and only ``other`` describes a headless ``-p``
-#: process exiting. Deriving it from the run's outcome would emit values real Claude
-#: Code never sends; the outcome already rides the wire envelope faithfully.
+#: ``SessionEnd``'s ``reason``. Of Claude Code's vocabulary (``clear`` / ``logout`` /
+#: ``prompt_input_exit`` / ``other``) only ``other`` describes a headless ``-p`` process
+#: exiting; deriving it from the run's outcome would emit values real Claude Code never
+#: sends.
 SESSION_END_REASON = "other"
 
 
@@ -105,10 +97,8 @@ class SettingsHookRunner:
     """Runs the hook commands one ``--settings`` document declares.
 
     One instance per turn. ``cwd`` and the environment are fixed at construction —
-    the acquired worktree and the spawn environment — matching real Claude Code,
-    whose hooks likewise run in the fixed session cwd and inherit the session's
-    environment. Inheriting is the point: it is how a hook command finds the
-    identity its caller injected.
+    the acquired worktree and the spawn environment. Inheriting the environment is
+    the point: it is how a hook command finds the identity its caller injected.
     """
 
     def __init__(
@@ -170,9 +160,9 @@ class SettingsHookRunner:
 
         Output is **captured**, never inherited: a chatty hook writing to this
         process's stdout would interleave with the ``{"type":"result", …}`` envelope
-        the runner's adapter parses. The payload goes to a pipe the command is free
-        to ignore — real Claude Code writes it the same way, and at these sizes it
-        is far inside the pipe buffer, so an unread one cannot deadlock.
+        on the wire. The payload goes to a pipe the command is free to ignore — at
+        these sizes it is far inside the pipe buffer, so an unread one cannot
+        deadlock.
         """
         try:
             completed = subprocess.run(
@@ -213,9 +203,8 @@ def build_hook_runner(
     """The hook runner for this run, or ``None`` when there is nothing to fire.
 
     ``None`` — the engine's total no-op — covers every degradation: no
-    ``--settings`` at all (the adapter omits it on the ``judge`` invocation on
-    purpose), a path that does not exist, JSON that will not parse, and a document
-    with no ``hooks`` key or no commands under either wired event.
+    ``--settings`` at all, a path that does not exist, JSON that will not parse, and
+    a document with no ``hooks`` key or no commands under either wired event.
     """
     if not settings_path:
         return None

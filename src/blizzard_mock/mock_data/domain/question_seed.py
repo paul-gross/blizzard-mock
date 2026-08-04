@@ -5,10 +5,9 @@ rendezvous, ``bzh:facts-not-status``).
 A question is open exactly while no ``question_answers`` row exists for it (the
 primary key IS the question id — first-write-wins CAS); an answer is *delivered* once
 ``answer_deliveries`` carries a row (board-detail only, does not affect derived
-status). There is no dedicated "resumed" fact beyond delivery in the real schema — the
-resume is the runner re-spawning around the delivered answer, which produces no row of
-its own — so ``create question --resumed`` (``cli.py``) is a pure marker requiring
-``--delivered`` already landed the full trail, not a fact this module composes.
+status). The real schema has no dedicated "resumed" row beyond that delivery, so
+``--resumed`` (``cli.py``) is a pure marker requiring ``--delivered``, not a fact this
+module composes.
 
 Each call mints its own ``qn_<ulid>`` question id, so two calls against the same chunk
 land two independent, non-colliding trails — the multi-question-per-chunk shape a UI

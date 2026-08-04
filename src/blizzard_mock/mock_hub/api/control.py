@@ -4,9 +4,9 @@
 Namespaced outside the ``/api`` surface and exempt from the transport-edge levers so a
 test can always seed a chunk, arm/clear a lever, or read a capture, even while the API
 is "unreachable". ``/_seed/chunk`` installs a scripted graph; ``/_levers`` is the
-first-class lever surface (catalog + active, arm, clear, reset) — the same shape the
-forge established; ``/_captured`` is the header-inspection lever — every ``/api/*``
-request's method/path/headers, in arrival order.
+first-class lever surface (catalog + active, arm, clear, reset); ``/_captured`` is the
+header-inspection lever — every ``/api/*`` request's method/path/headers, in arrival
+order.
 """
 
 from __future__ import annotations

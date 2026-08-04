@@ -1,12 +1,11 @@
 """Composes one ``usage_facts`` row — one harness invocation's usage/cost telemetry
 (``blizzard/hub/store/schema.py``'s ``usage_facts``, issue #59, ``bzh:facts-not-status``).
 
-``cost_usd`` is genuinely nullable — ``None`` is the harness-envelope-less
-transcript-token fallback (e.g. after a reaped crash) the real runner writes, which the
-hub's cost derivation reads as a lower bound and flags ``cost_partial`` for
-(``blizzard.runner.loop.steps._park_on_cost_cap``'s docstring). ``compose_usage`` never
-substitutes ``0.0`` for an absent cost — the caller's ``cost_usd=None`` lands a genuine
-SQL NULL, never a fabricated number.
+``cost_usd`` is genuinely nullable, and the hub's cost derivation reads NULL as a
+lower-bound ``cost_partial`` signal, so ``compose_usage`` never substitutes ``0.0`` for
+an absent cost — the caller's ``cost_usd=None`` lands a genuine SQL NULL (pinned by
+tests/test_mock_data_usage_seed.py::
+test_compose_usage_no_cost_lands_a_genuine_none_never_zero).
 """
 
 from __future__ import annotations

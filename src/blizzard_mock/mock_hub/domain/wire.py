@@ -35,12 +35,10 @@ class NodeConfig(BaseModel):
     executor: Executor
     session: SessionMode
     # The session reference target (issue #115) — the parsed `<name>` of a
-    # `resume:<name>`/`fresh:<name>` form; null for the bare forms. Never picked up when
-    # #115 landed, so the mock could not drive a targeted-resume envelope at all.
+    # `resume:<name>`/`fresh:<name>` form; null for the bare forms.
     session_source: str | None = None
     # The **effective** session declaration for this node-step (issue #144), already
-    # merged hub-side (declaration over chunk default, field by field). The runner reads
-    # these to resolve its pool, its model/effort, and its rotation bounds.
+    # merged hub-side (declaration over chunk default, field by field).
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
     session_effort: str | None = None
@@ -121,8 +119,7 @@ class QuestionView(BaseModel):
     answer: str | None = None
     answered_by: str | None = None
     answered_at: str | None = None
-    # The return leg (blizzard#165): the ``answer.delivered`` fact landed, so the
-    # resume-with-answer ran and the dormant session woke around it.
+    # The return leg (blizzard#165): the ``answer.delivered`` fact landed.
     delivered: bool = False
     delivered_at: str | None = None
 
@@ -143,9 +140,9 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
-    # The chunk's default model preference and effort (issue #144), replacing #27's
-    # `model` field-for-field with the real hub's — mirrored here so a real runner's wire
-    # model deserializes the mock's replies unchanged (`bzh:wire-change-extends-mock`).
+    # The chunk's default model preference and effort (issue #144) — mirrored here so
+    # a real runner's wire model deserializes the mock's replies unchanged
+    # (`bzh:wire-change-extends-mock`).
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     route: RouteView | None = None
@@ -170,9 +167,9 @@ class RunnerView(BaseModel):
     registered_at: str
     last_seen_at: str
     online: bool
-    # Two brakes, mirroring the real hub's contract (blizzard#43): the fleet's, which the
-    # runner pulls down and adheres to, and the runner's own, which it reports up. The mock
-    # only models the first — it stands in for the hub, and the hub never sets the second.
+    # Two brakes, mirroring the real hub's contract (blizzard#43): the fleet's, and the
+    # runner's own, which it reports up. The mock only models the first — it stands in
+    # for the hub, and the hub never sets the second.
     hub_paused: bool
     locally_paused: bool = False
     locally_paused_by: str | None = None

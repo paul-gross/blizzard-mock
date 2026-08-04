@@ -287,10 +287,10 @@ class MockHubService:
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
         """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected —
         mirrors ``blizzard.hub.domain.facts._apply``'s bool contract, including its
-        fallthrough for an unrecognized kind. Unlike the direct routes, the real hub's
-        batched ``_apply`` (``blizzard.hub.domain.facts:133-163``) carries no
-        chunk-existence check — a known kind naming an unknown chunk still counts
-        applied (the mark advances), the mutation is just a no-op."""
+        fallthrough for an unrecognized kind and its lack of a chunk-existence check —
+        a known kind naming an unknown chunk still counts applied and the mark advances
+        (pinned by tests/test_mock_hub.py::
+        test_events_known_kind_on_an_unknown_chunk_is_still_applied)."""
         if kind == LEASE_MINTED:
             chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
             if chunk is not None:
@@ -353,13 +353,13 @@ class MockHubService:
             row.locally_paused_by = None
             row.locally_paused_reason = None
             return True
-        # usage.recorded and event.recorded (issue #125): neither is fenced or
-        # route-token-gated at the real hub (deliberate); the mock has no usage ledger or
-        # event log to post to, so accepting without modeling further is the honest minimum
-        # (issue #4). external_subscription_usage.sampled (issue #218) is the same shape:
-        # runner-scoped, advisory-only, and the mock has no fleet-registry display field to
-        # refresh it into — accepted and no-op-stored. Any other kind is unrecognized —
-        # rejected, mirroring the real hub's fallthrough.
+        # usage.recorded / event.recorded (issue #125) and external_subscription_usage.
+        # sampled (issue #218) are accepted and no-op-stored: the mock has no usage
+        # ledger, event log, or fleet-registry field to post them into, so accepting
+        # without modeling further is the honest minimum (issue #4; pinned by
+        # tests/test_mock_hub.py::test_events_usage_recorded_is_accepted and
+        # ::test_events_external_subscription_usage_sampled_is_accepted). Any other kind
+        # is unrecognized — rejected, mirroring the real hub's fallthrough.
         return kind in (USAGE_RECORDED, EVENT_RECORDED, EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED)
 
     # -- completion apply --------------------------------------------------
@@ -411,8 +411,8 @@ class MockHubService:
         report; advances the fence exactly as the batched ``/events`` path does (the
         shared ``_advance_fence`` helper), 404 on an unknown chunk (unlike the batched
         path, which no-ops on an unknown chunk so an unrelated fact in the same push
-        still lands). Mirrors the real hub's 202 ``{"chunk_id"}`` body
-        (``blizzard.hub.api.fleet:415``) — no ``epoch`` in the response."""
+        still lands). Mirrors the real hub's 202 ``{"chunk_id"}`` body — no ``epoch``
+        in the response."""
         chunk = self._require(chunk_id)
         self._advance_fence(chunk, epoch)
         return {"chunk_id": chunk_id}
@@ -429,8 +429,7 @@ class MockHubService:
         """``POST /chunks/{id}/escalations`` — the direct, non-buffered
         ``escalation.recorded`` report; records the escalation exactly as the batched
         ``/events`` path does (the shared ``_record_escalation`` helper). Mirrors the
-        real hub's 202 ``{"chunk_id"}`` body (``blizzard.hub.api.fleet:431``) — no
-        ``epoch`` in the response."""
+        real hub's 202 ``{"chunk_id"}`` body — no ``epoch`` in the response."""
         chunk = self._require(chunk_id)
         self._record_escalation(
             chunk, epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
@@ -439,11 +438,12 @@ class MockHubService:
 
     def hub_advance(self, chunk_id: str) -> HubAdvanceResponse:
         """``POST /chunks/{id}/hub-advance`` — drive a chunk parked at a hub-executor
-        node one step (#65/#66). The mock's hub nodes only "park" (stay non-terminal)
-        when the *entry* node itself is a hub executor — a completion's own transition
-        into a hub node still derives ``done`` synchronously (``_advance``'s existing
-        behavior, unchanged so the mock-runner's driven happy path keeps working
-        without a hub-advance call). A chunk not parked at a hub-executor node is a
+        node one step (#65/#66). Hub nodes only "park" (stay non-terminal) when the
+        *entry* node itself is a hub executor; a completion's own transition into a hub
+        node still derives ``done`` synchronously, so the mock-runner's driven happy path
+        needs no hub-advance call (pinned by tests/test_mock_hub.py::
+        test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node and
+        ::test_happy_path_ingest_to_done). A chunk not parked at a hub-executor node is a
         no-op, ``ran=False``, mirroring the real hub's own "not parked" detail string."""
         chunk = self._require(chunk_id)
         node = chunk.node(chunk.current_node_id) if chunk.current_node_id is not None else None
@@ -578,8 +578,6 @@ class MockHubService:
             return self._fail(chunk, f"choice points at unknown node {target!r}")
         chunk.current_node_id = target
         if node.executor is Executor.HUB:
-            # A hub (deliver) node takes over; the mock delivers instantly and the chunk
-            # derives done — the runner holds envs, polls get_chunk, sees done, releases.
             chunk.status = ChunkStatus.DONE
             return ApplyResponse(outcome=ApplyOutcome.HUB_NODE_TAKEN, detail="hub node took over")
         chunk.status = ChunkStatus.RUNNING

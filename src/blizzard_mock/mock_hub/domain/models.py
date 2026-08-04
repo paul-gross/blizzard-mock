@@ -2,8 +2,7 @@
 
 These pydantic models **mirror the subset of the hub OpenAPI a runner consumes**
 (``blizzard.wire.{queue,route,envelope,completion,chunk,facts,runner}``), reproduced
-here **without importing ``blizzard``** — exactly as the mock forge mirrors the GitHub
-REST surface without importing octokit. A real runner deserializes these responses with
+here **without importing ``blizzard``**. A real runner deserializes these responses with
 its own wire models (non-strict ``model_validate``), so every field a wire model marks
 required is present and named identically; mock-only extras are omitted.
 
@@ -88,8 +87,8 @@ class NodeSpec(BaseModel):
     session: SessionMode = SessionMode.RESUME
     # The session reference target and the effective declaration (issues #115, #144) —
     # seeded per node rather than derived from a graph-level `sessions:` map, because a
-    # mock scenario scripts nodes directly and never mints a graph. A scenario seeds
-    # exactly what the real hub would have resolved onto the envelope.
+    # mock scenario scripts nodes directly and never mints a graph (pinned by
+    # tests/test_mock_hub.py::test_a_seeded_session_declaration_rides_the_claim_envelope).
     session_source: str | None = None
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
@@ -153,10 +152,9 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
-    # The chunk's default model preference and effort (issue #144), mirroring the real
-    # hub's `Chunk.default_model`/`default_effort` — what a surface declaring neither
-    # inherits. Both default to *express no preference*, exactly as ingest mints them, so
-    # a scenario that says nothing about either drives the same envelope the real hub does.
+    # Both default to *express no preference* (issue #144), mirroring what the real hub's
+    # ingest mints for a surface declaring neither (pinned by tests/test_pin_mock.py::
+    # test_a_chunk_spec_naming_neither_default_expresses_no_preference).
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     entry: str

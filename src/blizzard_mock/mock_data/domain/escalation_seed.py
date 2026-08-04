@@ -1,27 +1,19 @@
 """Composes one ``escalations`` row (``blizzard/hub/store/schema.py``, ``bzh:facts-not-status``).
 
-The real ``escalations.takeover_command`` is always the identical shape regardless of
-*why* the chunk was parked — ``blizzard.runner.loop.steps._escalate`` composes it once,
-from the harness adapter's ``resume_command`` (``cd <workdir> && <binary> --resume
-<session_id>``), for both a retries-exhausted park and :func:`_park_on_cost_cap`'s
-spend-cap park; the cap-specific wording (``f"spend cap ${cap:.2f} reached (spend
-${cost:.2f})"``, ``_park_on_cost_cap``'s ``reason``) is **log-line prose only** — it is
-never written to any column, so there is no live-schema text this module could read
-back verbatim. ``--cause cap`` therefore folds that same reason phrasing (placeholder
-amounts, no flags name real ones) onto the front of the generic resume-command
-placeholder, so a chunk seeded this way is recognizable as a cap-park — a deliberate,
-documented mock-only synthesis, not a literal reproduction of a real stored value.
-``--cause retries`` (the default) carries no such prefix, matching the real schema's
-own retries-exhausted shape exactly.
+``--cause cap`` folds a spend-cap reason phrasing (placeholder amounts) onto the front
+of the generic resume-command placeholder, so a chunk seeded this way is recognizable
+as a cap-park. That prefix is a deliberate mock-only synthesis, not a literal
+reproduction of a stored value — the real cap-specific wording is log-line prose and is
+never written to any column. ``--cause retries`` (the default) carries no such prefix
+(pinned by tests/test_mock_data_escalation_seed.py::
+test_cause_cap_composes_the_recognizable_spend_cap_wording and
+::test_cause_retries_is_the_same_as_the_default).
 
-``wrapped_takeover_command`` defaults the same way regardless of ``cause``: a real
-spend-cap park reuses the identical ``_escalate`` composition a retries-exhausted park
-does (``runner/loop/steps.py``), so both ``--cause retries`` and ``--cause cap`` get a
-synthesized placeholder ``blizzard runner takeover`` command alongside
-``takeover_command`` unless ``--wrapped-takeover-command`` overrides it explicitly.
-The wrapped default follows the raw value — an explicitly emptied ``takeover_command``
-suppresses it, and an explicit wrapped command alongside an empty raw one is rejected —
-because wrapped implies raw, never the reverse (``humans.md`` §Escalation).
+``wrapped_takeover_command`` defaults to a synthesized placeholder for either cause
+unless ``--wrapped-takeover-command`` overrides it, and follows the raw value — an
+emptied ``takeover_command`` suppresses it, and a wrapped command alongside an empty raw
+one is rejected, because wrapped implies raw, never the reverse (``humans.md``
+§Escalation).
 """
 
 from __future__ import annotations

@@ -20,8 +20,7 @@ FENCE_EXIT_CODE = 2
 def read_script(prompt_arg: str | None) -> str | None:
     """The behavior script: the positional ``prompt_arg``, else piped stdin, else ``None``.
 
-    ``None`` signals "nothing to run" — the caller prints usage and exits 0,
-    mirroring a bare ``claude`` invocation.
+    ``None`` signals "nothing to run" — the caller prints usage and exits 0.
     """
     if prompt_arg is not None:
         return prompt_arg
@@ -49,8 +48,7 @@ def dispatch(
     """Run ``script`` through the engine, mapping a fence refusal to an error exit.
 
     ``transcript``, ``hooks``, and the observed ``model``/``effort`` flags (issue #144)
-    ride straight through to :func:`~blizzard_mock.harness.engine.run_prompt`; only the
-    claude_code facade supplies any of them.
+    ride straight through to :func:`~blizzard_mock.harness.engine.run_prompt`.
     """
     try:
         return run_prompt(

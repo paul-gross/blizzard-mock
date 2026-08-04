@@ -2,9 +2,8 @@
 
 One module per coding harness the seam accepts. Each facade is a thin surface —
 invocation shape, output format, exit behavior, resume semantics — over
-:mod:`blizzard_mock.harness.engine`; the facade is exactly what the runner's
-adapter layer is tested against.
+:mod:`blizzard_mock.harness.engine`.
 
 - ``claude_code`` — the mock Claude Code facade (binary ``mock-claude-code``).
-- ``codex``, ``opencode`` — reserved for the Build step.
+- ``codex``, ``opencode`` — the mock Codex and OpenCode facades.
 """

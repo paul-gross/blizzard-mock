@@ -2,10 +2,7 @@
 
 A real coding harness turns a prompt string into behavior via an LLM; the mock
 turns it into behavior via :func:`exec` — the prompt it receives *is* Python
-code, run in the acquired worktree with the spawn environment
-(``implementation/mocking.md``). All three per-harness facades
-(:mod:`blizzard_mock.harness.facades`) call into this one engine and differ only
-in their CLI/wire surface, so a new facade never touches the engine.
+code, run in the acquired worktree with the spawn environment.
 
 Responsibilities owned here:
 
@@ -15,14 +12,10 @@ Responsibilities owned here:
   in the worktree tree). It can never pass as a real harness binding.
 - **The exec.** Treat the prompt's behavior script (or, on resume, the resume
   message's) as Python source and :func:`exec` it in the worktree with the
-  :mod:`blizzard_mock.harness.helpers` surface bound as globals. A caller that
-  controls the whole message declares **whole-message mode** (``run_prompt(...,
-  whole_message=True)``) and the entire body execs with no sentinel scanning at
-  all — the preferred contract for a driver that composes the message itself.
-  Otherwise, which part of the prompt *is* the program is said explicitly by a
-  ``<behavior-script>`` tag (:func:`split_behavior_script`); an untagged prompt
-  falls back to the positional :func:`split_worker_preamble` and execs everything
-  after the preamble.
+  :mod:`blizzard_mock.harness.helpers` surface bound as globals. Which part of the
+  prompt is the program is decided by ``whole_message`` (the entire body, no
+  scanning), else a ``<behavior-script>`` tag (:func:`split_behavior_script`), else
+  the positional :func:`split_worker_preamble`.
 - **Session state.** Persist a per-session file so a resumed script can read what
   it asked and act on the answer it was resumed with.
 
@@ -61,38 +54,29 @@ STATE_DIR_ENV_VAR = "BLIZZARD_MOCK_HARNESS_STATE_DIR"
 #: Optional command the ``ask`` helper shells out to (the real runner ask path),
 #: e.g. ``"blizzard runner ask"``. Absent in unit tests — the ask is emit-only.
 ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
-#: The runner-injected, comma-separated workdirs of the environments the chunk holds.
-#: The runner spawns a worker at the *workspace root* and names its env(s) in the
-#: preamble prompt instead (blizzard issue #17), so cwd is no longer the worktree to
-#: work in. A real agent reads that prose and goes there; the mock reads this.
+#: The runner-injected, comma-separated workdirs of the environments the chunk holds —
+#: the fact the mock obeys instead of cwd (blizzard issue #17); see
+#: :func:`acquired_worktree`.
 ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
 
-#: Header of the machine-local facts table the runner prepends to every spawn prompt
-#: (``design/harness-adapters.md``: the delivered prompt is "the hub's node envelope
-#: plus the runner's machine-local preamble"). It is prose, not program — see
-#: :func:`split_worker_preamble`.
+#: Header of the machine-local facts table the runner prepends to every spawn prompt.
+#: It is prose, not program — see :func:`split_worker_preamble`.
 PREAMBLE_TABLE_HEADER = "| Field | Value |"
 
-#: Delimiters that say outright which part of a prompt is the program — the same
-#: tagged-text idiom the wire already uses on the *output* side (:data:`CHOICE_OPEN`,
-#: ``<Ask>``), turned around onto the input. A prompt carrying them **on lines of their
-#: own** is exec'd from its tagged blocks alone and everything outside them is prose the
-#: engine never runs; a prompt without such a line — including one that only mentions a
-#: tag inline, as operator preamble prose may — keeps the positional
-#: :func:`split_worker_preamble` behavior. See :func:`split_behavior_script`.
+#: Delimiters that say outright which part of a prompt is the program. They count only
+#: **on lines of their own** — see :func:`split_behavior_script`.
 BEHAVIOR_SCRIPT_OPEN = "<behavior-script>"
 BEHAVIOR_SCRIPT_CLOSE = "</behavior-script>"
 
 #: Structured markers the facade wire embeds so a dumb adapter can parse the two
-#: reply shapes out of the harness-native output (mirrors Claude Code's tagged
-#: text; see ``design/harness-adapters.md``'s ``<Choice>{name}</Choice>``).
+#: reply shapes out of the harness-native output (``design/harness-adapters.md``).
 CHOICE_OPEN = "<Choice>"
 CHOICE_CLOSE = "</Choice>"
 
 #: The transcript's user-turn text when no preamble prose is available to show. A
-#: transcript reader must never see the raw exec'd Python as "what the user said"
-#: (it would misrepresent the script as prose an agent read) — these stand in for
-#: both the received prompt and a resume message, which also arrives as code.
+#: transcript reader must never see the raw exec'd Python as "what the user said" —
+#: these stand in for both the received prompt and a resume message, which also
+#: arrives as code.
 _TRANSCRIPT_SPAWN_TEXT = "(mock harness spawn — the behavior script it executed is not shown here)"
 _TRANSCRIPT_RESUME_TEXT = "(mock harness resume — the behavior script it executed is not shown here)"
 
@@ -121,9 +105,9 @@ class EmptyBehaviorScriptError(ValueError):
 
     Raised inside :func:`run_prompt`'s whole-message path so the turn ends as an
     ``error_during_execution`` — the same silent-no-op rot
-    :class:`BehaviorScriptTagError` closes for an empty tagged block, closed here
-    for a message that is blank or comments-only (which parses to no statements at
-    all, so an unguarded exec would exit 0 with no verdict).
+    :class:`BehaviorScriptTagError` closes, closed here for a message that is blank
+    or comments-only (which parses to no statements at all, so an unguarded exec
+    would exit 0 with no verdict).
     """
 
 
@@ -157,9 +141,8 @@ class RunResult:
 class IHarnessWire(Protocol):
     """A facade's wire surface — the engine's only outward dependency (owned inward).
 
-    Each per-harness facade implements this to render a :class:`RunResult` in its
-    coding harness's native output format. The engine constructs the result and
-    writes ``render(result)`` to the output stream; it never formats anything.
+    The engine constructs a :class:`RunResult` and writes ``render(result)`` to the
+    output stream; it never formats anything.
     """
 
     def render(self, result: RunResult) -> str:
@@ -170,13 +153,10 @@ class IHarnessWire(Protocol):
 class ITranscriptWriter(Protocol):
     """A facade's optional conversation-transcript sink — mirrors :class:`IHarnessWire`.
 
-    Only the claude_code facade constructs one (only Claude Code has a transcript
-    reader today — ``blizzard.runner.harness.internal.claude_code_normalizer``,
-    blizzard#245); every other facade passes ``None`` and the engine no-ops. The engine
-    calls into it at two defined points — the spawn/resume user turn and the final
-    result — and never renders anything itself; the helper surface drives
-    ``record_tool_call`` / ``record_tool_result`` off the run context in between (the
-    package README's "Conversation transcripts" owns which helpers those are).
+    ``None`` (every facade but claude_code) is a total no-op. The engine calls into
+    it at two defined points — the spawn/resume user turn and the final result — and
+    never renders anything itself; the helper surface drives ``record_tool_call`` /
+    ``record_tool_result`` off the run context in between.
     """
 
     def record_user(self, text: str) -> None:
@@ -199,13 +179,9 @@ class ITranscriptWriter(Protocol):
 class IHookRunner(Protocol):
     """A facade's optional hook-execution sink — mirrors :class:`ITranscriptWriter`.
 
-    Real Claude Code runs the hook commands declared in its ``--settings``
-    document; this is the seam that lets the mock do the same, so a runner-owned
-    hook travels its real path instead of being synthesized. Only the claude_code
-    facade constructs one (it is the only facade the runner passes ``--settings``
-    to); every other facade and every direct engine caller passes ``None`` and the
-    engine no-ops. The engine calls into it at two defined lifecycle points and
-    never constructs a hook payload or spawns anything itself.
+    ``None`` (every facade but claude_code, and every direct engine caller) is a
+    total no-op. The engine calls into it at two defined lifecycle points and never
+    constructs a hook payload or spawns anything itself.
     """
 
     def on_tool_use(self, name: str, tool_input: Mapping[str, object], tool_output: str) -> None:
@@ -323,10 +299,7 @@ class TaggedPrompt:
 
     ``script`` is every ``<behavior-script>`` block's contents, dedented and
     concatenated in order; ``prose`` is the rest of the prompt with the blocks (and
-    their delimiter lines) elided — real prose, which is both what a transcript shows
-    as "what the user said" and what a resumed script reads back from
-    :func:`~blizzard_mock.harness.helpers.answer`, where an untagged prompt has only
-    its preamble, a synthetic placeholder, or the raw message.
+    their delimiter lines) elided.
     """
 
     script: str
@@ -346,22 +319,15 @@ def split_behavior_script(prompt: str) -> TaggedPrompt | None:
     """Split a ``<behavior-script>``-tagged prompt into its program and its prose.
 
     The tag says *this part is the program*: only the tagged blocks reach the
-    interpreter, and everything around them is prose the engine treats as data. That
-    decouples the mock from the exact shape of the runner's spawn preamble — a
-    tagged prompt does not consult :func:`split_worker_preamble` at all — and lets a
-    mock-targeted prompt read like a real node prompt instead of being pure code.
+    interpreter, and everything around them is prose the engine treats as data. A
+    tagged prompt does not consult :func:`split_worker_preamble` at all.
 
     **A delimiter counts only on a line of its own** (leading/trailing whitespace
-    aside). The prompt a worker receives is not all script-author-owned: the runner
-    prepends operator prose it composes itself
-    (``blizzard:runner/harness/preamble.py``), and that prose may well *mention* the
-    tag — a house rule about it, or a quoted work item like the one this feature came
-    from. Matched as a bare substring, such a mention would either hijack a legacy
-    run (an illustrative block becomes the whole program and the node's real script
-    silently never runs) or, unpaired, hard-fail every untagged spawn in the
-    deployment. Line-anchoring makes an inline mention — ``a `<behavior-script>`
-    tag`` — inert, so a prompt with no *block* keeps behaving exactly as it did
-    before the tag existed.
+    aside). Prompt text the script author does not own may *mention* the tag inline,
+    and a bare-substring match on such a mention would either hijack the run (an
+    illustrative block becomes the whole program) or, unpaired, hard-fail every
+    untagged spawn. Line-anchoring makes an inline mention inert, so a prompt with no
+    *block* behaves exactly as an untagged one.
 
     Blocks are :func:`~textwrap.dedent`\\ ed, so a tag nested in a markdown list or a
     blockquote yields runnable source rather than an ``IndentationError``.
@@ -413,8 +379,7 @@ def split_behavior_script(prompt: str) -> TaggedPrompt | None:
         # passing, it carries no block, so it is a legacy prompt.
         return None
 
-    # Blocks join on a newline so two of them never fuse into one line; the prose
-    # keeps its own shape, minus the gaps the elided blocks left behind.
+    # Blocks join on a newline so two of them never fuse into one line.
     script = "\n".join(blocks)
     if not script.strip():
         raise BehaviorScriptTagError(
@@ -427,10 +392,8 @@ def _parses_to_empty_module(source: str) -> bool:
     """True iff ``source`` compiles to a module with no statements at all.
 
     Blank or whitespace-only source is the obvious case; comments-only source also
-    parses to an empty body, which is exactly the silent no-verdict rot
-    :class:`EmptyBehaviorScriptError` exists to catch for whole-message mode. A
-    genuine syntax error is *not* reported as empty — that already fails loudly of
-    its own accord once :func:`exec` reaches it.
+    parses to an empty body. A genuine syntax error is *not* reported as empty —
+    that already fails loudly of its own accord once :func:`exec` reaches it.
     """
     try:
         return len(ast.parse(source).body) == 0
@@ -444,17 +407,13 @@ def split_worker_preamble(prompt: str) -> tuple[str, str]:
     The **legacy, untagged** discrimination: positional, and consulted only for a prompt
     with no ``<behavior-script>`` tag (:func:`split_behavior_script`, which supersedes it).
 
-    The prompt is the program — but only the *envelope* half of it. The runner prepends a
-    machine-local preamble to every spawn: the operator's workspace prose, then a facts
-    table naming the held environments (blizzard issue #17, ``design/harness-adapters.md``).
-    That preamble is addressed to an agent's judgement, not to ``exec`` — feeding it to the
-    interpreter is a ``SyntaxError`` on the table's first pipe, which would fail the turn
-    before the script it precedes ever runs.
-
-    The preamble always ends with its facts table, and the table's rows are contiguous, so
-    the script is whatever follows the last row of the table opened by
-    :data:`PREAMBLE_TABLE_HEADER`. Returns ``("", prompt)`` when no preamble is present —
-    a resume message and every direct engine caller pass a bare script.
+    A spawn prompt's preamble is prose addressed to an agent's judgement, not to ``exec``
+    — feeding it to the interpreter is a ``SyntaxError`` on the facts table's first pipe,
+    which would fail the turn before the script it precedes ever runs (blizzard issue #17).
+    The preamble ends with that table and its rows are contiguous, so the script is
+    whatever follows the last row of the table opened by :data:`PREAMBLE_TABLE_HEADER`.
+    Returns ``("", prompt)`` when no preamble is present — a resume message and every
+    direct engine caller pass a bare script.
     """
     lines = prompt.splitlines()
     try:
@@ -470,18 +429,14 @@ def split_worker_preamble(prompt: str) -> tuple[str, str]:
 def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
     """The worktree a behavior-script runs in: the first held env's workdir, else ``cwd``.
 
-    The runner spawns a worker at the **workspace root** and names the environments it
-    holds in the preamble prompt (blizzard issue #17) — so the process cwd is the
-    workspace, not the worktree the node is supposed to touch. A real agent reads the
-    preamble and works in the named env; this is the mock's equivalent of obeying it,
-    reading the same fact off :data:`ENV_WORKDIRS_ENV_VAR` (which the adapter injects
-    alongside the prompt). The first workdir is the one chosen, matching the adapter's
-    own single-env fallback.
+    A worker's process cwd is the workspace root, not the worktree the node is meant to
+    touch, so the env to work in is read off :data:`ENV_WORKDIRS_ENV_VAR` instead
+    (blizzard issue #17). The first workdir is the one chosen.
 
     Falls back to ``cwd`` when the variable is absent or empty — direct engine callers
-    (the mock's own tests, ``blizzard-mock:e2e``, manual runs) drive it from inside the
-    worktree and never set it. A named workdir that does not exist is ignored rather
-    than trusted, so a stale value degrades to today's behavior instead of erroring.
+    drive it from inside the worktree and never set it. A named workdir that does not
+    exist is ignored rather than trusted, so a stale value degrades to the fallback
+    instead of erroring.
     """
     raw = env.get(ENV_WORKDIRS_ENV_VAR, "")
     for candidate in (part.strip() for part in raw.split(",")):
@@ -493,10 +448,9 @@ def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
 def fence_base_dir(cwd: Path) -> Path:
     """The directory session/transcript state is rooted under.
 
-    The fence marker's parent, else ``cwd`` when no marker is found in the tree —
-    the same fallback :func:`_state_root` has always used, pulled out so the
-    transcript writer's own fenced fallback (``facades/_transcript.py``) shares it
-    rather than re-deriving the rule.
+    The fence marker's parent, else ``cwd`` when no marker is found in the tree.
+    Shared by :func:`_state_root` and the transcript writer's fenced fallback
+    (``facades/_transcript.py``), so neither re-derives the rule.
     """
     marker = find_fence_marker(cwd)
     return marker.parent if marker is not None else cwd
@@ -580,39 +534,32 @@ def run_prompt(
 
     Spawn and resume read the prompt the same way: under ``whole_message=True``
     the entire body execs with no sentinel scanning at all (no
-    ``<behavior-script>`` scan, no preamble split) — the mode for a caller that
-    composes the whole message itself (test tiers, scripted journeys, fixture
-    scenarios), where a mention of the tag anywhere in the script, including
-    inside a string literal, must stay inert. Otherwise, a ``<behavior-script>``-
-    tagged prompt execs its blocks alone (:func:`split_behavior_script`), an
-    untagged one execs everything past the preamble
-    (:func:`split_worker_preamble`), and a malformed tag fails the turn as an
-    ``error_during_execution``. A whole-message script that parses to an empty
+    ``<behavior-script>`` scan, no preamble split), so a mention of the tag
+    anywhere in the script — including inside a string literal — stays inert.
+    Otherwise, a ``<behavior-script>``-tagged prompt execs its blocks alone
+    (:func:`split_behavior_script`), an untagged one execs everything past the
+    preamble (:func:`split_worker_preamble`), and a malformed tag fails the turn as
+    an ``error_during_execution``. A whole-message script that parses to an empty
     module body (blank, or comments-only) fails the same way instead of exiting 0
     with no verdict (:class:`EmptyBehaviorScriptError`).
 
     ``model``/``effort`` (issue #144) are the flags this invocation was launched with —
     recorded onto the session state as an :class:`~blizzard_mock.harness.session.Invocation`
     and otherwise ignored (the mock is model- and effort-agnostic). ``None`` means the flag
-    was absent from argv, which on a resume is precisely what a fleet-tier scenario asserts.
+    was absent from argv.
 
     Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
     :class:`RunResult` through ``wire`` to ``out`` exactly once (a ``hang`` never
     reaches that line; a ``crash`` renders an error result).
 
-    ``transcript``, when supplied (only the claude_code facade constructs one — a
-    genuine Claude-shaped conversation is only useful where a reader exists), mints
-    the user turn for this run and the assistant turn for its result; it is also
-    bound onto the run context, which the helper surface's tool calls write through
-    mid-script (the package README's "Conversation transcripts" owns that list).
-    ``None`` (every other facade) is a total no-op.
+    ``transcript``, when supplied, mints the user turn for this run and the
+    assistant turn for its result; it is also bound onto the run context, which the
+    helper surface's tool calls write through mid-script. ``None`` is a total no-op.
 
-    ``hooks``, when supplied (only the claude_code facade constructs one, from the
-    ``--settings`` document the runner hands it), executes the hook commands that
-    document declares. ``on_session_end`` fires once at the tail of this function,
-    after the wire render and before the return, so the hook completes while the
-    process is still alive. ``None`` (every other facade, and every direct caller)
-    is a total no-op.
+    ``hooks``, when supplied, executes the hook commands its ``--settings`` document
+    declares. ``on_session_end`` fires once at the tail of this function, after the
+    wire render and before the return, so the hook completes while the process is
+    still alive. ``None`` is a total no-op.
     """
     import sys
 
@@ -627,16 +574,9 @@ def run_prompt(
 
     assert_fenced(cwd, env)
 
-    # Which part of the prompt is the program? Under whole-message mode the caller
-    # has already answered that question — the entire body is the program, no
-    # scanning at all, so a `<behavior-script>` mention anywhere inside it (even in
-    # a string literal) is inert data rather than a delimiter. Otherwise, a
-    # `<behavior-script>` block says so outright; without one, the runner's preamble
-    # still rides ahead of the envelope on a spawn — prose for an agent to read, not
-    # code to run — so the positional split decides. A malformed tag, or a
-    # whole-message script with an empty module body, is neither: it is carried
-    # into the run below and raised there, so the turn fails loudly instead of
-    # degrading to a quiet path.
+    # Which part of the prompt is the program? A malformed tag, or a whole-message
+    # script with an empty module body, is carried into the run below and raised
+    # there, so the turn fails loudly instead of degrading to a quiet path.
     tag_error: BehaviorScriptTagError | None = None
     empty_error: EmptyBehaviorScriptError | None = None
     tagged: TaggedPrompt | None = None
@@ -658,10 +598,8 @@ def run_prompt(
         elif tag_error is None:
             preamble, script = split_worker_preamble(prompt)
     script_error: Exception | None = tag_error or empty_error
-    # What the *human* said this turn: a tagged prompt's prose, else the whole raw
-    # message (an untagged resume, and a whole-message resume alike, are code end to
-    # end, and `answer()` has always returned it verbatim). This is what a resumed
-    # script reads back as its answer.
+    # What the *human* said this turn — what a resumed script reads back as its
+    # answer: a tagged prompt's prose, else the whole raw message.
     message = tagged.prose if tagged is not None else prompt
 
     store = SessionStore(_state_root(env, cwd))
@@ -674,8 +612,7 @@ def run_prompt(
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
     state.turns += 1
-    # What this turn was actually launched with (issue #144) — the observable behind the
-    # mint-only model contract's fleet-tier proof.
+    # What this turn was actually launched with (issue #144).
     state.invocations.append(Invocation(kind="resume" if is_resume else "spawn", model=model, effort=effort))
 
     ctx = RunContext(
@@ -743,10 +680,9 @@ def run_prompt(
     stream.write(wire.render(result))
     stream.flush()
     if hooks is not None:
-        # The tail, after the render: the hook subprocess runs to completion while
-        # this process is still alive, so a "declared done" signal is durable before
-        # the runner can observe the exit it is compared against. The exits that do
-        # *not* reach here carry meaning of their own — see the package README's
-        # "Hook execution".
+        # The tail, after the render: the hook subprocess runs to completion while this
+        # process is still alive (pinned by tests/test_pin_mock.py::
+        # test_session_end_fires_after_the_wire_render_and_before_run_prompt_returns).
+        # The exits that do *not* reach here: package README, "Hook execution".
         hooks.on_session_end(result)
     return result.exit_code
