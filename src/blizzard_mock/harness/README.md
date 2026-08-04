@@ -170,10 +170,10 @@ runner panel can open. This is
   spawn and honors it, so this covers the fleet-driven path in full; a bare
   direct invocation that lets the engine self-assign a uuid skips transcript
   writing.
-- **The sidechain/thinking-fidelity gap — stated here and nowhere else** (pointed
-  at, never restated, by `facades/_transcript.py`'s own module docstring and by
-  `blizzard-context:/verification/blizzard.md`'s tier-rules bullet on the same
-  topic). Minted deliberately narrow for realism a human reading the file benefits
+- **The sidechain/thinking-fidelity gap — stated here and nowhere else.** Every
+  other mention anywhere in the workspace is a bare pointer back to this bullet,
+  never a restatement, so this is the one place to update if the gap's shape
+  changes. Minted deliberately narrow for realism a human reading the file benefits
   from (`sessionId`/`cwd`/`timestamp` per record): no `uuid`/`parentUuid` DAG, no
   `isSidechain` subagent sidecar files, no `type: "thinking"` content blocks, no
   `<persisted-output>` offload wrapper, no byte-exact ANSI fidelity. The first
@@ -181,10 +181,11 @@ runner panel can open. This is
   it added inline-sidechain threading (the `uuid`/`parentUuid` chain),
   sidecar-file discovery (`isSidechain` subagent conversations,
   `<session-id>/subagents/agent-<agentId>.jsonl`), and thinking-turn redaction,
-  none of which this writer mints. It closes once a future issue ships these
-  turns somewhere a mock-fleet chunk can observe (not yet filed) and teaches this
-  writer to mint them alongside. The
-  user turn's text is never the raw exec'd Python — that would misrepresent code as
+  none of which this writer mints. It closes once `blizzard-product:/plans/
+  transcripts.md`'s "The transcript lane" and "The hub transcript view" work ships
+  these turns somewhere a mock-fleet chunk can observe (no issue filed yet for that
+  work) and teaches this writer to mint them alongside.
+- The user turn's text is never the raw exec'd Python — that would misrepresent code as
   "what the user said" — it is a tagged prompt's own prose with its
   `<behavior-script>` blocks elided, else the real preamble prose when an
   untagged spawn carried one (`split_worker_preamble`), else a short synthetic

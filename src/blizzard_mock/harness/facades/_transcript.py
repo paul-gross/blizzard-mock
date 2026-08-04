@@ -15,10 +15,13 @@ tool-call surface drives ``record_tool_call``/``record_tool_result`` off the run
 context in between — the package README's "Conversation transcripts" owns which
 helpers those are.
 
-Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
-for a human reading the file, even though normalization does not need them for the
-plain conversation shape this writer mints (only ``type`` and ``message.content`` in
-file order). What this writer omits entirely — the sidechain/thinking-fidelity
+Minted deliberately narrow: ``sessionId``/``cwd`` ride every record for a human
+reading the file, even though normalization does not need them for the plain
+conversation shape this writer mints (only ``type`` and ``message.content`` in file
+order). ``timestamp`` rides every record too, and unlike ``sessionId``/``cwd`` it is
+load-bearing: the normalizer's prompt-timestamp sidechain-link route indexes and
+orders tool-call turns by it, so an un-timestamped turn can never be a match
+candidate at all. What this writer omits entirely — the sidechain/thinking-fidelity
 gap — is stated in one place only: the package README's "Conversation transcripts"
 section (``README.md``, not restated here).
 
