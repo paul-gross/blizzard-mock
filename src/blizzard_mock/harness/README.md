@@ -135,7 +135,8 @@ and how a settings document's hook commands are executed* — see "Hook executio
 
 `mock-claude-code` mints a genuine Claude-Code-shaped JSONL transcript for every
 run that has a known session id — the same record shapes the real runner's
-transcript parser (`blizzard/runner/transcripts/parser.py`) reads, so a chunk
+transcript normalizer (`blizzard/runner/harness/internal/claude_code_normalizer.py`,
+blizzard#245 — the successor to the old `transcripts/parser.py`) reads, so a chunk
 run through the fleet produces a conversation the runner panel can open. This is
 **claude_code-only**: only Claude Code has a reader today, so `codex.py` and
 `opencode.py` never construct a writer and the engine no-ops for them.
@@ -170,10 +171,13 @@ run through the fleet produces a conversation the runner panel can open. This is
   direct invocation that lets the engine self-assign a uuid skips transcript
   writing.
 - Minted deliberately narrow for realism a human reading the file benefits from
-  (`sessionId`/`cwd`/`timestamp` per record) without cost the parser doesn't
-  need: no `uuid`/`parentUuid` DAG, no `isSidechain` subagent sidecars, no
-  `<persisted-output>` offload wrapper, no byte-exact ANSI fidelity. The user
-  turn's text is never the raw exec'd Python — that would misrepresent code as
+  (`sessionId`/`cwd`/`timestamp` per record): no `uuid`/`parentUuid` DAG, no
+  `isSidechain` subagent sidecar files, no `<persisted-output>` offload wrapper, no
+  byte-exact ANSI fidelity. The first two are a **documented gap**, not a claim the
+  normalizer doesn't want them — it added inline-sidechain threading and sidecar-file
+  discovery this writer deliberately never mints (`blizzard-context:/verification/
+  blizzard.md`); it closes when a future issue teaches this writer those shapes. The
+  user turn's text is never the raw exec'd Python — that would misrepresent code as
   "what the user said" — it is a tagged prompt's own prose with its
   `<behavior-script>` blocks elided, else the real preamble prose when an
   untagged spawn carried one (`split_worker_preamble`), else a short synthetic

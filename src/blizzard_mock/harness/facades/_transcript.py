@@ -1,9 +1,10 @@
 """Claude-Code-shaped JSONL transcript writer — only the ``claude_code`` facade uses it.
 
-Mints the same record shapes the real runner's transcript parser
-(``blizzard/runner/transcripts/parser.py``) reads, so a chunk that runs through the
-mock fleet produces a conversation the runner panel can open. Only Claude Code has a
-reader today (codex/opencode have none), so only :mod:`~blizzard_mock.harness.
+Mints the same record shapes the real runner's transcript normalizer
+(``blizzard/runner/harness/internal/claude_code_normalizer.py``, blizzard#245 — the
+successor to the old ``transcripts/parser.py``) reads, so a chunk that runs through
+the mock fleet produces a conversation the runner panel can open. Only Claude Code has
+a reader today (codex/opencode have none), so only :mod:`~blizzard_mock.harness.
 facades.claude_code` constructs one; the engine's ``transcript`` parameter
 (:class:`~blizzard_mock.harness.engine.ITranscriptWriter`) is left ``None``
 everywhere else and the shared engine no-ops.
@@ -16,11 +17,17 @@ context in between — the package README's "Conversation transcripts" owns whic
 helpers those are.
 
 Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
-for a human reading the file, even though the parser does not read them (it reads
-only ``type`` and ``message.content`` in file order — no ``uuid``/``parentUuid``
-traversal). Left out entirely, matching the parser's actual needs: the
-``uuid``/``parentUuid`` DAG, ``isSidechain`` subagent sidecar files, the
-``<persisted-output>`` large-result offload wrapper, and byte-exact ANSI fidelity.
+for a human reading the file, even though normalization does not need them for the
+plain conversation shape this writer mints (only ``type`` and ``message.content`` in
+file order). Left out entirely — a **documented gap**, not a claim the normalizer
+does not want them: it added a ``uuid``/``parentUuid`` chain (inline-sidechain
+threading) and sidecar-file discovery (``isSidechain`` subagent conversations,
+``<session-id>/subagents/agent-<agentId>.jsonl``) that this writer deliberately never
+mints, alongside the pre-existing gaps below. Recorded at
+``blizzard-context:/verification/blizzard.md`` rather than invented around here; it
+closes when a future issue teaches this writer to mint those shapes. Still absent
+regardless: the ``<persisted-output>`` large-result offload wrapper, and byte-exact
+ANSI fidelity.
 
 Every assistant-type record also carries ``model`` + ``usage`` (blizzard epic #57)
 — the runner adapter's transcript-summation fallback
@@ -54,8 +61,9 @@ TRANSCRIPTS_ROOT_ENV_VAR = "BZ_TRANSCRIPTS_ROOT"
 #: The subdirectory every session file is grouped under. The real reader locates a
 #: transcript by globbing ``<root>/*/<session_id>.jsonl`` and only consults the
 #: directory name as a multi-match tie-break — which a UUID4 session id never
-#: triggers (``internal/jsonl_transcript_repository.py``) — so one stable name is
-#: enough; replicating Claude Code's mangled-cwd directory naming buys nothing.
+#: triggers (``blizzard/runner/harness/internal/claude_code_transcript.py``) — so one
+#: stable name is enough; replicating Claude Code's mangled-cwd directory naming buys
+#: nothing.
 PROJECT_DIR_NAME = "mock-claude-code"
 
 
