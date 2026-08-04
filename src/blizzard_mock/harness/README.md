@@ -136,8 +136,8 @@ and how a settings document's hook commands are executed* — see "Hook executio
 `mock-claude-code` mints a genuine Claude-Code-shaped JSONL transcript for every
 run that has a known session id — the same record shapes the real runner's
 transcript normalizer (`blizzard/runner/harness/internal/claude_code_normalizer.py`,
-blizzard#245 — the successor to the old `transcripts/parser.py`) reads, so a chunk
-run through the fleet produces a conversation the runner panel can open. This is
+blizzard#245) reads, so a chunk run through the fleet produces a conversation the
+runner panel can open. This is
 **claude_code-only**: only Claude Code has a reader today, so `codex.py` and
 `opencode.py` never construct a writer and the engine no-ops for them.
 
@@ -170,13 +170,20 @@ run through the fleet produces a conversation the runner panel can open. This is
   spawn and honors it, so this covers the fleet-driven path in full; a bare
   direct invocation that lets the engine self-assign a uuid skips transcript
   writing.
-- Minted deliberately narrow for realism a human reading the file benefits from
-  (`sessionId`/`cwd`/`timestamp` per record): no `uuid`/`parentUuid` DAG, no
-  `isSidechain` subagent sidecar files, no `<persisted-output>` offload wrapper, no
-  byte-exact ANSI fidelity. The first two are a **documented gap**, not a claim the
-  normalizer doesn't want them — it added inline-sidechain threading and sidecar-file
-  discovery this writer deliberately never mints (`blizzard-context:/verification/
-  blizzard.md`); it closes when a future issue teaches this writer those shapes. The
+- **The sidechain/thinking-fidelity gap — stated here and nowhere else** (pointed
+  at, never restated, by `facades/_transcript.py`'s own module docstring and by
+  `blizzard-context:/verification/blizzard.md`'s tier-rules bullet on the same
+  topic). Minted deliberately narrow for realism a human reading the file benefits
+  from (`sessionId`/`cwd`/`timestamp` per record): no `uuid`/`parentUuid` DAG, no
+  `isSidechain` subagent sidecar files, no `type: "thinking"` content blocks, no
+  `<persisted-output>` offload wrapper, no byte-exact ANSI fidelity. The first
+  three are a **documented gap**, not a claim the normalizer doesn't want them —
+  it added inline-sidechain threading (the `uuid`/`parentUuid` chain),
+  sidecar-file discovery (`isSidechain` subagent conversations,
+  `<session-id>/subagents/agent-<agentId>.jsonl`), and thinking-turn redaction,
+  none of which this writer mints. It closes once a future issue ships these
+  turns somewhere a mock-fleet chunk can observe (not yet filed) and teaches this
+  writer to mint them alongside. The
   user turn's text is never the raw exec'd Python — that would misrepresent code as
   "what the user said" — it is a tagged prompt's own prose with its
   `<behavior-script>` blocks elided, else the real preamble prose when an

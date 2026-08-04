@@ -1,13 +1,12 @@
 """Claude-Code-shaped JSONL transcript writer — only the ``claude_code`` facade uses it.
 
 Mints the same record shapes the real runner's transcript normalizer
-(``blizzard/runner/harness/internal/claude_code_normalizer.py``, blizzard#245 — the
-successor to the old ``transcripts/parser.py``) reads, so a chunk that runs through
-the mock fleet produces a conversation the runner panel can open. Only Claude Code has
-a reader today (codex/opencode have none), so only :mod:`~blizzard_mock.harness.
-facades.claude_code` constructs one; the engine's ``transcript`` parameter
-(:class:`~blizzard_mock.harness.engine.ITranscriptWriter`) is left ``None``
-everywhere else and the shared engine no-ops.
+(``blizzard/runner/harness/internal/claude_code_normalizer.py``, blizzard#245) reads,
+so a chunk that runs through the mock fleet produces a conversation the runner panel
+can open. Only Claude Code has a reader today (codex/opencode have none), so only
+:mod:`~blizzard_mock.harness.facades.claude_code` constructs one; the engine's
+``transcript`` parameter (:class:`~blizzard_mock.harness.engine.ITranscriptWriter`)
+is left ``None`` everywhere else and the shared engine no-ops.
 
 Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`: the engine
 calls into it at two defined points (the spawn/resume user turn, the final
@@ -19,15 +18,9 @@ helpers those are.
 Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
 for a human reading the file, even though normalization does not need them for the
 plain conversation shape this writer mints (only ``type`` and ``message.content`` in
-file order). Left out entirely — a **documented gap**, not a claim the normalizer
-does not want them: it added a ``uuid``/``parentUuid`` chain (inline-sidechain
-threading) and sidecar-file discovery (``isSidechain`` subagent conversations,
-``<session-id>/subagents/agent-<agentId>.jsonl``) that this writer deliberately never
-mints, alongside the pre-existing gaps below. Recorded at
-``blizzard-context:/verification/blizzard.md`` rather than invented around here; it
-closes when a future issue teaches this writer to mint those shapes. Still absent
-regardless: the ``<persisted-output>`` large-result offload wrapper, and byte-exact
-ANSI fidelity.
+file order). What this writer omits entirely — the sidechain/thinking-fidelity
+gap — is stated in one place only: the package README's "Conversation transcripts"
+section (``README.md``, not restated here).
 
 Every assistant-type record also carries ``model`` + ``usage`` (blizzard epic #57)
 — the runner adapter's transcript-summation fallback
