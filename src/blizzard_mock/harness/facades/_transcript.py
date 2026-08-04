@@ -29,10 +29,10 @@ Every assistant-type record also carries ``model`` + ``usage`` (blizzard epic #5
 — the runner adapter's transcript-summation fallback
 (``blizzard.runner.harness.internal.claude_code_adapter.ClaudeCodeAdapter.
 sum_transcript_usage``) reads exactly these two keys off each ``type: "assistant"``
-record's ``message``, so both the final result turn (:meth:`ClaudeTranscriptWriter.
-record_result`) and each mid-turn tool-call turn (:meth:`ClaudeTranscriptWriter.
-record_tool_call`) mint them. Figures are :mod:`._usage`'s deterministic synthesis,
-not a real token count.
+record's ``message``, so both the final result turn
+(:meth:`ClaudeTranscriptWriter.record_result`) and each mid-turn tool-call turn
+(:meth:`ClaudeTranscriptWriter.record_tool_call`) mint them. Figures are
+:mod:`._usage`'s deterministic synthesis, not a real token count.
 """
 
 from __future__ import annotations
