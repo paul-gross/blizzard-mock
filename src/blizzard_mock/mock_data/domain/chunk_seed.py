@@ -224,6 +224,7 @@ def compose_chunk(
                     "chunk_id": minted_chunk_id,
                     "epoch": epoch,
                     "takeover_command": f"cd <workdir> && <resume {minted_chunk_id}>",
+                    "wrapped_takeover_command": f"blizzard runner takeover {minted_chunk_id} --dir <runner-dir>",
                     "decision_id": None,
                     "recorded_at": at(3),
                 },

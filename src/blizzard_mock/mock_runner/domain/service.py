@@ -194,13 +194,20 @@ class MockRunnerService:
         test drives via ``/_drive/get-git-commits`` (issue #143, Phase 3)."""
         return dict(self._git_commit_declarations.get(lease_id, {}))
 
-    def escalate(self, chunk_id: str, takeover_command: str = "") -> dict[str, Any]:
+    def escalate(
+        self, chunk_id: str, *, takeover_command: str = "", wrapped_takeover_command: str = ""
+    ) -> dict[str, Any]:
         """Report retries-exhausted via the dedicated route, fenced by the held epoch."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
             return {"drove": False, "reason": f"chunk {chunk_id} not claimed by this driver"}
-        body = {"epoch": held.epoch, "runner_id": self._runner_id, "takeover_command": takeover_command}
+        body = {
+            "epoch": held.epoch,
+            "runner_id": self._runner_id,
+            "takeover_command": takeover_command,
+            "wrapped_takeover_command": wrapped_takeover_command,
+        }
         status, response = self._gw.report_escalation(chunk_id, body)
         return {"drove": True, "status": status, "response": response}
 

@@ -76,17 +76,12 @@ code path runs; only `--url` is spelled out per verb below.
   `lease_facts` row (`domain/lease_seed.py`) — the same row shape `create chunk
   --status running/delivering` composes internally, which imports it rather than
   re-deriving the shape.
-- `create escalation --store hub --chunk ID [--epoch N] [--takeover-command TEXT] [--cause {cap,retries}]`
-  — **implemented**. Lands one `escalations` row (`domain/escalation_seed.py`);
-  `needs_human` derives from an open one. `--cause cap` composes a takeover command
-  carrying recognizable spend-cap wording (mirroring
-  `_park_on_cost_cap`'s log-only reason string — never actually written to the real
-  schema, since the real `takeover_command` column is cause-agnostic; see the
-  module docstring); `--cause retries` (the default) composes the plain generic
-  placeholder. `--takeover-command` overrides either default verbatim. Does **not**
-  also write an `event_log` row — an open escalation is synthesized into the
-  read-time event feed (`derive_event_feed`), so `create escalation` alone is
-  sufficient for it to show up there.
+- `create escalation --store hub --chunk ID [--epoch N] [--takeover-command TEXT] [--wrapped-takeover-command TEXT] [--cause {cap,retries}]` — **implemented**. Lands one `escalations` row (`domain/escalation_seed.py`); `needs_human` derives from an open one.
+  `--cause cap` composes a `takeover_command` carrying recognizable spend-cap wording (mirroring `_park_on_cost_cap`'s log-only reason string — never actually written to the real schema, since the real `takeover_command` column is cause-agnostic; see the module docstring); `--cause retries` (the default) composes the plain generic placeholder.
+  `--takeover-command` overrides either default verbatim.
+  `wrapped_takeover_command`'s default (the `blizzard runner takeover` entry point) is a synthesized placeholder regardless of `--cause` — a real spend-cap park composes it the same way a retries-exhausted park does.
+  `--wrapped-takeover-command` overrides that default verbatim, the same way `--takeover-command` overrides the raw one.
+  Does **not** also write an `event_log` row — an open escalation is synthesized into the read-time event feed (`derive_event_feed`), so `create escalation` alone is sufficient for it to show up there.
 - `create question --store hub --chunk ID --text T [--option TEXT]... [--answer A --answered-by W] [--delivered] [--resumed] [--node NAME] [--runner-id R] [--epoch N] [--seed N]`
   — **implemented**. Lands one open-or-answered `questions` trail
   (`domain/question_seed.py`); `waiting_on_human` derives from an open one.

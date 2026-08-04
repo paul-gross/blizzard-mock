@@ -197,7 +197,11 @@ def report_escalation(
 ) -> object:
     try:
         return service.report_escalation(
-            chunk_id, epoch=body.epoch, runner_id=body.runner_id, takeover_command=body.takeover_command
+            chunk_id,
+            epoch=body.epoch,
+            runner_id=body.runner_id,
+            takeover_command=body.takeover_command,
+            wrapped_takeover_command=body.wrapped_takeover_command,
         )
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})

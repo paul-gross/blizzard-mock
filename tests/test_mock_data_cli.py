@@ -164,6 +164,7 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
         Column("epoch", Integer, nullable=False),
         Column("takeover_command", Text, nullable=False, server_default=""),
+        Column("wrapped_takeover_command", Text, nullable=False, server_default=""),
         Column("decision_id", String, nullable=True),
         Column("recorded_at", DateTime, nullable=False),
     )
@@ -827,12 +828,17 @@ def test_create_escalation_default_cause_composes_the_generic_placeholder(tmp_pa
     result = runner.invoke(cli, ["create", "escalation", "--store", "hub", "--url", url, "--chunk", chunk_id])
     assert result.exit_code == 0, result.output
     with create_engine(url).begin() as conn:
-        takeover = conn.execute(
-            select(_table(meta, "escalations").c.takeover_command).where(
-                _table(meta, "escalations").c.chunk_id == chunk_id
-            )
-        ).scalar()
+        takeover, wrapped = conn.execute(
+            select(
+                _table(meta, "escalations").c.takeover_command,
+                _table(meta, "escalations").c.wrapped_takeover_command,
+            ).where(_table(meta, "escalations").c.chunk_id == chunk_id)
+        ).one()
     assert takeover == f"cd <workdir> && <resume {chunk_id}>"
+    # The bare default path a human seeding a board takes writes the synthesized
+    # wrapped placeholder too — pinned through cli.py -> service.seed() -> the row,
+    # not just at the composer.
+    assert wrapped == f"blizzard runner takeover {chunk_id} --dir <runner-dir>"
 
 
 def test_create_escalation_cause_cap_composes_recognizable_spend_cap_wording(tmp_path: Path) -> None:
@@ -856,6 +862,38 @@ def test_create_escalation_cause_cap_composes_recognizable_spend_cap_wording(tmp
     assert takeover.startswith("spend cap ")
     assert "reached" in takeover
     assert takeover.endswith(f"cd <workdir> && <resume {chunk_id}>")
+
+
+def test_create_escalation_explicit_wrapped_takeover_command_lands_the_given_value(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "escalation",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--wrapped-takeover-command",
+            "blizzard runner takeover ch_x --dir /custom",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        wrapped = conn.execute(
+            select(_table(meta, "escalations").c.wrapped_takeover_command).where(
+                _table(meta, "escalations").c.chunk_id == chunk_id
+            )
+        ).scalar()
+    assert wrapped == "blizzard runner takeover ch_x --dir /custom"
 
 
 def test_create_escalation_explicit_takeover_command_overrides_the_cause_default(tmp_path: Path) -> None:

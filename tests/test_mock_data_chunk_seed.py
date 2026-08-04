@@ -89,6 +89,15 @@ def test_needs_human_lands_an_escalation_and_no_route_or_terminal() -> None:
     assert transition.values["to_node_id"] != "done"
 
 
+def test_needs_human_composes_a_wrapped_takeover_command_placeholder() -> None:
+    """``needs_human`` seeds a non-empty ``wrapped_takeover_command`` placeholder by
+    default (issue #251) — see blizzard's ``chunk-takeover.ts`` for the rendering rule
+    this exercises."""
+    seed = _compose("needs_human", chunk_id="ch_fixed")
+    escalation = next(row for row in seed.rows if row.table == "escalations")
+    assert escalation.values["wrapped_takeover_command"] == "blizzard runner takeover ch_fixed --dir <runner-dir>"
+
+
 def test_waiting_on_human_lands_an_open_question() -> None:
     seed = _compose("waiting_on_human")
     assert _tables(seed.rows) == {"chunks", "chunk_promoted", "transitions", "questions"}

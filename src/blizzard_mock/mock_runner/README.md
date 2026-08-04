@@ -36,7 +36,7 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) via the dedicated `POST {hub}/api/fleet/chunks/{id}/leases` route by default — arm `lease_via_events` to route the same report through the batched `/events` push instead |
   | `POST /_drive/complete` `{chunk_id, choice, artifacts?}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next`. `artifacts` (optional, default `[]`) are the submission's `produces:` artifacts (`SubmittedArtifact` dicts — `{name, kind, content, attached}`), letting a service test drive the hub's `produces_mode=enforce` backstop (issue #113) over the wire |
   | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/fleet/chunks/{id}` |
-  | `POST /_drive/escalate` `{chunk_id, takeover_command?}` | `POST {hub}/api/fleet/chunks/{id}/escalations` — reports retries-exhausted, fenced by the held lease's own epoch |
+  | `POST /_drive/escalate` `{chunk_id, takeover_command?, wrapped_takeover_command?}` | `POST {hub}/api/fleet/chunks/{id}/escalations` — reports retries-exhausted, fenced by the held lease's own epoch |
   | `POST /_drive/decide` `{chunk_id, choice?}` | `POST {hub}/api/fleet/chunks/{id}/decisions` — a runner-config gate decision; `choice` is cosmetic (not part of the wire submission) |
   | `POST /_drive/ask` `{chunk_id, question, options?}` | Pushes a `question.asked` fact via `POST {hub}/api/fleet/events`, minting a pollable question hub-side; returns the minted `question_id` |
   | `POST /_drive/poll-answer` `{question_id}` | `GET {hub}/api/fleet/questions/{id}` — the runner's answer poll |
