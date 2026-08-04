@@ -221,7 +221,66 @@ def test_levers_reset_restores_the_default_profile(client: TestClient) -> None:
     client.put("/_levers/refuse_callback", json={"refuse": True})
     client.post("/_levers/reset")
     profile = client.get("/_levers/profile").json()["profile"]
-    assert profile == {"subject": "1001", "handle": "octocat", "email": "octocat@example.com", "email_verified": True}
+    assert profile == {
+        "subject": "1001",
+        "handle": "octocat",
+        "email": "octocat@example.com",
+        "email_verified": True,
+        "role": None,
+    }
+
+
+def test_levers_profile_accepts_and_defaults_the_role_field(client: TestClient) -> None:
+    default_profile = client.get("/_levers/profile").json()["profile"]
+    assert default_profile["role"] is None
+
+    resp = client.put(
+        "/_levers/profile",
+        json={"subject": "42", "handle": "ada", "email": "ada@example.com", "email_verified": True, "role": "guest"},
+    )
+    assert resp.json()["profile"]["role"] == "guest"
+    assert client.get("/_levers/profile").json()["profile"]["role"] == "guest"
+
+
+def test_levers_profile_role_round_trips_through_a_subsequent_authorize_dance(client: TestClient) -> None:
+    client.put(
+        "/_levers/profile",
+        json={
+            "subject": "42",
+            "handle": "ada",
+            "email": "ada@example.com",
+            "email_verified": True,
+            "role": "contributor",
+        },
+    )
+    resp = client.get(
+        "/oidc/authorize",
+        params={"redirect_uri": "http://cb.test/callback", "state": "s1", "client_id": "cid"},
+        follow_redirects=False,
+    )
+    code = _redirect_query(resp)["code"]
+    token_resp = client.post(
+        "/oidc/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": "http://cb.test/callback",
+            "client_id": "cid",
+            "client_secret": "secret",
+        },
+    )
+    access_token = token_resp.json()["access_token"]
+
+    idp_state = client.app.state.idp_state  # type: ignore[attr-defined]
+    resolved_profile = idp_state.profile_for_access_token(access_token)
+    assert resolved_profile.role == "contributor"
+
+    # additive only — the role never surfaces in the signed id_token, which stays
+    # provider-shaped
+    jwks = client.get("/oidc/jwks").json()
+    key = RSAAlgorithm.from_jwk(jwks["keys"][0])
+    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert "role" not in claims
 
 
 def test_healthz(client: TestClient) -> None:

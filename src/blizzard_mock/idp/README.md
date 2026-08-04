@@ -22,7 +22,7 @@ involved.
 
 | Lever | Effect |
 |-------|--------|
-| `PUT /_levers/profile` | The identity (`subject`, `handle`, `email`, `email_verified`) the *next* completed dance resolves to — also how a test drives an unverified email or a handle rename |
+| `PUT /_levers/profile` | The identity (`subject`, `handle`, `email`, `email_verified`) the *next* completed dance resolves to — also how a test drives an unverified email or a handle rename. The optional `role` field rides along for a consuming hub to read and apply at first-login time; it is additive only — it never surfaces in the signed `id_token` or the GitHub-shaped `/user` response, which stay provider-shaped |
 | `PUT /_levers/refuse_callback` | Armed, `authorize` redirects back with `error=access_denied` instead of a code |
 | `POST /_levers/reset` | Back to the default profile, lever cleared, codes/tokens forgotten |
 
