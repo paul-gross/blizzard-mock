@@ -171,12 +171,12 @@ class ITranscriptWriter(Protocol):
     """A facade's optional conversation-transcript sink — mirrors :class:`IHarnessWire`.
 
     Only the claude_code facade constructs one (only Claude Code has a transcript
-    reader today — ``blizzard/runner/transcripts/parser.py``); every other facade
-    passes ``None`` and the engine no-ops. The engine calls into it at two defined
-    points — the spawn/resume user turn and the final result — and never renders
-    anything itself; the helper surface drives ``record_tool_call`` /
-    ``record_tool_result`` off the run context in between (the package README's
-    "Conversation transcripts" owns which helpers those are).
+    reader today — ``blizzard.runner.harness.internal.claude_code_normalizer``,
+    blizzard#245); every other facade passes ``None`` and the engine no-ops. The engine
+    calls into it at two defined points — the spawn/resume user turn and the final
+    result — and never renders anything itself; the helper surface drives
+    ``record_tool_call`` / ``record_tool_result`` off the run context in between (the
+    package README's "Conversation transcripts" owns which helpers those are).
     """
 
     def record_user(self, text: str) -> None:

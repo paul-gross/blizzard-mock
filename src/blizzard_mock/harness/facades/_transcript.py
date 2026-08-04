@@ -1,12 +1,12 @@
 """Claude-Code-shaped JSONL transcript writer — only the ``claude_code`` facade uses it.
 
-Mints the same record shapes the real runner's transcript parser
-(``blizzard/runner/transcripts/parser.py``) reads, so a chunk that runs through the
-mock fleet produces a conversation the runner panel can open. Only Claude Code has a
-reader today (codex/opencode have none), so only :mod:`~blizzard_mock.harness.
-facades.claude_code` constructs one; the engine's ``transcript`` parameter
-(:class:`~blizzard_mock.harness.engine.ITranscriptWriter`) is left ``None``
-everywhere else and the shared engine no-ops.
+Mints the same record shapes the real runner's transcript normalizer
+(``blizzard.runner.harness.internal.claude_code_normalizer``, blizzard#245) reads,
+so a chunk that runs through the mock fleet produces a conversation the runner panel
+can open. Only Claude Code has a reader today (codex/opencode have none), so only
+:mod:`~blizzard_mock.harness.facades.claude_code` constructs one; the engine's
+``transcript`` parameter (:class:`~blizzard_mock.harness.engine.ITranscriptWriter`)
+is left ``None`` everywhere else and the shared engine no-ops.
 
 Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`: the engine
 calls into it at two defined points (the spawn/resume user turn, the final
@@ -15,21 +15,28 @@ tool-call surface drives ``record_tool_call``/``record_tool_result`` off the run
 context in between — the package README's "Conversation transcripts" owns which
 helpers those are.
 
-Minted deliberately narrow: ``sessionId``/``cwd``/``timestamp`` ride every record
-for a human reading the file, even though the parser does not read them (it reads
-only ``type`` and ``message.content`` in file order — no ``uuid``/``parentUuid``
-traversal). Left out entirely, matching the parser's actual needs: the
-``uuid``/``parentUuid`` DAG, ``isSidechain`` subagent sidecar files, the
-``<persisted-output>`` large-result offload wrapper, and byte-exact ANSI fidelity.
+Minted deliberately narrow: ``sessionId``/``cwd`` ride every record for a human
+reading the file, even though normalization does not need them for the plain
+conversation shape this writer mints (only ``type`` and ``message.content`` in file
+order). ``timestamp`` rides every record too, and unlike ``sessionId``/``cwd`` it is
+load-bearing today: each turn's ``timestamp`` is what the panel renders
+(``blizzard.runner.transcripts.internal.projected_transcript_repository``), so an
+un-timestamped turn would render with none. The normalizer's prompt-timestamp
+sidechain-link route also indexes tool-call turns by ``timestamp``, but that route
+only runs against ``isSidechain`` records, which this writer never mints — so that
+dependency holds only once this writer mints sidechain records too (future work,
+not today). What this writer omits entirely — the sidechain/thinking-fidelity gap —
+is stated in one place only: the package README's "Conversation transcripts"
+section (``README.md``, not restated here).
 
 Every assistant-type record also carries ``model`` + ``usage`` (blizzard epic #57)
 — the runner adapter's transcript-summation fallback
-(``blizzard.runner.harness.internal.claude_code_adapter.ClaudeCodeAdapter.
-sum_transcript_usage``) reads exactly these two keys off each ``type: "assistant"``
-record's ``message``, so both the final result turn (:meth:`ClaudeTranscriptWriter.
-record_result`) and each mid-turn tool-call turn (:meth:`ClaudeTranscriptWriter.
-record_tool_call`) mint them. Figures are :mod:`._usage`'s deterministic synthesis,
-not a real token count.
+(``blizzard.runner.harness.internal.claude_code_adapter.ClaudeCodeAdapter.sum_transcript_usage``)
+reads exactly these two keys off each ``type: "assistant"`` record's ``message``,
+so both the final result turn
+(:meth:`ClaudeTranscriptWriter.record_result`) and each mid-turn tool-call turn
+(:meth:`ClaudeTranscriptWriter.record_tool_call`) mint them. Figures are
+:mod:`._usage`'s deterministic synthesis, not a real token count.
 """
 
 from __future__ import annotations
@@ -54,8 +61,9 @@ TRANSCRIPTS_ROOT_ENV_VAR = "BZ_TRANSCRIPTS_ROOT"
 #: The subdirectory every session file is grouped under. The real reader locates a
 #: transcript by globbing ``<root>/*/<session_id>.jsonl`` and only consults the
 #: directory name as a multi-match tie-break — which a UUID4 session id never
-#: triggers (``internal/jsonl_transcript_repository.py``) — so one stable name is
-#: enough; replicating Claude Code's mangled-cwd directory naming buys nothing.
+#: triggers (``blizzard.runner.harness.internal.claude_code_transcript``) — so one
+#: stable name is enough; replicating Claude Code's mangled-cwd directory naming buys
+#: nothing.
 PROJECT_DIR_NAME = "mock-claude-code"
 
 
