@@ -1,10 +1,8 @@
 """Mock OpenCode facade (``mock-opencode``).
 
-Shares the exec engine with every other facade and differs only in OpenCode's
-wire shape (``design/harness-adapters.md``): ``opencode run "<prompt>"`` drives a
-server-assigned session, and ``opencode run --attach --session <id>`` delivers an
-automated follow-up. OpenCode prints the assistant's message as text; the mock
-appends a machine-readable trailer so the adapter can recover the session id.
+Differs from other facades only in OpenCode's wire shape: a server-assigned
+session, message printed as text, with a machine-readable trailer appended so
+the adapter can recover the session id.
 """
 
 from __future__ import annotations

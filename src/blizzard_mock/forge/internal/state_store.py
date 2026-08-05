@@ -1,10 +1,8 @@
 """In-memory forge-state store (``IWriteForgeState``).
 
-Issue/PR metadata lives beside the bare repos as process-local state — git is
-the durable truth for refs and commits, this holds the vendor metadata around
-them (bodies, comment threads, merge dispositions). A fresh ``winter service
-up`` starts a fresh forge, so in-memory is the right lifetime; the choice is
-recorded in the package README.
+Issue/PR metadata lives beside the bare repos as process-local state; git is
+the durable truth for refs and commits, this holds the vendor metadata
+(bodies, comments, merge dispositions) — in-memory is the right lifetime.
 """
 
 from __future__ import annotations

@@ -1,14 +1,8 @@
-"""Composes one ``event_log`` row — the operational event feed
-(``blizzard/hub/store/schema.py``, issue #125, ``bzh:facts-not-status``).
+"""Composes one ``event_log`` row — the operational event feed (issue #125).
 
-Independent of ``escalations`` by design: the hub already synthesizes an open escalation
-into the read-time event feed, so this module composes exactly one ``event_log`` row and
-never a redundant one for an escalation (pinned by tests/test_mock_data_event_seed.py::
-test_compose_event_lands_the_supplied_fields).
-
-``detail`` is opaque, round-tripped-only JSON on the real column — this module
-validates it *parses* as JSON before composing (fail loud, never a silently-malformed
-row) but never interprets its contents.
+Composes exactly one row, never a redundant one for an escalation (pinned by
+tests/test_mock_data_event_seed.py). ``detail`` must parse as JSON before
+composing — fail loud, never a silently-malformed row.
 """
 
 from __future__ import annotations
@@ -22,8 +16,8 @@ INFO = "info"
 WARNING = "warning"
 CRITICAL = "critical"
 
-#: The three severities ``event_log.severity`` accepts (``blizzard.hub.domain.work``'s
-#: own ``_SEVERITY_RANK`` vocabulary, independently mirrored — no ``blizzard`` import).
+#: The three severities ``event_log.severity`` accepts, mirrored independently
+#: (no ``blizzard`` import).
 SEVERITIES = (INFO, WARNING, CRITICAL)
 
 

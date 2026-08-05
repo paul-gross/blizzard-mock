@@ -1,22 +1,8 @@
 """``--settings`` hook execution — only the ``claude_code`` facade uses it.
 
-Runs the hook commands a ``--settings`` document declares as real subprocesses,
-so a caller-owned hook travels its actual path — command → subprocess → whatever
-that command does — instead of being synthesized by whoever wanted the signal.
-
-Implements :class:`~blizzard_mock.harness.engine.IHookRunner`: the engine calls
-into it at two defined lifecycle points and constructs no payload itself. Settings
-parsing and payload construction live here and nowhere else.
-
-**This module stays blizzard-free.** It executes whatever command string the
-settings document names and never imports or assumes ``blizzard``.
-
-Degrading rather than failing is deliberate throughout: a missing file,
-unreadable JSON, an absent ``hooks`` key, a malformed entry, a nonzero exit, or a
-wedged command all leave the turn intact — a mock that hard-failed on a bad
-document would turn a settings typo into a dead fleet, so the failures are logged
-(stderr-routed structlog) and swallowed. See the package README's "Hook
-execution" for what that costs a reader debugging a hook that never fires.
+Runs hook commands as real subprocesses; implements
+:class:`~blizzard_mock.harness.engine.IHookRunner`. Degrades rather than fails:
+a missing file, bad JSON, or a wedged command all leave the turn intact.
 """
 
 from __future__ import annotations
@@ -31,10 +17,8 @@ from blizzard_mock.harness.internal.logging import get_logger
 
 _log = get_logger(__name__)
 
-#: Per-hook wall-clock budget, in seconds — real Claude Code's own default. A
-#: constructor argument rather than a flag or env var, because the settings document
-#: declares no per-hook ``timeout`` field for it to shadow (pinned by
-#: tests/test_harness_hooks.py::test_a_wedged_hook_is_abandoned_at_the_timeout).
+#: Per-hook wall-clock budget, in seconds — real Claude Code's own default
+#: (pinned by tests/test_harness_hooks.py).
 DEFAULT_HOOK_TIMEOUT_SECONDS = 60.0
 
 #: The two hook events wired here. The payload's ``hook_event_name`` discriminates,
@@ -42,10 +26,8 @@ DEFAULT_HOOK_TIMEOUT_SECONDS = 60.0
 POST_TOOL_USE = "PostToolUse"
 SESSION_END = "SessionEnd"
 
-#: ``SessionEnd``'s ``reason``. Of Claude Code's vocabulary (``clear`` / ``logout`` /
-#: ``prompt_input_exit`` / ``other``) only ``other`` describes a headless ``-p`` process
-#: exiting; deriving it from the run's outcome would emit values real Claude Code never
-#: sends.
+#: ``SessionEnd``'s ``reason``: only ``other`` describes a headless ``-p``
+#: process exiting; the run's outcome is not used to derive it.
 SESSION_END_REASON = "other"
 
 
@@ -67,9 +49,8 @@ def _read_document(path: Path) -> Mapping[str, object]:
 def _commands(document: Mapping[str, object], event: str) -> list[str]:
     """The command strings ``document`` declares for one hook event, in order.
 
-    Reads the nesting the real producer writes — ``hooks.<Event>[].hooks[]``, inner
-    entries carrying ``type: "command"``. Anything malformed is skipped rather than
-    fatal, so one bad entry cannot take the rest of the document down with it.
+    Reads ``hooks.<Event>[].hooks[]`` entries carrying ``type: "command"``.
+    Anything malformed is skipped rather than fatal.
     """
     hooks = document.get("hooks")
     if not isinstance(hooks, Mapping):
@@ -96,9 +77,7 @@ def _commands(document: Mapping[str, object], event: str) -> list[str]:
 class SettingsHookRunner:
     """Runs the hook commands one ``--settings`` document declares.
 
-    One instance per turn. ``cwd`` and the environment are fixed at construction —
-    the acquired worktree and the spawn environment. Inheriting the environment is
-    the point: it is how a hook command finds the identity its caller injected.
+    One instance per turn; ``cwd``/env are fixed at construction and inherited.
     """
 
     def __init__(
@@ -158,11 +137,8 @@ class SettingsHookRunner:
     def _run(self, event: str, command: str, body: str) -> None:
         """Run one hook command to completion, or log why it did not.
 
-        Output is **captured**, never inherited: a chatty hook writing to this
-        process's stdout would interleave with the ``{"type":"result", …}`` envelope
-        on the wire. The payload goes to a pipe the command is free to ignore — at
-        these sizes it is far inside the pipe buffer, so an unread one cannot
-        deadlock.
+        Output is captured, never inherited, so a chatty hook cannot interleave
+        with the wire envelope on this process's stdout.
         """
         try:
             completed = subprocess.run(
@@ -202,9 +178,8 @@ def build_hook_runner(
 ) -> SettingsHookRunner | None:
     """The hook runner for this run, or ``None`` when there is nothing to fire.
 
-    ``None`` — the engine's total no-op — covers every degradation: no
-    ``--settings`` at all, a path that does not exist, JSON that will not parse, and
-    a document with no ``hooks`` key or no commands under either wired event.
+    ``None`` covers every degradation: no ``--settings``, a missing path,
+    unparseable JSON, or no commands under either wired event.
     """
     if not settings_path:
         return None

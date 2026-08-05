@@ -1,9 +1,6 @@
 """Per-harness CLI/wire facades over the shared exec engine.
 
-One module per coding harness the seam accepts. Each facade is a thin surface —
-invocation shape, output format, exit behavior, resume semantics — over
-:mod:`blizzard_mock.harness.engine`.
-
-- ``claude_code`` — the mock Claude Code facade (binary ``mock-claude-code``).
-- ``codex``, ``opencode`` — the mock Codex and OpenCode facades.
+One module per coding harness the seam accepts (``claude_code``, ``codex``,
+``opencode``): invocation shape, output format, exit behavior, and resume
+semantics over :mod:`blizzard_mock.harness.engine`.
 """

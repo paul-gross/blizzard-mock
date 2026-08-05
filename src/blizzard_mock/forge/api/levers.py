@@ -1,9 +1,8 @@
 """Lever routes — the forge's first-class edge-state control surface.
 
-Namespaced under ``/_levers`` (outside the GitHub surface). State levers arm and
-persist; action levers (``externally_merged``, ``comment_midflight``) fire on
-POST. These routes are exempt from the request-bending levers so a test can
-always clear a lever it armed.
+Namespaced under ``/_levers``. State levers arm and persist; action levers
+(``externally_merged``, ``comment_midflight``) fire on POST. Exempt from the
+request-bending levers so a test can always clear a lever it armed.
 """
 
 from __future__ import annotations

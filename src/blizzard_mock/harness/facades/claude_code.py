@@ -1,28 +1,8 @@
 """Mock Claude Code facade (``mock-claude-code``).
 
-Presents Claude Code's non-interactive CLI/wire surface and turns the received
-prompt into behavior by ``exec``'ing it as Python in the acquired worktree — *the
-prompt is the program*. Only the CLI shape and the output format live here; the
-behavior, fence, and session state are the shared
-:mod:`blizzard_mock.harness.engine`.
-
-Surface mimicked (``design/harness-adapters.md``):
-
-- Headless run: ``mock-claude-code -p [--output-format json] "<script>"`` (prompt
-  via arg or stdin).
-- Pre-assigned session: ``--session-id <uuid>`` (Claude Code honors the hint).
-- Automated follow-up: ``mock-claude-code -p --resume <sid> "<message>"`` — the
-  resume message arrives as code, executed with the prior session state visible.
-- ``--output-format json`` emits the single ``{"type":"result", …}`` envelope
-  (``<Choice>{name}</Choice>`` rides ``result``).
-- ``--settings <path>`` (the runner-owned worker hook file) is read, and the
-  ``PostToolUse`` / ``SessionEnd`` commands it declares are executed as real
-  subprocesses — see the package README's "Hook execution".
-- ``--model <name>`` (the pinned worker model) is accepted and ignored — the mock
-  is model-agnostic.
-
-Fenced: the engine refuses to run unless test scaffolding marks the environment,
-so ``mock-claude-code`` can never pass as a real ``claude`` binding.
+Presents Claude Code's non-interactive CLI/wire surface. Only the CLI shape
+and output format live here; behavior, fence, and session state are the
+shared :mod:`blizzard_mock.harness.engine`.
 """
 
 from __future__ import annotations
@@ -63,8 +43,7 @@ See src/blizzard_mock/harness/README.md for the full contract.
 class ClaudeCodeWire:
     """Render a :class:`RunResult` as Claude Code's headless output.
 
-    ``--output-format json`` -> the single ``result`` envelope; ``text`` -> just
-    the assistant's final message (the tagged ask/verdict text).
+    ``--output-format json`` -> the ``result`` envelope; ``text`` -> the message.
     """
 
     def __init__(self, output_format: str = "text") -> None:
@@ -118,13 +97,8 @@ def _build_transcript_writer(
 ) -> ClaudeTranscriptWriter | None:
     """The Claude-shaped transcript writer for this run, else ``None``.
 
-    Only constructed when a session id is already known. A bare direct invocation
-    that lets the engine self-assign a uuid (no ``--session-id``/``--resume``) skips
-    transcript writing — that path has no session id to key the file on until the
-    engine mints one.
-
-    ``cwd``/``env`` are resolved once by :func:`main` and passed in, so the writer
-    and the hook runner cannot disagree about which worktree this run acquired.
+    Only constructed when a session id is already known; a self-assigned
+    uuid has no id to key the file on until the engine mints one.
     """
     if not session_id:
         return None

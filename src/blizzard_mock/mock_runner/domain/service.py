@@ -1,11 +1,8 @@
 """``MockRunnerService`` — the mock runner's driving rules over a hub gateway and levers.
 
-The domain layer (``bzh:domain-core``): it performs the runner's outbound protocol against
-a hub — register, peek, claim (recording the lease + reporting ``lease.minted``), and
-complete (an epoch-fenced submission) — exactly as the real runner does, but under lever
-control. Each lever distorts one outbound call so the hub-under-test meets the named
-misbehaviour over the wire. Collaborators are injected at the composition root
-(``bzh:dependency-injection``).
+The domain layer (``bzh:domain-core``): performs the runner's outbound
+protocol against a hub, exactly as the real runner does, but under lever
+control — each distorts one outbound call.
 """
 
 from __future__ import annotations
@@ -22,9 +19,8 @@ from blizzard_mock.mock_runner.domain.models import Held
 
 #: The runner-fact kind that advances the hub's fence (``blizzard.wire.facts.LEASE_MINTED``).
 LEASE_MINTED = "lease.minted"
-#: The remaining fact kinds this driver can push over ``/events``
-#: (``blizzard.wire.facts``) — not fence-advancing, so ``ingest_facts`` need not
-#: understand them for the fact push itself to be observable over the wire.
+#: The remaining fact kinds this driver can push over ``/events`` — not
+#: fence-advancing.
 QUESTION_ASKED = "question.asked"
 RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
@@ -43,14 +39,11 @@ class MockRunnerService:
         self._runner_id = runner_id
         self._workspace_id = workspace_id
         self._held: dict[str, Held] = {}
-        #: Monotonic sequence for facts that are not chunk-scoped leases (question/pause/
-        #: resume) — independent of a ``Held``'s own per-chunk lease-fact counter.
+        #: Monotonic sequence for facts that are not chunk-scoped leases —
+        #: independent of a ``Held``'s own per-chunk lease-fact counter.
         self._runner_seq = 0
-        #: The mock's own local git-commit declaration store (issue #143, Phase 3) —
-        #: ``lease_id -> repo -> {forge, repo, branch, commit}``, latest-wins per
-        #: ``(lease_id, repo)``, mirroring the real runner's ``git_commit_declarations``
-        #: table. Purely local: no hub call backs it, exactly as the real declare channel
-        #: makes no hub call this phase.
+        #: The mock's own local git-commit declaration store (issue #143) —
+        #: ``lease_id -> repo -> {forge, repo, branch, commit}``, latest-wins.
         self._git_commit_declarations: dict[str, dict[str, dict[str, str]]] = {}
 
     @property
@@ -109,12 +102,9 @@ class MockRunnerService:
     ) -> dict[str, Any]:
         """Submit the held node-step's completion, distorted by any armed lever.
 
-        ``artifacts`` (the submission's ``produces:`` artifacts, ``SubmittedArtifact``
-        dicts) default empty, so only a produces-aware service test passes them, to
-        drive the hub's ``produces_mode`` backstop. ``check_results`` (the
-        runner-executed check facts, ``CheckResult`` dicts, issue #114) default empty
-        likewise — a checks-gate service test sets them to drive the hub's
-        ``requires_checks`` backstop over the wire."""
+        ``artifacts``/``check_results`` default empty, set by a
+        produces/checks-aware test to drive the hub's backstops.
+        """
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -131,9 +121,8 @@ class MockRunnerService:
         if self._pull(RunnerLever.CONFLICTING_FACT, chunk_id):
             from_node = "conflicting-node"  # a fact that does not match the hub's current node
 
-        # Route capability token (issue #84b): stamp the held claim's own plaintext by
-        # default (mirroring the real runner's stash-and-stamp), unless a lever overrides
-        # it for this one call — a wrong token, or none at all.
+        # Route capability token (issue #84b): stamp the held claim's own
+        # plaintext by default, unless a lever overrides it for this call.
         route_token = held.route_token
         if self._pull(RunnerLever.OMIT_ROUTE_TOKEN, chunk_id):
             route_token = None
@@ -344,12 +333,8 @@ class MockRunnerService:
     def _report_lease(self, chunk_id: str, epoch: int) -> None:
         """Advance the hub's fence for the held chunk.
 
-        Never lever-distorted for correctness — a completion test's own setup depends on
-        the fence landing regardless of which drive-level lever is armed. Only the
-        *transport path* is lever-selectable: the dedicated ``/chunks/{id}/leases`` route
-        by default, or the batched ``/events`` fact-push under ``lease_via_events``
-        (pinned by tests/test_mock_runner.py::
-        test_lever_lease_via_events_routes_the_report_through_events).
+        Never lever-distorted for correctness; only the transport path is
+        lever-selectable (pinned by tests/test_mock_runner.py).
         """
         held = self._held.get(chunk_id)
         if self._pull(RunnerLever.LEASE_VIA_EVENTS, chunk_id):
@@ -357,11 +342,8 @@ class MockRunnerService:
             if held is not None:
                 held.seq = seq
             payload: dict[str, Any] = {"chunk_id": chunk_id, "epoch": epoch}
-            # Stamp the held claim's own route token (issue #84b) — always, never
-            # lever-controlled, so this genuine report keeps landing under
-            # ``route_token_mode=enforce``; the route-token levers distort only the driven
-            # ``/_drive/complete`` call (pinned by tests/test_pin_mock.py::
-            # test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token_armed).
+            # Stamp the held claim's own route token (issue #84b) — always,
+            # never lever-controlled (pinned by tests/test_pin_mock.py).
             if held is not None and held.route_token is not None:
                 payload["route_token"] = held.route_token
             self._gw.report_lease_via_events(

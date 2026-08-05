@@ -1,9 +1,8 @@
 """The per-env scratch-path convention for a fixture workspace.
 
-Pure path arithmetic — no filesystem access — so the layout of a fixture can be
-computed (for ``destroy`` / ``path``) without the fixture existing. The domain
-core owns *where* a fixture lives; the service (and its injected adapters) own
-*materializing* it.
+Pure path arithmetic — no filesystem access — so a fixture's layout can be
+computed without the fixture existing. This module owns *where* a fixture
+lives; the service owns *materializing* it.
 """
 
 from __future__ import annotations
@@ -14,20 +13,9 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class FixtureLayout:
-    """The resolved on-disk layout of one per-env fixture workspace.
-
-    A fixture is a self-contained directory tree under a per-env scratch path::
-
-        <scratch_root>/<env>/                 root — the whole disposable fixture
-        ├── origins/<repo>.git                bare git origins (the forge's git truth)
-        ├── workspace/                         the REAL winter workspace root
-        │   ├── .winter/config.toml            declares the origins as project repos
-        │   └── tools/winter-cli/              the winter framework, from a local source
-        └── fixture.json                       provenance manifest
-
-    ``workspace`` is a genuine winter workspace root (it holds ``.winter/config.toml``
-    *and* ``tools/winter-cli/``): the runner under test drives the real ``winter``
-    CLI against it. ``origins`` is the single git truth the mock forge fronts.
+    """The resolved on-disk layout of one per-env fixture workspace: ``origins/``
+    (bare git origins), ``workspace/`` (a real winter workspace root), and
+    ``fixture.json``, under a per-env scratch path.
     """
 
     env: str

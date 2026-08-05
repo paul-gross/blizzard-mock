@@ -1,13 +1,8 @@
-"""Composes one runner-pause fact — the fleet's own brake (``runner_pause_facts``) or
-the runner's own local brake (``runner_local_pause_facts``), two separate tables with
-separate authors (``blizzard/hub/store/schema.py``'s module comment above each).
+"""Composes one runner-pause fact — the fleet's own brake (``runner_pause_facts``)
+or the runner's own local brake (``runner_local_pause_facts``).
 
-``runner_pause_facts`` carries **no ``reason`` column** — only
-``runner_local_pause_facts`` does (nullable there). Supplying a reason for the fleet
-brake is a genuine schema mismatch, not a detail to drop silently, so
-:func:`compose_runner_pause` fails loud naming the missing column (pinned by
-tests/test_mock_data_runner_pause_seed.py::
-test_fleet_with_a_reason_fails_loud_naming_the_missing_column).
+``runner_pause_facts`` has no ``reason`` column; supplying one fails loud
+(pinned by tests/test_mock_data_runner_pause_seed.py).
 """
 
 from __future__ import annotations

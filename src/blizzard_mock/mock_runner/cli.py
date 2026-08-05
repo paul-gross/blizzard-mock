@@ -1,9 +1,8 @@
 """Entrypoint for the mock runner driver (``blizzard-mock-runner``).
 
-Resolves its bind address (``--host`` / ``BZ_MOCK_RUNNER_HOST``, ``--port`` /
-``BZ_MOCK_RUNNER_PORT``) and the hub it drives (``--hub-url`` / ``BZ_HUB_URL``), then
-serves the driver's control API with uvicorn. A hub service-tier test arms this driver's
-levers and POSTs ``/_drive/*`` to exercise the real hub's API over the wire.
+Resolves its bind address and the hub it drives, then serves the driver's
+control API with uvicorn. A hub service-tier test arms this driver's levers
+and POSTs ``/_drive/*`` to exercise the real hub's API over the wire.
 """
 
 from __future__ import annotations

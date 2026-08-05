@@ -1,15 +1,8 @@
 """GitPython adapter for the bare-repo backing model (``IWriteGitBackend``).
 
-All git usage is confined to this file. The forge fronts a directory of bare
-repos; this adapter resolves ``owner/name`` to one, reads refs, computes
-mergeability with ``git merge-tree``, and performs a *real* merge into the base
-branch via a throwaway linked worktree — the single git truth the fixture
-workspace shares.
-
-Repo resolution is permissive by design (the fixture-workspace scaffold, built
-in parallel, owns the on-disk names): for ``owner/name`` it accepts
-``<dir>/owner/name(.git)``, ``<dir>/name(.git)``, or ``<dir>/owner__name(.git)``,
-first valid git repo wins.
+All git usage is confined to this file: resolves ``owner/name`` to a bare
+repo, reads refs, computes mergeability with ``git merge-tree``, and performs
+a real merge via a throwaway linked worktree.
 """
 
 from __future__ import annotations

@@ -1,9 +1,8 @@
 """The mock runner's driver state and control-request bodies.
 
-``Held`` is the mock runner's copy of the lease it is working — the epoch it fences
-completions with and the node it is at — mirroring the real runner's lease record. The
-drive bodies are the mock's own control vocabulary (``/_drive/*``): a test tells the
-driver which chunk to claim and which choice to complete with; the levers do the rest.
+``Held`` is the mock runner's copy of the lease it is working. The drive
+bodies are the mock's own control vocabulary (``/_drive/*``): a test tells
+the driver which chunk to claim and which choice to complete with.
 """
 
 from __future__ import annotations
@@ -18,10 +17,8 @@ from pydantic import BaseModel, Field
 class Held:
     """A claimed chunk the driver is working: the fence epoch and the current node.
 
-    ``route_token`` (issue #84b) is the plaintext the claim response returned once —
-    stamped onto every subsequent chunk-scoped outbound call, mirroring the real
-    runner's stash-and-stamp (``route_tokens`` table), unless a route-token lever
-    overrides it for that one call."""
+    ``route_token`` (issue #84b) is the plaintext the claim response returned once.
+    """
 
     chunk_id: str
     epoch: int
@@ -41,17 +38,8 @@ class ClaimBody(BaseModel):
 class CompleteBody(BaseModel):
     """POST /_drive/complete — complete the held node-step with a judgement choice.
 
-    ``artifacts`` are the submission's ``produces:`` artifacts, each a wire
-    ``SubmittedArtifact`` dict (``{name, kind, content, attached}``); the mock lets a
-    service test set them directly, so the hub's ``produces_mode=enforce`` backstop
-    (issue #113 phase 5) can be driven over the wire — the produces analogue of the
-    ``stale_route_token``/``omit_route_token`` levers.
-
-    ``check_results`` are the node's runner-executed check facts (issue #114), each a wire
-    ``CheckResult`` dict (``{command, passed}`` — the ``output_tail`` stays runner-local and
-    never rides the wire); the mock lets a service test set them directly, so the hub's
-    ``requires_checks`` gate backstop can be driven over the wire — the checks analogue of
-    ``artifacts`` above."""
+    ``artifacts``/``check_results`` are settable directly over the wire.
+    """
 
     chunk_id: str
     choice: str
@@ -78,11 +66,10 @@ class GitCommitDeclarationBody(BaseModel):
 
 
 class DeclareGitCommitBody(BaseModel):
-    """POST /_drive/declare-git-commit — drive a git-commit declaration directly against
-    the mock runner's own local store (issue #143, Phase 3), the produces-kind analogue of
-    ``CompleteBody.artifacts``: a service test can set declaration state without a raw
-    client to the lease-scoped served route above, mirroring the ``/_drive/*`` convention
-    every other verb here follows."""
+    """POST /_drive/declare-git-commit — drive a git-commit declaration directly
+    against the mock runner's own local store (issue #143), without a raw
+    client to the lease-scoped served route.
+    """
 
     lease_id: str
     forge: str
@@ -103,9 +90,8 @@ class EscalateBody(BaseModel):
 
     chunk_id: str
     takeover_command: str = ""
-    #: The ``blizzard runner takeover`` wrapped entry point (issue #251) — carried
-    #: alongside the raw ``takeover_command`` so a service test can drive the hub's
-    #: board-preferred primary command over the wire.
+    #: The ``blizzard runner takeover`` wrapped entry point (issue #251),
+    #: carried alongside the raw ``takeover_command``.
     wrapped_takeover_command: str = ""
 
 

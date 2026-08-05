@@ -1,30 +1,8 @@
 """The mock-data CLI (``blizzard-mock-data``).
 
-A tool *for agents* to set up test cases repeatably against the **real** hub/runner
-stores (sqlite or postgres) the service tier and crash sweep run over. It operates on
-**domain models, not raw tables**, and — crucially — **without importing ``blizzard``**:
-it **reflects** the live store's schema at runtime (SQLAlchemy), so it works against
-whatever the daemon's Alembic tree migrated, and a mock-repo edit never has to chase a
-hub/runner schema change.
-
-This module is the composition root (``bzh:dependency-injection``): it parses flags,
-resolves a store URL, wires the domain seam (``domain/seeding.SeedService`` over the
-``internal/reflected_store.ReflectedStore`` adapter) with a real clock, calls it, and
-echoes the result — no SQLAlchemy or store logic lives here.
-
-``reset`` returns a store to a known-clean state. ``create`` is a group, one
-subcommand per domain concept — see each subcommand's own docstring for its
-behavior; each writes through its own ``domain/*_seed.py`` composer. ``scenario``
-composes richer, multi-concept worlds purely from ``create``'s own composers
-(``domain/scenario_seed.py``). ``fixture`` — richer, cross-store scenarios spanning
-the hub store, the forge, and git state at once — remains a stub.
-
-Every verb accepts a target store as ``--url``/``$DATABASE_URL`` or as ``--dir`` — a hub/
-runner runtime directory whose ``blizzard-hub.toml``/``blizzard-runner.toml`` names the
-``db_url`` (``internal/hub_runtime.py``) — sugar for ``--url`` that resolves before the
-same code path runs.
-
-Every write runs the drift guard (``domain/schema_contract.py``) first.
+A tool *for agents* to set up test cases repeatably against the real
+hub/runner stores. Operates on domain models, not raw tables, and reflects
+the live store's schema at runtime rather than importing ``blizzard``.
 """
 
 from __future__ import annotations
@@ -86,17 +64,12 @@ _COMPOSITION_ERRORS = (
     ScenarioCompositionError,
 )
 
-#: The fallback ``event_log.runner_id`` (NOT NULL on the real table) when ``create
-#: event`` is given neither ``--runner-id`` nor a ``--chunk`` whose lease history
-#: names one — the same "mock-data" placeholder ``create chunk``'s own facts use for
-#: ``set_by``/``stopped_by`` when no more specific attribution applies.
+#: Fallback ``event_log.runner_id`` (NOT NULL) when ``create event`` gets
+#: neither ``--runner-id`` nor a ``--chunk`` whose lease history names one.
 _DEFAULT_EVENT_RUNNER_ID = "mock-data"
 
-#: The instant any ``--seed``\ ed verb pins its clock to — a fixed, non-wall
-#: instant, so two separate invocations at the same seed compose byte-identical
-#: timestamps (and hence ids, since ``domain/ids.py``'s ULID leading bits are
-#: the mint instant) rather than drifting apart on real wall-clock reads a few
-#: milliseconds apart. Unseeded runs keep the real ``SystemClock``.
+#: Fixed clock instant any ``--seed``\ ed verb pins to, so two invocations at
+#: the same seed compose byte-identical timestamps and ids.
 _SEEDED_CLOCK_ANCHOR = datetime(2024, 1, 1, tzinfo=UTC)
 
 
@@ -126,13 +99,9 @@ def _seed_service(url: str) -> SeedService:
 def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: random.Random) -> GraphContext:
     """Resolve ``--graph <name>`` (or its absence) to a :class:`GraphContext`.
 
-    Named and found — reuse the newest matching ``graphs`` row (by ``created_at``).
-    Named and absent, or no name given with the store holding no graph at all — mint
-    a fresh one (:func:`compose_graph`, under ``name`` or :data:`DEFAULT_GRAPH_NAME`)
-    and write it immediately, so ``create chunk`` never errors merely because a
-    freshly provisioned store's ``graphs`` table starts empty (``domain/graph_seed.py``).
-    No name given with an existing graph present reuses the newest one across the
-    whole store."""
+    Reuses the newest matching ``graphs`` row when found; mints and writes a
+    fresh one when absent, so ``create chunk`` never errors on an empty store.
+    """
     existing = service.query("graphs", {"name": name} if name else None)
     if existing:
         graph_row = max(existing, key=lambda row: str(require_column(row, "created_at", table="graphs")))
@@ -154,13 +123,9 @@ def _resolve_usage_defaults(
     service: SeedService, chunk_id: str, *, node_name: str | None, epoch: int | None, runner_id: str | None
 ) -> tuple[str, int, str]:
     """Resolve ``create usage``'s ``--node``/``--epoch``/``--runner-id`` against
-    ``chunk_id``'s already-seeded rows when not explicitly given, rather than making
-    the caller repeat what a sibling ``create chunk``/``create lease`` call already
-    landed: epoch and runner id from the chunk's newest ``lease_facts`` row, node from
-    its newest ``transitions`` row's ``to_node_id``. Falls back to ``create chunk``'s
-    own epoch/runner-id defaults when the chunk carries no lease; ``--node`` has no
-    such fallback (a usage fact must name a real node) and is refused when neither
-    given nor derivable.
+    ``chunk_id``'s already-seeded rows when not given: epoch/runner id from the
+    newest ``lease_facts`` row, node from the newest ``transitions`` row.
+    ``--node`` has no fallback and is refused when not derivable.
     """
     resolved_epoch = epoch
     resolved_runner = runner_id
@@ -221,9 +186,8 @@ def _not_implemented(what: str) -> None:
 def cli() -> None:
     """Seed, reset, and fixture the hub/runner stores for repeatable test cases.
 
-    A tool *for agents*: it operates on domain models, not raw tables, and reflects the
-    live store's schema so it never imports ``blizzard``. Reset returns a store to a
-    known-clean state so every run starts from the same ground.
+    Operates on domain models, not raw tables, and reflects the live store's
+    schema so it never imports ``blizzard``.
     """
 
 
@@ -238,9 +202,8 @@ _DIR_HELP = "A hub/runner runtime dir — reads its blizzard-hub.toml/blizzard-r
 def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
     """Return a store to a known-clean state — delete every row, FK-safe.
 
-    Reflects the live schema and deletes from every table in reverse dependency order, so
-    the next test run starts from the same ground. The tables (the facts-only schema)
-    survive; only the rows go.
+    Reflects the live schema and deletes every table in reverse dependency
+    order; the tables (facts-only schema) survive, only the rows go.
     """
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     try:
@@ -254,12 +217,8 @@ def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
 def create() -> None:
     """Create one domain-model instance — a subcommand per concept.
 
-    Not a raw table name: ``runner`` seeds the hub's fleet registry, ``graph`` mints a
-    synthetic workflow graph, ``chunk`` composes one chunk at a requested derived
-    status, and ``usage``/``lease``/``escalation``/``question``/``event``/
-    ``runner-pause`` each land one board-concept fact set onto an already-seeded
-    chunk or runner. An unknown subcommand is click's own "No such command"
-    (compare ``fixture``, still a stub subgroup).
+    Not a raw table name: each subcommand lands one board-concept fact set
+    onto an already-seeded chunk or runner.
     """
 
 
@@ -310,13 +269,10 @@ def create_runner(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
 def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str, seed: int | None) -> None:
-    """Mint a synthetic workflow graph — a ``build`` (runner) node into a ``deliver``
-    (hub) node into the reserved terminal (``domain/graph_seed.py``).
+    """Mint a synthetic workflow graph — a ``build`` node into a ``deliver`` node.
 
-    Always mints a fresh ``graph_id``, even when ``--name`` repeats an existing
-    graph's name — pass the same ``--name`` to a later ``create chunk --graph`` to
-    reuse the row this call just minted instead of minting another. Prints the
-    minted graph id, alone, on stdout.
+    Always mints a fresh ``graph_id``, even when ``--name`` repeats an
+    existing name. Prints the minted graph id, alone, on stdout.
     """
     if store != "hub":
         raise click.UsageError("'graph' lives in the hub store (--store hub)")
@@ -365,12 +321,8 @@ def create_chunk(
 ) -> None:
     """Compose and write one chunk's fact rows so it derives ``--status``.
 
-    Never a status column (``bzh:facts-not-status``) — writes the fact rows the hub
-    reads to derive ``status`` (``domain/chunk_seed.py``). Auto-mints a synthetic
-    graph (``create graph``'s own logic) when the store holds none, or when
-    ``--graph`` names one absent; reuses an existing one otherwise. Prints the
-    minted chunk id, alone, on stdout — pipeable into a sibling verb (``create
-    usage``/``create lease``/etc.).
+    Never a status column (``bzh:facts-not-status``). Auto-mints a synthetic
+    graph when the store holds none; prints the minted chunk id on stdout.
     """
     if store != "hub":
         raise click.UsageError("'chunk' lives in the hub store (--store hub)")
@@ -444,10 +396,8 @@ def create_usage(
 ) -> None:
     """Land one ``usage_facts`` row against an already-seeded chunk.
 
-    Exactly one of ``--cost-usd``/``--no-cost`` is required — ``--no-cost`` lands a
-    genuine SQL NULL ``cost_usd``, never a fabricated ``0.0`` (``domain/usage_seed.py``).
-    ``--node``/``--epoch``/``--runner-id`` default from the chunk's own newest
-    transition/lease when omitted.
+    Exactly one of ``--cost-usd``/``--no-cost`` is required — ``--no-cost``
+    lands a genuine SQL NULL, never a fabricated ``0.0``.
     """
     if store != "hub":
         raise click.UsageError("'usage' lives in the hub store (--store hub)")
@@ -604,14 +554,8 @@ def create_question(
 ) -> None:
     """Land one open-or-answered question trail against an already-seeded chunk.
 
-    ``waiting_on_human`` derives from an open (unanswered) ``questions`` row.
-    ``--answer``/``--answered-by`` together also land a ``question_answers`` row;
-    ``--delivered`` (requires an answer) also lands an ``answer_deliveries`` row.
-    ``--resumed`` requires ``--delivered`` and lands no fact of its own — the real
-    schema has no dedicated "resumed" row beyond the delivery (see
-    ``domain/question_seed.py``). Each call mints its own question id, so a second
-    call against the same chunk lands an independent, non-colliding trail. Prints the
-    minted question id, alone, on stdout.
+    ``--answer``/``--answered-by`` also land a ``question_answers`` row;
+    ``--delivered`` also lands an ``answer_deliveries`` row.
     """
     if store != "hub":
         raise click.UsageError("'question' lives in the hub store (--store hub)")
@@ -728,9 +672,8 @@ def create_runner_pause(
 def scenario() -> None:
     """Compose a whole, consistent multi-concept world in one invocation.
 
-    Where ``create``'s nine verbs each land one concept, ``scenario``'s verbs
-    are pure composition on top of them (``domain/scenario_seed.py``) — one
-    command, one realistic board.
+    Where ``create``'s verbs each land one concept, ``scenario``'s verbs are
+    pure composition on top of them — one command, one realistic board.
     """
 
 
@@ -752,14 +695,10 @@ def scenario() -> None:
 )
 def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress: bool, seed: int | None) -> None:
     """Seed one whole, ready-to-view board: a synthetic graph, ``--chunks``
-    chunks spread across all nine derived statuses, a cost spread (including
-    at least one cost-partial usage fact), a ceiling-paused runner, a runner
-    per chunk, and a mixed-severity event log — see
-    ``domain/scenario_seed.py``'s module docstring for the exact, deterministic
-    status-distribution algorithm. ``--stress`` layers on four extremes a
-    narrow-viewport/overflow UI check needs on demand. Prints the store it
-    wrote to and a summary census. Always the hub store — a scenario board is
-    a hub-store concept, so there is no ``--store`` flag to get wrong."""
+    chunks spread across all nine derived statuses, a cost spread, a
+    ceiling-paused runner, a runner per chunk, and a mixed-severity event log.
+    Always the hub store. Prints the store it wrote to and a summary census.
+    """
     resolved_url = _resolve_url("hub", url, runtime_dir)
     service = _seed_service(resolved_url)
     clock = _seeded_clock(seed)

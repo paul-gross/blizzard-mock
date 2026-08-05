@@ -1,14 +1,8 @@
 """The seeding seam — the store Protocol concept composers write against.
 
-The domain declares ``ISeedStore`` (``bzh:dependency-inversion``): the store
-operations a concept composition needs, owned inward; ``internal/reflected_store.py``
-implements it. ``SeedService`` is the ``concept -> list[FactRow]`` orchestrator
-concept composers hand their rows to; ``create runner`` has no composer of its own,
-so ``cli.py`` exercises the same seam directly for it.
-
-``query`` is the read half — ``create chunk --graph <name>``'s "reuse an existing
-minted graph, or mint one" lookup needs to read the store before deciding whether to
-write, the one place this tool reads its own prior writes back.
+Declares ``ISeedStore`` (``bzh:dependency-inversion``): the store operations
+a concept composition needs, owned inward. ``SeedService`` is the ``concept
+-> list[FactRow]`` orchestrator concept composers hand their rows to.
 """
 
 from __future__ import annotations
@@ -30,13 +24,8 @@ class ResetSummary:
 
 class SeedIntegrityError(Exception):
     """A composed row doesn't satisfy a constraint the drift guard can't see —
-    a foreign key naming a row that was never seeded (e.g. ``--chunk``/
-    ``--runner-id`` pointing at nothing), or a unique constraint the store
-    already carries (re-running ``scenario board`` without an intervening
-    ``reset``). The drift guard (``domain/schema_contract.py``) validates
-    column *shape* only; this is the seam's other failure mode, raised by
-    ``ISeedStore.write`` from the underlying constraint violation and named
-    actionably rather than surfacing as a raw traceback.
+    a dangling foreign key, or a unique constraint the store already carries.
+    Named actionably rather than surfacing as a raw traceback.
     """
 
 

@@ -1,10 +1,8 @@
-"""In-memory stub-IdP state — the current profile, the ``refused_callback`` lever, and
-the single-use code / access-token maps both provider shapes share.
+"""In-memory stub-IdP state — the current profile, the ``refused_callback``
+lever, and the single-use code / access-token maps both provider shapes share.
 
-One process-wide store (mirrors ``blizzard_mock.forge.internal.lever_store``): a code
-is minted at ``authorize`` and consumed exactly once at the token/access-token
-exchange, mirroring the real single-use-code contract both the ``oidc`` and ``github``
-conformers rely on.
+One process-wide store: a code is minted at ``authorize`` and consumed
+exactly once at the token exchange.
 """
 
 from __future__ import annotations

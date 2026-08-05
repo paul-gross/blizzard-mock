@@ -1,40 +1,8 @@
 """Composes one chunk's ``FactRow`` set for a requested derived status (``bzh:facts-not-status``).
 
-:func:`compose_chunk` is ``create chunk``'s pure heart: given a resolved
-:class:`~blizzard_mock.mock_data.domain.graph_seed.GraphContext` (minted fresh, or
-hydrated from an existing store row — ``graph_seed.py``) and one of the nine derived
-statuses below, it returns the **exact** fact rows the hub's own
-``derive_chunk_status`` (``blizzard/hub/domain/work.py``) reads to arrive at that
-status, first-match-wins per its precedence — never a status column. A pure function
-of its inputs (``bzh:domain-takes-objects``), unit-tested with zero store.
-
-The nine status constants mirror ``blizzard.hub.domain.work.ChunkStatus``'s member
-values — independently kept in step, no ``blizzard`` import (the mock-data
-contract's first property), the same precedent ``domain/ids.py``'s prefix registry
-and this module's own graph counterpart set.
-
-Per-status composition, precedence-ordered top to bottom (the same order
-``derive_chunk_status`` checks, so each entry names exactly the fact(s) that outrank
-every status below it):
-
-- ``stopped`` — a ``chunk_stopped`` row. Checked first, so a transition to *any* node
-  (including a hub node) is safe here and never flips the derivation.
-- ``done`` — a transition whose ``to_node_id`` is the reserved terminal ``"done"``.
-- ``needs_human`` — an ``escalations`` row with no later lease/requeue (trivially open
-  when no lease/requeue exists at all, which is what this composes).
-- ``waiting_on_human`` — an open (unanswered) ``questions`` row.
-- ``paused`` — a ``chunk_pause_facts`` row reading ``paused=True``.
-- ``delivering`` — the newest transition's target is a **hub-executor** node; refuses
-  an explicit ``--node`` that resolves to a non-hub node (the composed status would
-  not be reachable).
-- ``running`` — a live ``route_created`` (no ``route_released``) with the newest
-  transition's target a **non-hub** node; refuses an explicit ``--node`` that
-  resolves to a hub node (it would instead derive ``delivering``).
-- ``not_ready`` — no ``chunk_promoted`` row. Mints no transition (a chunk that has
-  never moved sits at the graph's entry node); ``--node`` is refused; there is
-  nothing for it to land on.
-- ``ready`` — a ``chunk_promoted`` row and nothing that outranks it. Same
-  no-transition/no-``--node`` shape as ``not_ready``.
+:func:`compose_chunk` returns the exact fact rows the hub's own
+``derive_chunk_status`` reads to arrive at that status, first-match-wins —
+never a status column. A pure function of its inputs.
 """
 
 from __future__ import annotations
@@ -64,12 +32,11 @@ READY = "ready"
 #: precedence order (highest first) — the CLI's ``click.Choice`` is built from this.
 STATUSES = (STOPPED, DONE, NEEDS_HUMAN, WAITING_ON_HUMAN, PAUSED, DELIVERING, RUNNING, NOT_READY, READY)
 
-# A local id-prefix, like blizzard's own ``chunk_store._ROUTE_PREFIX`` — deliberately
-# not in ``domain/ids.py``'s shared registry, mirroring that the real one isn't in
-# ``blizzard.foundation.ids`` either (it is ``ChunkStore``'s own module constant).
+# A local id-prefix, deliberately not in ``domain/ids.py``'s shared registry,
+# mirroring that the real one is its own module constant too.
 _ROUTE_PREFIX = "route"
 
-_RESERVED_TERMINAL = "done"  # blizzard.hub.domain.graph.RESERVED_TERMINAL, independently mirrored
+_RESERVED_TERMINAL = "done"  # mirrors the hub's reserved terminal, independently
 
 _DEFAULT_WORKSPACE_ID = "workspace-seed"
 
@@ -101,17 +68,8 @@ def compose_chunk(
 ) -> ChunkSeed:
     """Compose one chunk minted onto ``graph``, landing at ``status``.
 
-    ``node_name`` names the graph node the chunk's composed transition lands on
-    (``--node``); status-dependent defaults apply where a transition is minted at
-    all (see the module docstring). ``workspace_id`` is the ``route_created`` fact's
-    own attribution (``running``/``delivering`` only, where a route is minted at
-    all) — callers that also register the attributed ``runner_id`` under a specific
-    workspace (e.g. ``scenario_seed.py``) should pass the same id here, so a
-    chunk's live route doesn't claim a workspace its own runner isn't registered
-    under. Raises :class:`ChunkCompositionError` for an unknown status, an
-    unresolvable node name (via
-    :meth:`~blizzard_mock.mock_data.domain.graph_seed.GraphContext.node`), or a
-    ``--node``/``--status`` pairing that cannot reach the requested status.
+    Raises :class:`ChunkCompositionError` for an unknown status, an
+    unresolvable node name, or an unreachable ``--node``/``--status`` pairing.
     """
     if status not in STATUSES:
         raise ChunkCompositionError(f"unknown status {status!r} — one of {STATUSES}")

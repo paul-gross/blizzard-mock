@@ -1,26 +1,8 @@
 """The shared mock-harness exec engine — *the prompt is the program*.
 
-A real coding harness turns a prompt string into behavior via an LLM; the mock
-turns it into behavior via :func:`exec` — the prompt it receives *is* Python
-code, run in the acquired worktree with the spawn environment.
-
-Responsibilities owned here:
-
-- **The fence.** Arbitrary code execution is the feature, so it is fenced: the
-  engine refuses to run unless test scaffolding marks the environment (a
-  :data:`FENCE_ENV_VAR` env var *and* a :data:`FENCE_MARKER_FILENAME` marker file
-  in the worktree tree). It can never pass as a real harness binding.
-- **The exec.** Treat the prompt's behavior script (or, on resume, the resume
-  message's) as Python source and :func:`exec` it in the worktree with the
-  :mod:`blizzard_mock.harness.helpers` surface bound as globals. Which part of the
-  prompt is the program is decided by ``whole_message`` (the entire body, no
-  scanning), else a ``<behavior-script>`` tag (:func:`split_behavior_script`), else
-  the positional :func:`split_worker_preamble`.
-- **Session state.** Persist a per-session file so a resumed script can read what
-  it asked and act on the answer it was resumed with.
-
-The engine owns *what* is emitted (a :class:`RunResult`); a facade's
-:class:`IHarnessWire` owns *how* it is rendered on the wire.
+A real coding harness turns a prompt into behavior via an LLM; the mock turns
+it via :func:`exec` — the prompt it receives *is* Python code. Execution is
+fenced (:func:`assert_fenced`).
 """
 
 from __future__ import annotations
@@ -54,9 +36,8 @@ STATE_DIR_ENV_VAR = "BLIZZARD_MOCK_HARNESS_STATE_DIR"
 #: Optional command the ``ask`` helper shells out to (the real runner ask path),
 #: e.g. ``"blizzard runner ask"``. Absent in unit tests — the ask is emit-only.
 ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
-#: The runner-injected, comma-separated workdirs of the environments the chunk holds —
-#: the fact the mock obeys instead of cwd (blizzard issue #17); see
-#: :func:`acquired_worktree`.
+#: The runner-injected, comma-separated workdirs of the environments the chunk
+#: holds (issue #17); see :func:`acquired_worktree`.
 ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
 
 #: Header of the machine-local facts table the runner prepends to every spawn prompt.
@@ -73,10 +54,8 @@ BEHAVIOR_SCRIPT_CLOSE = "</behavior-script>"
 CHOICE_OPEN = "<Choice>"
 CHOICE_CLOSE = "</Choice>"
 
-#: The transcript's user-turn text when no preamble prose is available to show. A
-#: transcript reader must never see the raw exec'd Python as "what the user said" —
-#: these stand in for both the received prompt and a resume message, which also
-#: arrives as code.
+#: Placeholder user-turn text when no preamble prose is available: a transcript
+#: reader must never see the raw exec'd Python as "what the user said".
 _TRANSCRIPT_SPAWN_TEXT = "(mock harness spawn — the behavior script it executed is not shown here)"
 _TRANSCRIPT_RESUME_TEXT = "(mock harness resume — the behavior script it executed is not shown here)"
 
@@ -92,22 +71,14 @@ class HarnessCrash(RuntimeError):
 class BehaviorScriptTagError(ValueError):
     """A prompt's ``<behavior-script>`` tags are unbalanced or nested.
 
-    Raised out of :func:`split_behavior_script` and re-raised inside the run so the
-    turn ends as an ``error_during_execution``. Silent degradation is the failure
-    mode designed out here: a typo'd tag must never fall back to the legacy
-    exec-everything path or quietly succeed as a no-op turn, because a script that
-    stops running while its tests keep passing rots them invisibly.
+    Ends the turn as ``error_during_execution`` rather than a silent no-op.
     """
 
 
 class EmptyBehaviorScriptError(ValueError):
     """A whole-message behavior script parses to an empty module body.
 
-    Raised inside :func:`run_prompt`'s whole-message path so the turn ends as an
-    ``error_during_execution`` — the same silent-no-op rot
-    :class:`BehaviorScriptTagError` closes, closed here for a message that is blank
-    or comments-only (which parses to no statements at all, so an unguarded exec
-    would exit 0 with no verdict).
+    Ends the turn as ``error_during_execution`` rather than exiting 0.
     """
 
 
@@ -123,9 +94,7 @@ class _AskExit(Exception):
 class RunResult:
     """What one turn produced, before a facade renders it to the wire.
 
-    ``subtype`` is ``"success"`` (a verdict or plain completion), ``"ask"`` (the
-    worker parked on a question), or ``"error_during_execution"`` (the script
-    raised / crashed). ``exit_code`` is what the facade returns to the OS.
+    ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``.
     """
 
     session_id: str
@@ -139,10 +108,9 @@ class RunResult:
 
 
 class IHarnessWire(Protocol):
-    """A facade's wire surface — the engine's only outward dependency (owned inward).
+    """A facade's wire surface — the engine's only outward dependency.
 
-    The engine constructs a :class:`RunResult` and writes ``render(result)`` to the
-    output stream; it never formats anything.
+    Writes ``render(result)`` to the output stream; never formats anything.
     """
 
     def render(self, result: RunResult) -> str:
@@ -153,10 +121,7 @@ class IHarnessWire(Protocol):
 class ITranscriptWriter(Protocol):
     """A facade's optional conversation-transcript sink — mirrors :class:`IHarnessWire`.
 
-    ``None`` (every facade but claude_code) is a total no-op. The engine calls into
-    it at two defined points — the spawn/resume user turn and the final result — and
-    never renders anything itself; the helper surface drives ``record_tool_call`` /
-    ``record_tool_result`` off the run context in between.
+    ``None`` is a total no-op; called at defined points only.
     """
 
     def record_user(self, text: str) -> None:
@@ -179,9 +144,7 @@ class ITranscriptWriter(Protocol):
 class IHookRunner(Protocol):
     """A facade's optional hook-execution sink — mirrors :class:`ITranscriptWriter`.
 
-    ``None`` (every facade but claude_code, and every direct engine caller) is a
-    total no-op. The engine calls into it at two defined lifecycle points and never
-    constructs a hook payload or spawns anything itself.
+    ``None`` is a total no-op; called at two defined lifecycle points only.
     """
 
     def on_tool_use(self, name: str, tool_input: Mapping[str, object], tool_output: str) -> None:
@@ -197,9 +160,7 @@ class IHookRunner(Protocol):
 class RunContext:
     """Ambient state for the currently-executing behavior script.
 
-    Set by :func:`run_prompt` for the duration of the ``exec`` and read by the
-    helper functions through :func:`current_context`. Helpers mutate ``result``
-    (verdict/ask) and ``session`` (asks/answers) rather than touching stdout.
+    Set by :func:`run_prompt`; read via :func:`current_context`.
     """
 
     session: SessionState
@@ -230,9 +191,7 @@ def current_context() -> RunContext:
     return ctx
 
 
-# --------------------------------------------------------------------------- #
-# The fence
-# --------------------------------------------------------------------------- #
+# -- The fence -------------------------------------------------------------- #
 
 
 def find_fence_marker(cwd: Path) -> Path | None:
@@ -252,10 +211,8 @@ def is_fenced(cwd: Path, env: Mapping[str, str]) -> bool:
 def assert_fenced(cwd: Path | None = None, env: Mapping[str, str] | None = None) -> None:
     """Raise :class:`FenceError` unless the environment is test-marked.
 
-    Both factors are required so neither a stray env var nor a stray file alone
-    can unfence the mock: ``FENCE_ENV_VAR`` must equal ``FENCE_ENV_VALUE`` *and*
-    a ``FENCE_MARKER_FILENAME`` marker must exist in the worktree tree. Every
-    facade guards through this one function before executing anything.
+    Both factors are required: ``FENCE_ENV_VAR`` must equal ``FENCE_ENV_VALUE``
+    *and* a ``FENCE_MARKER_FILENAME`` marker must exist in the worktree tree.
     """
     cwd = Path(cwd) if cwd is not None else Path.cwd()
     env = env if env is not None else os.environ
@@ -288,18 +245,14 @@ def fenced_env(base: Mapping[str, str] | None = None, **extra: str) -> dict[str,
     return env
 
 
-# --------------------------------------------------------------------------- #
-# Worktree resolution, state location & ask dispatch
-# --------------------------------------------------------------------------- #
+# -- Worktree resolution, state location & ask dispatch ---------------------- #
 
 
 @dataclass(frozen=True)
 class TaggedPrompt:
     """A tagged prompt's two halves: the program, and the prose around it.
 
-    ``script`` is every ``<behavior-script>`` block's contents, dedented and
-    concatenated in order; ``prose`` is the rest of the prompt with the blocks (and
-    their delimiter lines) elided.
+    ``script`` is the dedented, concatenated block contents; ``prose`` the rest.
     """
 
     script: str
@@ -318,30 +271,8 @@ _CLOSE_LINE = _tag_line(BEHAVIOR_SCRIPT_CLOSE)
 def split_behavior_script(prompt: str) -> TaggedPrompt | None:
     """Split a ``<behavior-script>``-tagged prompt into its program and its prose.
 
-    The tag says *this part is the program*: only the tagged blocks reach the
-    interpreter, and everything around them is prose the engine treats as data. A
-    tagged prompt does not consult :func:`split_worker_preamble` at all.
-
-    **A delimiter counts only on a line of its own** (leading/trailing whitespace
-    aside). Prompt text the script author does not own may *mention* the tag inline,
-    and a bare-substring match on such a mention would either hijack the run (an
-    illustrative block becomes the whole program) or, unpaired, hard-fail every
-    untagged spawn. Line-anchoring makes an inline mention inert, so a prompt with no
-    *block* behaves exactly as an untagged one.
-
-    Blocks are :func:`~textwrap.dedent`\\ ed, so a tag nested in a markdown list or a
-    blockquote yields runnable source rather than an ``IndentationError``.
-
-    Returns ``None`` when the prompt carries no delimiter line at all, which is the
-    caller's signal to fall back to the legacy positional split. Raises
-    :class:`BehaviorScriptTagError` when the delimiter lines are unbalanced or
-    nested, or when they enclose nothing executable — never a silent fall-through to
-    legacy exec, and never a quiet no-op turn, because a tag that succeeds with no
-    verdict and no side effects makes tests rot invisibly.
-
-    The tag is orthogonal to the fence: it marks *which part* of a prompt is the
-    program, while :func:`assert_fenced` decides whether anything may run at all. A
-    tag in prompt content is never on its own sufficient to trigger execution.
+    A delimiter counts only on a line of its own. Returns ``None`` when absent;
+    raises :class:`BehaviorScriptTagError` on unbalanced or empty blocks.
     """
     blocks: list[str] = []
     prose: list[str] = []
@@ -391,9 +322,8 @@ def split_behavior_script(prompt: str) -> TaggedPrompt | None:
 def _parses_to_empty_module(source: str) -> bool:
     """True iff ``source`` compiles to a module with no statements at all.
 
-    Blank or whitespace-only source is the obvious case; comments-only source also
-    parses to an empty body. A genuine syntax error is *not* reported as empty —
-    that already fails loudly of its own accord once :func:`exec` reaches it.
+    Blank, whitespace-only, or comments-only source all qualify. A genuine
+    syntax error is not reported as empty.
     """
     try:
         return len(ast.parse(source).body) == 0
@@ -404,16 +334,8 @@ def _parses_to_empty_module(source: str) -> bool:
 def split_worker_preamble(prompt: str) -> tuple[str, str]:
     """Split a spawn prompt into ``(preamble, behavior_script)``.
 
-    The **legacy, untagged** discrimination: positional, and consulted only for a prompt
-    with no ``<behavior-script>`` tag (:func:`split_behavior_script`, which supersedes it).
-
-    A spawn prompt's preamble is prose addressed to an agent's judgement, not to ``exec``
-    — feeding it to the interpreter is a ``SyntaxError`` on the facts table's first pipe,
-    which would fail the turn before the script it precedes ever runs (blizzard issue #17).
-    The preamble ends with that table and its rows are contiguous, so the script is
-    whatever follows the last row of the table opened by :data:`PREAMBLE_TABLE_HEADER`.
-    Returns ``("", prompt)`` when no preamble is present — a resume message and every
-    direct engine caller pass a bare script.
+    Legacy, untagged, positional split: the script follows the last row of the
+    table opened by :data:`PREAMBLE_TABLE_HEADER` (issue #17).
     """
     lines = prompt.splitlines()
     try:
@@ -429,14 +351,8 @@ def split_worker_preamble(prompt: str) -> tuple[str, str]:
 def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
     """The worktree a behavior-script runs in: the first held env's workdir, else ``cwd``.
 
-    A worker's process cwd is the workspace root, not the worktree the node is meant to
-    touch, so the env to work in is read off :data:`ENV_WORKDIRS_ENV_VAR` instead
-    (blizzard issue #17). The first workdir is the one chosen.
-
-    Falls back to ``cwd`` when the variable is absent or empty — direct engine callers
-    drive it from inside the worktree and never set it. A named workdir that does not
-    exist is ignored rather than trusted, so a stale value degrades to the fallback
-    instead of erroring.
+    Read off :data:`ENV_WORKDIRS_ENV_VAR` (issue #17); a workdir that does not
+    exist is ignored, falling back to ``cwd``.
     """
     raw = env.get(ENV_WORKDIRS_ENV_VAR, "")
     for candidate in (part.strip() for part in raw.split(",")):
@@ -448,9 +364,8 @@ def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
 def fence_base_dir(cwd: Path) -> Path:
     """The directory session/transcript state is rooted under.
 
-    The fence marker's parent, else ``cwd`` when no marker is found in the tree.
-    Shared by :func:`_state_root` and the transcript writer's fenced fallback
-    (``facades/_transcript.py``), so neither re-derives the rule.
+    The fence marker's parent, else ``cwd`` when no marker is found in the
+    tree.
     """
     marker = find_fence_marker(cwd)
     return marker.parent if marker is not None else cwd
@@ -483,9 +398,8 @@ def _chdir(target: Path) -> Iterator[None]:
 def _script_globals(ctx: RunContext) -> dict[str, object]:
     """Build the namespace a behavior script executes in.
 
-    The terse helper surface is bound by name so a script writes ``commit("…")``
-    with no imports; ``__builtins__`` is left intact — the mock is a full Python
-    interpreter on purpose, so a script can reach for raw Python for weird cases.
+    The helper surface is bound by name so a script writes ``commit("…")`` with
+    no imports; ``__builtins__`` is left intact.
     """
     from blizzard_mock.harness import helpers
 
@@ -504,9 +418,7 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
     return ns
 
 
-# --------------------------------------------------------------------------- #
-# The exec engine
-# --------------------------------------------------------------------------- #
+# -- The exec engine ---------------------------------------------------------- #
 
 
 def run_prompt(
@@ -526,40 +438,8 @@ def run_prompt(
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
-    On **spawn** (``is_resume=False``) ``session_id`` is the harness-honored
-    pre-assignment (Claude Code) or ``None`` to self-assign a uuid (Codex,
-    OpenCode). On **resume** ``session_id`` is required and ``prompt`` is the
-    resume message — which *also arrives as code* and is what gets executed,
-    with the persisted session state (prior asks) available to it.
-
-    Spawn and resume read the prompt the same way: under ``whole_message=True``
-    the entire body execs with no sentinel scanning at all (no
-    ``<behavior-script>`` scan, no preamble split), so a mention of the tag
-    anywhere in the script — including inside a string literal — stays inert.
-    Otherwise, a ``<behavior-script>``-tagged prompt execs its blocks alone
-    (:func:`split_behavior_script`), an untagged one execs everything past the
-    preamble (:func:`split_worker_preamble`), and a malformed tag fails the turn as
-    an ``error_during_execution``. A whole-message script that parses to an empty
-    module body (blank, or comments-only) fails the same way instead of exiting 0
-    with no verdict (:class:`EmptyBehaviorScriptError`).
-
-    ``model``/``effort`` (issue #144) are the flags this invocation was launched with —
-    recorded onto the session state as an :class:`~blizzard_mock.harness.session.Invocation`
-    and otherwise ignored (the mock is model- and effort-agnostic). ``None`` means the flag
-    was absent from argv.
-
     Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
-    :class:`RunResult` through ``wire`` to ``out`` exactly once (a ``hang`` never
-    reaches that line; a ``crash`` renders an error result).
-
-    ``transcript``, when supplied, mints the user turn for this run and the
-    assistant turn for its result; it is also bound onto the run context, which the
-    helper surface's tool calls write through mid-script. ``None`` is a total no-op.
-
-    ``hooks``, when supplied, executes the hook commands its ``--settings`` document
-    declares. ``on_session_end`` fires once at the tail of this function, after the
-    wire render and before the return, so the hook completes while the process is
-    still alive. ``None`` is a total no-op.
+    :class:`RunResult` through ``wire`` to ``out`` exactly once.
     """
     import sys
 
@@ -574,9 +454,8 @@ def run_prompt(
 
     assert_fenced(cwd, env)
 
-    # Which part of the prompt is the program? A malformed tag, or a whole-message
-    # script with an empty module body, is carried into the run below and raised
-    # there, so the turn fails loudly instead of degrading to a quiet path.
+    # Which part of the prompt is the program? A malformed tag or an empty
+    # whole-message body is raised below, never silently degraded.
     tag_error: BehaviorScriptTagError | None = None
     empty_error: EmptyBehaviorScriptError | None = None
     tagged: TaggedPrompt | None = None
@@ -629,9 +508,8 @@ def run_prompt(
     )
 
     if transcript is not None:
-        # Never the raw script (it would misrepresent code as "what the user said"):
-        # the tagged prompt's own prose, else the real preamble prose, else a short
-        # synthetic line.
+        # Never the raw script — the tagged prompt's own prose, else the real
+        # preamble prose, else a short synthetic line.
         prose = tagged.prose if tagged is not None else preamble
         user_text = prose if prose else (_TRANSCRIPT_RESUME_TEXT if is_resume else _TRANSCRIPT_SPAWN_TEXT)
         transcript.record_user(user_text)
@@ -680,9 +558,7 @@ def run_prompt(
     stream.write(wire.render(result))
     stream.flush()
     if hooks is not None:
-        # The tail, after the render: the hook subprocess runs to completion while this
-        # process is still alive (pinned by tests/test_pin_mock.py::
-        # test_session_end_fires_after_the_wire_render_and_before_run_prompt_returns).
-        # The exits that do *not* reach here: package README, "Hook execution".
+        # After the render, so the hook subprocess runs while this process is
+        # still alive (pinned by tests/test_pin_mock.py).
         hooks.on_session_end(result)
     return result.exit_code

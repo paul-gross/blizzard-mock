@@ -1,10 +1,8 @@
 """Real git plumbing for the behavior-script helpers.
 
-Everything downstream of the harness seam runs for real
-(``implementation/verification.md``): ``commit`` makes an actual commit in the
-acquired worktree and ``apply_diff`` mutates real files. Thin subprocess wrappers
-over ``git`` — no gitpython object graph needed for the two operations a mock
-agent performs.
+``commit`` makes an actual commit in the acquired worktree and ``apply_diff``
+mutates real files. Thin subprocess wrappers over ``git`` — no gitpython
+object graph needed for these two operations.
 """
 
 from __future__ import annotations

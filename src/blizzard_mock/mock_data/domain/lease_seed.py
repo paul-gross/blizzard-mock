@@ -1,11 +1,8 @@
 """Composes one ``lease_facts`` row (``bzh:facts-not-status``).
 
-The single fact ``running``/``delivering`` chunks share a shape with —
-``domain/chunk_seed.py``'s per-status composer already builds one of these internally
-for those two statuses, so this module is the one place the row shape lives;
-``chunk_seed.py`` imports :func:`compose_lease_row` rather than re-deriving it, and
-``create lease`` (a chunk composed independently of ``create chunk``, e.g. attaching a
-second lease epoch onto an already-seeded chunk) is this function's other caller.
+The single fact ``running``/``delivering`` chunks share a shape with — this
+module is the one place the row shape lives, composed once and reused rather
+than re-derived.
 """
 
 from __future__ import annotations

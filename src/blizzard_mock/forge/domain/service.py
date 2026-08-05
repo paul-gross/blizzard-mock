@@ -1,11 +1,8 @@
 """``ForgeService`` — the forge's business rules over the git and state seams.
 
 This is the domain layer: it resolves an id to its git/state objects at the
-boundary and applies the rules (``bzh:domain-takes-objects`` — the rule-bearing
-helpers ``_mergeability`` / merge take resolved ``Repo`` / ``PullRequest``
-objects). It holds the *write* seams (``bzh:controller-read-only`` — routers
-hold only this service, never a store); all mutation flows through here. Every
-collaborator is injected at the composition root (``bzh:dependency-injection``).
+boundary and applies the rules (``bzh:domain-takes-objects``). It holds the
+*write* seams (``bzh:controller-read-only``); all mutation flows through here.
 """
 
 from __future__ import annotations
@@ -184,10 +181,9 @@ class ForgeService:
         return issue
 
     def set_issue_state(self, owner: str, name: str, number: int, *, state: str, state_reason: str | None) -> Issue:
-        """Support ``PATCH .../issues/{n}`` closing an issue without a merge — the
-        delivery-time closure the work-source adapter drives (blizzard#216). Setting
-        the same state again (e.g. re-closing an already-closed issue) is a clean
-        no-op, mirroring GitHub's own PATCH."""
+        """Support ``PATCH .../issues/{n}`` closing an issue without a merge
+        (issue #216). Setting the same state again is a clean no-op, mirroring
+        GitHub's own PATCH."""
         if state not in ("open", "closed"):
             raise ValidationError(f"invalid state: {state}")
         repo = self.get_repo(owner, name)
@@ -268,15 +264,10 @@ class ForgeService:
         return self._require_pull(repo, number).merged
 
     def update_branch(self, owner: str, name: str, number: int, *, expected_head_sha: str | None = None) -> str:
-        """Merge base into the PR's head branch (GitHub's ``PUT .../update-branch``).
-
-        The self-heal a ``behind`` PR needs: advances the head with the latest base
-        (a real merge commit, so ``head.sha`` moves — mirroring GitHub) and clears any
-        ``stale_branch`` lever so the PR next reads ``clean``. Guarded on
-        ``expected_head_sha`` — a mismatch is a 409 (``HeadMismatch``), so a caller that
-        stacked reads never double-updates a moved head (pinned by
-        tests/test_forge_smoke.py::test_update_branch_stale_expected_head_is_409);
-        ``behind`` implies mergeable, so the update itself never conflicts."""
+        """Merge base into the PR's head branch (``PUT .../update-branch``);
+        self-heals a ``behind`` PR. A mismatched ``expected_head_sha`` is a 409
+        (pinned by tests/test_forge_smoke.py::test_update_branch_stale_expected_head_is_409).
+        """
         repo = self.get_repo(owner, name)
         pull = self._require_pull(repo, number)
         if pull.merged or pull.state is State.CLOSED:
@@ -291,9 +282,7 @@ class ForgeService:
         return "Updating pull request branch."
 
     def set_pull_state(self, owner: str, name: str, number: int, *, state: State) -> PullView:
-        """Support ``PATCH .../pulls/{n}`` closing a PR without merge — the
-        close-without-merge terminal disposition a delivery flow treats as
-        complete (D-065)."""
+        """Support ``PATCH .../pulls/{n}`` closing a PR without merge (D-065)."""
         repo = self.get_repo(owner, name)
         pull = self._require_pull(repo, number)
         pull.state = state
@@ -337,8 +326,7 @@ class ForgeService:
             self._comment_midflight(params)
 
     def _external_merge(self, params: LeverParams) -> None:
-        """Land the PR's head on its base directly — the external merge a
-        polling delivery flow must detect (D-065)."""
+        """Land the PR's head on its base directly, bypassing the PR flow (D-065)."""
         if params.repo is None or params.number is None:
             raise ValidationError("externally_merged requires repo and number")
         owner, name = _split_full_name(params.repo)
@@ -402,16 +390,11 @@ class ForgeService:
         return False, MergeableState.DIRTY
 
     def list_check_runs(self, owner: str, name: str, ref: str) -> list[CheckRun]:
-        """Live check runs against ``ref`` — derived from the active lever set the
-        same way ``_mergeability`` is, not stored (blizzard#232). ``checks_failed``
-        (armed for the PR whose head resolves to ``ref``) and ``base_checks_failed``
-        (armed for the repo, read against its default branch) both win over
-        ``checks_pending``; absent any lever, the ref reads green.
-
-        Correlation is by resolved commit sha, not branch name, because a real land
-        script queries by the PR's head commit sha; a branch-name ``ref`` still matches,
-        since it resolves to the same sha (pinned by tests/test_pin_mock.py::
-        test_check_runs_correlate_a_pr_by_its_head_commit_sha_not_its_branch_name)."""
+        """Live check runs against ``ref``, derived from the active lever set, not
+        stored (issue #232). ``checks_failed``/``base_checks_failed`` win over
+        ``checks_pending``; absent a lever, the ref reads green. Correlated by
+        resolved commit sha, not branch name (pinned by tests/test_pin_mock.py).
+        """
         repo = self.get_repo(owner, name)
         sha = self._git.resolve_ref(repo, ref)
         pull = self._find_pull_by_head_sha(repo, sha)
@@ -426,9 +409,7 @@ class ForgeService:
         return [self._synthetic_check_run(sha, status="completed", conclusion="success")]
 
     def _find_pull_by_head_sha(self, repo: Repo, sha: str) -> PullRequest | None:
-        """The open PR whose head branch currently resolves to ``sha``, if any —
-        correlating a check-runs query (issued against a commit sha, like a real land
-        script issues it) to the PR it belongs to."""
+        """The open PR whose head branch currently resolves to ``sha``, if any."""
         for pull in self._state.list_pulls(repo.full_name, "open"):
             if self._git.resolve_ref(repo, pull.head) == sha:
                 return pull
@@ -454,9 +435,9 @@ class ForgeService:
     def update_ref(self, owner: str, name: str, ref: str, *, sha: str, force: bool) -> str:
         """Update a ref's target sha (GitHub's ``PATCH .../git/refs/{ref}``).
 
-        Unless ``force`` is set, this is an atomic compare-and-swap: the
-        update is rejected (``NotFastForward``) unless the ref's current sha
-        is an ancestor of ``sha`` — the fast-forward, PR-free delivery path."""
+        Unless ``force``, this is a compare-and-swap: rejected (``NotFastForward``)
+        unless the current sha is an ancestor of ``sha``.
+        """
         repo = self.get_repo(owner, name)
         current_sha = self._git.resolve_ref(repo, ref)
         target_sha = self._git.resolve_ref(repo, sha)

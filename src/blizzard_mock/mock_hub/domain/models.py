@@ -1,14 +1,8 @@
 """The mock hub's domain model — a stateful stand-in for the real hub's HTTP surface.
 
-These pydantic models **mirror the subset of the hub OpenAPI a runner consumes**
-(``blizzard.wire.{queue,route,envelope,completion,chunk,facts,runner}``), reproduced
-here **without importing ``blizzard``**. A real runner deserializes these responses with
-its own wire models (non-strict ``model_validate``), so every field a wire model marks
-required is present and named identically; mock-only extras are omitted.
-
-The seed shape (``ChunkSpec`` / ``NodeSpec``) is the mock's own control vocabulary: a
-scripted graph an agent seeds so a real runner (or the mock runner) can be driven
-through it deterministically. ``ChunkState`` is the in-memory row the service advances.
+These pydantic models mirror the subset of the hub OpenAPI a runner consumes,
+reproduced here without importing ``blizzard``. ``ChunkSpec``/``NodeSpec`` is
+the mock's own control vocabulary: a scripted graph an agent seeds.
 """
 
 from __future__ import annotations
@@ -85,10 +79,8 @@ class NodeSpec(BaseModel):
 
     executor: Executor = Executor.RUNNER
     session: SessionMode = SessionMode.RESUME
-    # The session reference target and the effective declaration (issues #115, #144) —
-    # seeded per node rather than derived from a graph-level `sessions:` map, because a
-    # mock scenario scripts nodes directly and never mints a graph (pinned by
-    # tests/test_mock_hub.py::test_a_seeded_session_declaration_rides_the_claim_envelope).
+    # The session reference target and effective declaration (issues #115, #144),
+    # seeded per node (pinned by tests/test_mock_hub.py).
     session_source: str | None = None
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
@@ -111,9 +103,8 @@ class EscalationState(BaseModel):
 
     epoch: int
     takeover_command: str = ""
-    #: The ``blizzard runner takeover`` wrapped entry point; empty whenever the runner
-    #: didn't compose one — see ``blizzard-context:/domain/humans.md`` §Escalation for
-    #: the full account of when each command is present.
+    #: The ``blizzard runner takeover`` wrapped entry point; empty whenever the
+    #: runner didn't compose one.
     wrapped_takeover_command: str = ""
 
 
@@ -152,9 +143,8 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
-    # Both default to *express no preference* (issue #144), mirroring what the real hub's
-    # ingest mints for a surface declaring neither (pinned by tests/test_pin_mock.py::
-    # test_a_chunk_spec_naming_neither_default_expresses_no_preference).
+    # Both default to express no preference (issue #144), pinned by
+    # tests/test_pin_mock.py.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     entry: str
@@ -185,9 +175,7 @@ class ChunkState(BaseModel):
     route_workspace_id: str | None = None
     route_environment_ids: list[str] = Field(default_factory=list)
     #: How many times the live route's capability token has been re-keyed
-    #: (``POST /api/fleet/chunks/{id}/route-token``, issue paul-gross/blizzard#84b) —
-    #: folded into the deterministic token string so a re-key never echoes the claim's
-    #: own token back.
+    #: (issue #84b); folded into the token string so a re-key never repeats.
     route_token_rekey_count: int = 0
     #: ``(from_node_id, epoch)`` -> the apply-response already produced, for idempotent
     #: re-apply (D-090): a replayed completion returns its original outcome, no re-advance.

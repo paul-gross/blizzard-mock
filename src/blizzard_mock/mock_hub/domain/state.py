@@ -34,10 +34,8 @@ class RunnerRow:
         self.url = url
         self.redirect_uris = redirect_uris
         self.paused = False
-        # The runner's own locally-reported pause brake (``runner.locally_paused`` /
-        # ``runner.locally_resumed``) — distinct from ``paused``, the fleet's brake the
-        # runner pulls down (blizzard#43/#44). The mock only enforces the fleet's own
-        # brake; this trio is reported-up state, mirrored read-only via ``RunnerView``.
+        # The runner's own locally-reported pause brake — distinct from
+        # ``paused``, the fleet's brake (issue #43/#44); reported-up, read-only.
         self.locally_paused = False
         self.locally_paused_by: str | None = None
         self.locally_paused_reason: str | None = None

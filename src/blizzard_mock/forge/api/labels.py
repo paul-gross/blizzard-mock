@@ -1,9 +1,7 @@
 """Label routes — repo-level label definitions and issue label assignment.
 
-GitHub-shaped label surface backing the forge-status projection's annotator:
-repo-level label CRUD backs its idempotent bootstrap, issue-level add/remove
-backs its writes, and the ``labels=`` filter on list-issues (``api/issues.py``)
-backs its stateless discovery.
+GitHub-shaped label surface: repo-level label CRUD and issue-level label
+add/remove, mirroring GitHub's REST v3 label endpoints.
 """
 
 from __future__ import annotations

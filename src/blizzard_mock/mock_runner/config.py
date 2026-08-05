@@ -1,9 +1,8 @@
 """Mock-runner configuration — its own bind address and the hub it drives.
 
-Sourced from CLI flags with env fallbacks. ``hub_url`` (``BZ_HUB_URL``) is the hub the
-driver's outbound protocol targets — a real ``blizzard hub`` in a hub service-tier test,
-or the mock hub; ``host``/``port`` (``BZ_MOCK_RUNNER_PORT``) is where the driver's own
-control surface (``/_drive``, ``/_levers``) listens.
+Sourced from CLI flags with env fallbacks. ``hub_url`` is the hub the
+driver's outbound protocol targets; ``host``/``port`` is where the driver's
+own control surface listens.
 """
 
 from __future__ import annotations

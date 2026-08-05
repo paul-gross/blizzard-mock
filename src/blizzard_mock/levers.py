@@ -1,16 +1,8 @@
 """The shared lever primitive for the mock hub and mock runner.
 
-A **lever** is an explicit, first-class control an agent or test pulls to steer a mock
-into a named edge state instead of contriving it (``implementation/mocking.md``). The
-hub and runner mocks share one arm/clear/find store and one ``/_levers`` wire shape
-(see ``forge.domain.levers``), each supplying only its own ``kind`` vocabulary and
-catalog.
-
-A lever is scoped ``(chunk_id)`` where meaningful; a lever with no chunk is global. A
-lever may **self-expire** after ``remaining`` affected requests — the mechanism behind
-"go unreachable *mid-lease*": arm ``unreachable`` with ``remaining=2`` and the mock is
-down for exactly the next two calls, then heals. ``payload`` carries kind-specific
-detail (a delay in milliseconds, a conflicting runner id, a rejection message).
+A lever is an explicit control that steers a mock into a named edge state,
+scoped ``(chunk_id)`` where meaningful. May self-expire after ``remaining``
+affected requests; ``payload`` carries kind-specific detail.
 """
 
 from __future__ import annotations

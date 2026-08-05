@@ -11,9 +11,8 @@ import sys
 
 from blizzard_mock.harness.engine import FenceError, IHarnessWire, IHookRunner, ITranscriptWriter, run_prompt
 
-#: Exit code a facade returns when the engine's fence refuses the run. Distinct
-#: from a behavior-script error (1) so callers can tell "refused" from "ran and
-#: failed".
+#: Exit code a facade returns when the engine's fence refuses the run —
+#: distinct from a behavior-script error (1).
 FENCE_EXIT_CODE = 2
 
 

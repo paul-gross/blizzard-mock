@@ -1,9 +1,8 @@
 """The injected git-error factory — wraps GitPython failures once, at ERROR.
 
-Follows the factory-injected error pattern (``exemplars/python/repo_pattern.py``,
-``standards/logging.md``): library exceptions become domain ``GitError`` /
-``NotMergeable`` at the boundary, logged exactly once here with structured
-fields, so callers never re-log and no catch-log-rethrow cascade forms.
+Follows the factory-injected error pattern (``exemplars/python/repo_pattern.py``):
+library exceptions become domain ``GitError``/``NotMergeable`` at the boundary,
+logged exactly once here, so callers never re-log.
 """
 
 from __future__ import annotations

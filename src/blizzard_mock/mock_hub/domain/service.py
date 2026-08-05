@@ -1,14 +1,8 @@
 """``MockHubService`` — the mock hub's business rules over its state and levers.
 
-The domain layer (``bzh:domain-core``): it advances a seeded chunk through its scripted
-graph exactly as the real hub would over the wire — claim mints a route and hands back
-the first envelope, a completion is epoch-fenced and idempotent (D-007/D-090), a hub
-(deliver) node "takes over" and the chunk derives ``done``. Levers that shape a *response
-body* (``replay``, ``stale_envelope``, ``conflicting_fact``) are consulted here; the
-transport-edge levers (``unreachable``, ``delay``) live in the middleware, and ``drop_ack``
-is applied by the completions router after this service has advanced the real state.
-
-All collaborators are injected at the composition root (``bzh:dependency-injection``).
+The domain layer (``bzh:domain-core``): advances a seeded chunk through its
+scripted graph exactly as the real hub would. Levers shaping a response body
+are consulted here; transport-edge levers live in the middleware.
 """
 
 from __future__ import annotations
@@ -88,10 +82,8 @@ class MockHubService:
         self._state = state
         self._levers = levers
         self._clock = clock
-        #: Per-runner fact high-water mark (``blizzard.hub.domain.facts``'s
-        #: ``runner_high_water``) — a seq at/under this mark is re-acked as
-        #: ``already_applied`` rather than re-applied. Process-lifetime, like the rest
-        #: of this mock's state; cleared by ``reset()``.
+        #: Per-runner fact high-water mark — a seq at/under this mark is
+        #: re-acked as ``already_applied`` rather than re-applied.
         self._fact_high_water: dict[str, int] = {}
 
     @property
@@ -160,9 +152,8 @@ class MockHubService:
             workspace_id=workspace_id,
             environment_ids=list(environment_ids),
             envelope=self._envelope(chunk, chunk.entry, epoch=chunk.latest_epoch),
-            # A per-claim capability token, per blizzard's RouteClaimResponse
-            # (issue paul-gross/blizzard#84a). Deterministic on purpose — a
-            # scenario can predict it; realism of the secret is not the point.
+            # A per-claim capability token (issue #84a). Deterministic on
+            # purpose, so a scenario can predict it.
             route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}",
         )
 
@@ -223,10 +214,9 @@ class MockHubService:
     def work_items(self, chunk_id: str) -> WorkItemsView:
         """A chunk's pass-through work items — one canned entry per pointer.
 
-        The mock carries no forge integration (D-012's vendor-native fidelity stops at
-        the wire shape here); this exists so the fleet-side work-items route is reachable
-        at all, for the runner-local proxy's forward and the wire-shape/auth-capture
-        assertions it backs (issue #86b/#87), not for work-item-content behavior."""
+        The mock carries no forge integration; this exists so the route is
+        reachable at all, not for work-item-content behavior.
+        """
         chunk = self._require(chunk_id)
         now = self._clock.now().isoformat()
         return WorkItemsView(
@@ -254,13 +244,11 @@ class MockHubService:
     # -- fact intake (fence + full vocabulary) ------------------------------
 
     def ingest_facts(self, runner_id: str, facts: list[dict[str, Any]]) -> RunnerFactAck:
-        """Apply a batched ``POST /events`` push — the runner's full fact vocabulary
-        (``blizzard.wire.facts``), partitioned into ``applied``/``already_applied``/
-        ``rejected`` against a per-runner high-water mark (mirrors
-        ``blizzard.hub.domain.facts.FactIngestService.ingest``). A seq at or under the
-        mark is re-acked without re-applying (idempotent replay); an unrecognized
-        ``kind`` is rejected, not silently applied, and the mark only advances past a
-        seq that was genuinely applied."""
+        """Apply a batched ``POST /events`` push, partitioned into
+        ``applied``/``already_applied``/``rejected`` against a per-runner
+        high-water mark. A seq at or under the mark is re-acked without
+        re-applying; an unrecognized ``kind`` is rejected, not silently applied.
+        """
         mark = self._fact_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -285,12 +273,11 @@ class MockHubService:
         )
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
-        """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected —
-        mirrors ``blizzard.hub.domain.facts._apply``'s bool contract, including its
-        fallthrough for an unrecognized kind and its lack of a chunk-existence check —
-        a known kind naming an unknown chunk still counts applied and the mark advances
-        (pinned by tests/test_mock_hub.py::
-        test_events_known_kind_on_an_unknown_chunk_is_still_applied)."""
+        """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected.
+
+        A known kind naming an unknown chunk still counts applied (pinned by
+        tests/test_mock_hub.py).
+        """
         if kind == LEASE_MINTED:
             chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
             if chunk is not None:
@@ -329,9 +316,8 @@ class MockHubService:
             question = self._state.get_question(str(payload.get("question_id", "")))
             if question is None:
                 return False
-            # `answered` is set here too as a mock shortcut: a scenario that pushes the
-            # delivery without first driving `POST /_seed/answer` still gets a coherent
-            # row back off the poll. The real hub derives it from the answer row alone.
+            # `answered` is set here too as a mock shortcut, so a scenario
+            # that skips `POST /_seed/answer` still gets a coherent poll row.
             question.answered = True
             question.delivered = True
             question.delivered_at = self._clock.now().isoformat()
@@ -353,13 +339,8 @@ class MockHubService:
             row.locally_paused_by = None
             row.locally_paused_reason = None
             return True
-        # usage.recorded / event.recorded (issue #125) and external_subscription_usage.
-        # sampled (issue #218) are accepted and no-op-stored: the mock has no usage
-        # ledger, event log, or fleet-registry field to post them into, so accepting
-        # without modeling further is the honest minimum (issue #4; pinned by
-        # tests/test_mock_hub.py::test_events_usage_recorded_is_accepted and
-        # ::test_events_external_subscription_usage_sampled_is_accepted). Any other kind
-        # is unrecognized — rejected, mirroring the real hub's fallthrough.
+        # usage.recorded / event.recorded (issue #125) and
+        # external_subscription_usage.sampled (issue #218) are accepted as no-ops.
         return kind in (USAGE_RECORDED, EVENT_RECORDED, EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED)
 
     # -- completion apply --------------------------------------------------
@@ -408,11 +389,9 @@ class MockHubService:
 
     def report_lease(self, chunk_id: str, *, epoch: int, runner_id: str) -> dict[str, Any]:
         """``POST /chunks/{id}/leases`` — the direct, non-buffered ``lease.minted``
-        report; advances the fence exactly as the batched ``/events`` path does (the
-        shared ``_advance_fence`` helper), 404 on an unknown chunk (unlike the batched
-        path, which no-ops on an unknown chunk so an unrelated fact in the same push
-        still lands). Mirrors the real hub's 202 ``{"chunk_id"}`` body — no ``epoch``
-        in the response."""
+        report; advances the fence exactly as the batched ``/events`` path, but
+        404s on an unknown chunk rather than no-op'ing.
+        """
         chunk = self._require(chunk_id)
         self._advance_fence(chunk, epoch)
         return {"chunk_id": chunk_id}
@@ -438,13 +417,9 @@ class MockHubService:
 
     def hub_advance(self, chunk_id: str) -> HubAdvanceResponse:
         """``POST /chunks/{id}/hub-advance`` — drive a chunk parked at a hub-executor
-        node one step (#65/#66). Hub nodes only "park" (stay non-terminal) when the
-        *entry* node itself is a hub executor; a completion's own transition into a hub
-        node still derives ``done`` synchronously, so the mock-runner's driven happy path
-        needs no hub-advance call (pinned by tests/test_mock_hub.py::
-        test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node and
-        ::test_happy_path_ingest_to_done). A chunk not parked at a hub-executor node is a
-        no-op, ``ran=False``, mirroring the real hub's own "not parked" detail string."""
+        node one step (#65/#66). A chunk not parked at a hub-executor node is a
+        no-op, ``ran=False`` (pinned by tests/test_mock_hub.py).
+        """
         chunk = self._require(chunk_id)
         node = chunk.node(chunk.current_node_id) if chunk.current_node_id is not None else None
         parked = node is not None and node.executor is Executor.HUB and chunk.status is not ChunkStatus.DONE

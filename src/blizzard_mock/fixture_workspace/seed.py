@@ -1,9 +1,8 @@
 """The toy project repos a fixture workspace mints.
 
 Small, boring, and framework-agnostic on purpose: the fixture exists to exercise
-winter's workspace binding (clone, worktree, reset, commit, push) and the mock
-forge's git backing — not to run any real application. Two repos is enough to
-prove multi-repo worktreeing; the content only needs to be a committable history.
+winter's workspace binding (clone, worktree, reset, commit, push), not to run
+any real application. Two repos is enough to prove multi-repo worktreeing.
 """
 
 from __future__ import annotations

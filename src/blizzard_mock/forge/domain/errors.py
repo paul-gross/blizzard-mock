@@ -1,9 +1,8 @@
 """Domain errors the forge raises, each carrying the HTTP status GitHub returns.
 
 The API layer owns one exception handler that renders any ``ForgeError`` into a
-GitHub-shaped ``{"message": ...}`` body at ``error.status``. Domain and adapter
-code raise these; nothing catches a raw GitPython or filesystem exception past
-the boundary that wraps it (``forge.internal.errors``).
+GitHub-shaped ``{"message": ...}`` body at ``error.status``. Nothing catches a
+raw GitPython or filesystem exception past the boundary that wraps it.
 """
 
 from __future__ import annotations

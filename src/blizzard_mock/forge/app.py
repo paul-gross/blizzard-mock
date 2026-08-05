@@ -3,8 +3,6 @@
 The single place collaborators are constructed (``bzh:dependency-injection``):
 the GitPython backend, the in-memory state and lever stores, the clock, and the
 ``ForgeService`` are bound here and stashed on ``app.state`` for the routers.
-Tests call ``create_app`` with a ``FixedClock`` and a temp repos dir; the CLI
-calls it from resolved config.
 """
 
 from __future__ import annotations

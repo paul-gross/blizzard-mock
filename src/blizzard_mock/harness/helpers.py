@@ -1,16 +1,8 @@
 """The terse helper library behavior scripts import.
 
-A mock-harness prompt *is* a Python script; these helpers keep the common cases
-one line each — ``apply_diff`` / ``commit`` / ``tool_call`` / ``verdict`` / ``ask``
-/ ``hang`` / ``crash`` — with raw Python underneath for the weird cases. They are bound into
-the script namespace by :func:`blizzard_mock.harness.engine.run_prompt`, so a
-script calls ``commit("msg")`` with no import; called outside an engine run they
-raise (there is no ambient context).
-
-Everything downstream of the harness seam runs for real: :func:`commit` makes a
-real git commit in the acquired worktree, :func:`apply_diff` mutates real files.
-:func:`ask` and :func:`verdict` record on the session and stage the wire result;
-:func:`ask` then exits the turn (ask-and-exit, ``design/ask-answer.md``).
+Bound into the script namespace by :func:`~engine.run_prompt`; a script calls
+``commit("msg")`` with no import, and everything downstream is real —
+:func:`commit` makes a git commit, :func:`apply_diff` mutates real files.
 """
 
 from __future__ import annotations
@@ -35,11 +27,8 @@ from blizzard_mock.harness.session import Ask, SessionState
 def ask(question: str, options: Sequence[str] | None = None) -> None:
     """Fire the ask-and-exit protocol and end the turn (never returns normally).
 
-    Records the ask on the session (so the resumed script can read
-    ``state().last_ask``), optionally shells out to the real ``blizzard runner
-    ask`` when the runner wired one via ``BLIZZARD_RUNNER_ASK_CMD``, stages an
-    ``ask`` wire result, and unwinds the ``exec`` so the process exits — the
-    worker does not block, spin, or poll (``design/ask-answer.md``).
+    Records the ask on the session, stages an ``ask`` wire result, and
+    unwinds the ``exec`` so the process exits rather than blocking or polling.
     """
     ctx = current_context()
     opts = list(options or [])
@@ -72,10 +61,8 @@ def commit(message: str) -> str:
 def tool_call(name: str, tool_input: dict[str, object] | None = None, output: str = "ok") -> None:
     """Record one tool call that does nothing else — no git, no files touched.
 
-    ``apply_diff``/``commit`` are tool calls that also do real work, so a script
-    wanting a *timeline* of tool calls ("three calls, then ``hang()``") would
-    otherwise have to make commits it does not want. Here the transcript pair and
-    the ``PostToolUse`` hook fire, with ``name`` whatever the script says it is.
+    Fires the transcript pair and ``PostToolUse`` hook, ``name`` whatever the
+    script says it is — a call timeline with no side effects.
     """
     ctx = current_context()
     _record_tool_turn(ctx, name, dict(tool_input or {}), output=output)
@@ -84,9 +71,8 @@ def tool_call(name: str, tool_input: dict[str, object] | None = None, output: st
 def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object], *, output: str) -> None:
     """The effects of one tool call: the transcript pair, and the ``PostToolUse`` hooks.
 
-    Two independent seams, deliberately: the transcript pair is minted **when a
-    writer is wired**, and the hooks fire **regardless** — a run with hooks and no
-    transcript still beats.
+    Two independent seams: the transcript pair is minted when a writer is
+    wired; the hooks fire regardless.
     """
     if ctx.transcript is not None:
         tool_use_id = ctx.transcript.record_tool_call(name, tool_input)
@@ -98,10 +84,8 @@ def _record_tool_turn(ctx: RunContext, name: str, tool_input: dict[str, object],
 def verdict(choice: str, assessment: str = "") -> None:
     """Emit the structured completion verdict in the facade's output format.
 
-    Renders as the tagged ``<Choice>{choice}</Choice>`` shape
-    (``design/harness-adapters.md``), with any ``assessment`` payload following.
-    Staged on the context; the facade wraps it in its native envelope when the turn
-    ends.
+    Renders as ``<Choice>{choice}</Choice>``, with any ``assessment`` payload
+    following; staged on the context, wrapped by the facade at turn end.
     """
     ctx = current_context()
     text = f"{CHOICE_OPEN}{choice}{CHOICE_CLOSE}"
@@ -124,9 +108,8 @@ def hang() -> None:
 def crash(*, hard: bool = False) -> None:
     """Terminate abnormally — the worker dies without a verdict.
 
-    Default raises :class:`HarnessCrash`, which the engine renders as an error
-    run (exit 1). ``hard=True`` bypasses all cleanup with ``os._exit`` for the
-    rare test that needs a truly un-graceful death (no output, no state flush).
+    Default raises :class:`HarnessCrash` (exit 1). ``hard=True`` bypasses all
+    cleanup with ``os._exit`` for a truly un-graceful death.
     """
     if hard:
         import os
@@ -147,8 +130,7 @@ def state() -> SessionState:
 def answer() -> str | None:
     """Return the resume message this turn was resumed with (the answer), if any.
 
-    The *answer*, not the script that carries it: on a ``<behavior-script>``-tagged
-    resume this is the message's prose with its blocks elided, so a script never
-    reads its own source back. An untagged resume returns the whole raw message.
+    On a ``<behavior-script>``-tagged resume this is the message's prose with
+    its blocks elided; an untagged resume returns the whole raw message.
     """
     return current_context().session.last_answer

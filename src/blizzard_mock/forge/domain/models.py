@@ -1,10 +1,8 @@
 """Forge domain types — the vendor-neutral shape of the state the forge holds.
 
-These are the entities the business rules operate on. They deliberately do *not*
-carry GitHub wire fields (``url``, ``html_url``, nested ``user`` objects); the
-``forge.api.serialization`` layer renders these into GitHub-shaped JSON. Keeping
-the wire shape out of the domain is what lets the merge/mergeability rules be
-unit-tested without an HTTP app (``bzh:domain-core``).
+These are the entities the business rules operate on. They deliberately carry
+no GitHub wire fields (``url``, ``html_url``, nested ``user`` objects), which
+keeps the merge/mergeability rules unit-testable without an HTTP app.
 """
 
 from __future__ import annotations
@@ -28,9 +26,8 @@ class MergeableState(StrEnum):
     CLEAN = "clean"
     DIRTY = "dirty"
     UNKNOWN = "unknown"
-    #: Base advanced with no conflict — the branch is merely out of date. GitHub
-    #: clears it via ``PUT .../update-branch``; a *conflicting* stale branch is
-    #: ``DIRTY``, never ``BEHIND``.
+    #: Base advanced with no conflict, merely out of date; cleared via
+    #: ``PUT .../update-branch``. A conflicting stale branch is ``DIRTY``, not this.
     BEHIND = "behind"
     #: Content-mergeable but held by branch protection — required checks/reviews
     #: not yet green (the "CI isn't green yet" wait state).
@@ -70,8 +67,7 @@ class Comment(BaseModel):
 class Issue(BaseModel):
     """A work-source item: title, body, and a comment thread (D-047 / D-074).
 
-    Issue and pull-request numbers share one per-repo counter, mirroring
-    GitHub — a pull request is also addressable as an issue.
+    Issue and pull-request numbers share one per-repo counter, mirroring GitHub.
     """
 
     number: int
@@ -95,9 +91,7 @@ class Label(BaseModel):
 class CheckRun(BaseModel):
     """One check run against a commit — a CI job's status/conclusion.
 
-    Vendor-neutral (no ``url``/``html_url``); ``forge.api.serialization`` renders
-    the GitHub-shaped check-run JSON. ``conclusion`` is ``None`` while ``status``
-    is not yet ``"completed"``.
+    Vendor-neutral; ``conclusion`` is ``None`` until ``status`` is ``"completed"``.
     """
 
     id: int
@@ -110,10 +104,7 @@ class CheckRun(BaseModel):
 class PullRequest(BaseModel):
     """A delivery item: a merge proposal of ``head`` into ``base`` (D-057…D-065).
 
-    ``head`` / ``base`` are branch names in the backing bare repo; mergeability
-    and the merge itself are computed/performed against those real refs. The
-    merge-outcome fields (``merged``, ``merge_commit_sha``, …) are forge state
-    set when a merge lands — via the merge route or the external-merge lever.
+    ``head``/``base`` are branch names in the bare repo; merging is real.
     """
 
     number: int

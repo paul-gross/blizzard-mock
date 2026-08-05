@@ -1,12 +1,8 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
-``GET /repos/{o}/{r}/commits/{ref}`` and ``GET /repos/{o}/{r}/git/ref/{ref}``
-(e.g. ``heads/main``) let a delivery flow confirm a landed commit is reachable
-on the base branch. ``PATCH /repos/{o}/{r}/git/refs/{ref}`` is the write
-counterpart — an atomic compare-and-swap ref update that makes PR-free,
-fast-forward delivery testable. ``GET /repos/{o}/{r}/commits/{ref}/check-runs``
-is the check-runs surface a CI-watch delivery flow polls (blizzard#232) —
-derived live from the active lever set, same as ``mergeable_state``.
+Resolves refs to commits and supports an atomic compare-and-swap ref update
+(``PATCH .../git/refs/{ref}``). ``.../check-runs`` (issue #232) derives runs
+live from the active lever set.
 """
 
 from __future__ import annotations

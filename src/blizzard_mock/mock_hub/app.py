@@ -1,9 +1,8 @@
 """Composition root — wire the mock hub and build its FastAPI app (``bzh:dependency-injection``).
 
-The single place collaborators are constructed: the in-memory state, the shared lever
-store, the clock, and the ``MockHubService``, bound here and stashed on ``app.state`` for
-the routers. Tests call ``create_app`` with a ``FixedClock``; the CLI calls it from
-resolved config. A ``ChunkNotFound`` bubbles to a 404 handler.
+The single place collaborators are constructed: the in-memory state, the
+shared lever store, the clock, and the ``MockHubService``, stashed on
+``app.state`` for the routers. A ``ChunkNotFound`` bubbles to a 404 handler.
 """
 
 from __future__ import annotations

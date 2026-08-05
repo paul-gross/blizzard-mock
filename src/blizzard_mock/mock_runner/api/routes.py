@@ -1,10 +1,8 @@
 """The mock runner's control surface — its own HTTP API.
 
-Two families: the runner's thin **served surface** (``/api/health``, ``/api/ready``) that
-mirrors the real runner, and the **drive** plane (``/_drive/*``) a test POSTs to so the
-driver performs a runner-role call against the hub and reports what it observed. The
-``/_levers`` plane arms the runner-side distortions. Controllers hold only the
-``MockRunnerService`` (``bzh:controller-read-only``).
+Two families: the served surface (``/api/health``, ``/api/ready``), and the
+drive plane (``/_drive/*``) a test POSTs to so the driver performs a
+runner-role call against the hub. Controllers hold only ``MockRunnerService``.
 """
 
 from __future__ import annotations

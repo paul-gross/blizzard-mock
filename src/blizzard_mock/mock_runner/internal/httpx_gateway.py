@@ -11,12 +11,8 @@ from typing import Any
 
 import httpx
 
-#: Every mock-runner->real-hub call (issue #87) — the real hub's fleet router mounts
-#: `require_runner_principal` once at router level, so a mock runner driving the real
-#: hub in a service-tier scenario (`mock_runner(...)` against a real ``blizzard hub
-#: host``) speaks the same partitioned surface the real ``HttpHubClient`` does. The mock
-#: hub's own routes (``blizzard_mock.mock_hub.api.routes``) moved the same way, for the
-#: opposite direction (real runner against the mock hub).
+#: Every mock-runner->hub call (issue #87) mounts under the fleet partition,
+#: mirroring the real hub's own router split.
 _API = "/api/fleet"
 
 

@@ -1,9 +1,8 @@
 """The injected clock seam (``bzh:injected-clock``).
 
 The forge stamps ``created_at`` / ``updated_at`` / ``merged_at`` on issues,
-comments, and pull requests. Time flows through this abstraction so tests pin a
-fixed instant and assert deterministic timestamps rather than reading the wall
-clock. Wired once at the composition root (``forge.app.create_app``).
+comments, and pull requests. Time flows through this abstraction so tests pin
+a fixed instant and assert deterministic timestamps.
 """
 
 from __future__ import annotations

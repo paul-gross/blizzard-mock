@@ -1,17 +1,8 @@
 """``blizzard-mock-fixture`` — mint / destroy / reset / locate a fixture workspace.
 
-The composition root: resolves the scratch root, the target env, and the local
-winter source from flags / environment, wires the real git and winter adapters
-into :class:`FixtureWorkspaceService`, and dispatches the verb.
-
-Scratch-path convention (per-env, so two feature envs never share a fixture)::
-
-    <scratch_root>/<env>/{origins/, workspace/, fixture.json}
-
-resolved from, in precedence order:
-  * env    — ``--env`` > ``$WINTER_ENV``
-  * root   — ``--scratch-root`` > ``$BLIZZARD_MOCK_SCRATCH_ROOT`` > ``<tmp>/blizzard-mock/fixtures``
-  * winter — ``--winter-source`` > ``$BLIZZARD_MOCK_WINTER_SOURCE`` > walk up from CWD
+The composition root: resolves scratch root, env, and local winter source from
+flags / environment (``--env``, ``--scratch-root``, ``--winter-source``) and
+wires the adapters into :class:`FixtureWorkspaceService`.
 """
 
 from __future__ import annotations

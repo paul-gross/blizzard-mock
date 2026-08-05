@@ -1,24 +1,8 @@
 """Composes a synthetic workflow graph's ``FactRow`` set (``bzh:domain-core``).
 
-A freshly provisioned hub's ``graphs`` table is empty — the real hub's own default
-graph is minted lazily, on first ingest — so ``create chunk`` needs a graph of its
-own to pin a chunk to and transition into. This module mints the **minimal** one: two
-nodes, ``build`` (``executor: runner``) and ``deliver`` (``executor: hub``), joined by
-one choice/edge each, entry at ``build``, ``deliver``'s own choice reaching the
-reserved terminal ``done``. The hub node is the one required shape constraint: without
-one, no composed chunk could ever derive ``delivering`` (pinned by
-tests/test_mock_data_graph_seed.py::test_compose_graph_mints_a_runner_node_and_a_hub_node).
-
-``graphs.definition_yaml`` is audit-only — the hub re-parses it for a mint-if-changed
-comparison, never to hydrate — so the inlined text only needs to read as valid-enough
-YAML, not round-trip through the real graph-authoring parser.
-
-:class:`GraphContext` is the **read side** — a graph's shape, however it was
-obtained (freshly minted here, or hydrated from an existing store row by
-``cli.py``'s ``--graph`` reuse lookup) — that ``domain/chunk_seed.py``'s pure
-composer resolves a ``--node`` name against. No ``blizzard`` import (the mock-data
-contract's first property): id prefixes are drawn from ``domain/ids.py``'s
-independently kept-in-step registry.
+Mints the minimal graph ``create chunk`` needs: ``build`` (``executor:
+runner``) into ``deliver`` (``executor: hub``) into the reserved terminal.
+:class:`GraphContext` is the read side a ``--node`` name resolves against.
 """
 
 from __future__ import annotations
@@ -35,15 +19,14 @@ from blizzard_mock.mock_data.domain.schema_contract import require_column
 #: The name ``create chunk``/``create graph`` mint under when the caller names none.
 DEFAULT_GRAPH_NAME = "mock-data-synthetic-graph"
 
-#: The two node names every graph this module mints carries — ``chunk_seed.py``'s
-#: per-status defaults resolve against these, so any graph this tool minted (fresh or
-#: reused by name) resolves them the same way.
+#: The two node names every graph this module mints carries, resolved the
+#: same way whether freshly minted or reused by name.
 BUILD_NODE_NAME = "build"
 DELIVER_NODE_NAME = "deliver"
 
 _APPROVED_CHOICE_NAME = "approved"
 _LANDED_CHOICE_NAME = "landed"
-_RESERVED_TERMINAL = "done"  # blizzard.hub.domain.graph.RESERVED_TERMINAL, independently mirrored
+_RESERVED_TERMINAL = "done"  # mirrors the hub's reserved terminal, independently
 
 
 class GraphCompositionError(Exception):
@@ -206,9 +189,9 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
 
 def hydrate_graph_context(graph_row: Mapping[str, object], node_rows: Sequence[Mapping[str, object]]) -> GraphContext:
     """Rebuild a :class:`GraphContext` from an existing ``graphs`` row plus its
-    ``graph_nodes`` rows — the read side of ``--graph <name>`` reuse. A pure function
-    of already-loaded rows (``bzh:domain-takes-objects``): ``cli.py`` does the actual
-    store read (``SeedService.query``), this only shapes what comes back."""
+    ``graph_nodes`` rows — the read side of ``--graph <name>`` reuse. A pure
+    function of already-loaded rows (``bzh:domain-takes-objects``).
+    """
     nodes = {
         str(require_column(row, "name", table="graph_nodes")): NodeRef(
             node_id=str(require_column(row, "node_id", table="graph_nodes")),

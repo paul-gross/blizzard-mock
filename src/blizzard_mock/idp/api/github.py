@@ -1,10 +1,8 @@
 """The GitHub-style shape — ``/login/oauth/authorize``, ``/login/oauth/access_token``,
 ``GET /user``, ``GET /user/emails``.
 
-Served at the **same origin** as the OIDC shape (``api/oidc.py``) — a service-tier
-scenario points a ``[[auth.oauth.provider]] api_base`` override at this one process for
-both, matching how a real ``github`` conformer's ``web_base``/``api_base`` collapse to
-one host here.
+Served at the same origin as the OIDC shape: a scenario points a single
+``api_base`` override at this process for both.
 """
 
 from __future__ import annotations

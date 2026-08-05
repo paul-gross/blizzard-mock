@@ -1,9 +1,8 @@
 """A plain-text wire — the engine's default when no facade wire is supplied.
 
 Not a coding-harness facade; a minimal renderer for direct
-:func:`~blizzard_mock.harness.engine.run_prompt` use and tests. The three real
-facades (:mod:`~blizzard_mock.harness.facades.claude_code` and siblings) supply
-their own vendor-shaped wire.
+:func:`~blizzard_mock.harness.engine.run_prompt` use and tests. Real facades
+supply their own vendor-shaped wire.
 """
 
 from __future__ import annotations

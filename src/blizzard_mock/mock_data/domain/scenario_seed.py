@@ -1,47 +1,8 @@
 """Composes the ``scenario board`` verb's whole ``FactRow`` set (``bzh:domain-core``).
 
-``compose_board_scenario`` mints one synthetic graph, spreads ``--chunks`` chunks
-across the nine derived statuses, attaches a realistic cost spread, a
-ceiling-paused runner, a runner fleet, and a mixed event log — pure composition
-**on top of** the other domain composers (``graph_seed``, ``chunk_seed``,
-``usage_seed``, ``question_seed``, ``event_seed``, ``runner_pause_seed``); this
-module derives no new fact shape of its own, the same discipline
-``domain/chunk_seed.py`` already holds for ``lease_seed.compose_lease_row``.
-
-**Status distribution algorithm** (deterministic, so a fixed ``--seed`` composes
-an exact, assertable census): :data:`_STATUS_ORDER` lists the nine statuses,
-most board-interesting first (``ready``/``running``/``needs_human``/
-``waiting_on_human``/``done`` — the five ``--chunks < 9`` must cover at
-minimum — then ``paused``/``delivering``/``stopped``/``not_ready``). Chunk
-``i`` (0-indexed) always takes ``_STATUS_ORDER[i % len(_STATUS_ORDER)]`` — for
-``--chunks < 9`` this is just ``_STATUS_ORDER[i]``, a prefix of the priority
-list; for ``--chunks >= 9`` every status is covered at least once by the time
-``i`` reaches 8, and any remainder round-robins from the front again. No
-randomness in the assignment itself — only id-minting draws from ``rng``.
-
-**Cost spread**: every other chunk (``i % 2 == 0``) gets one ``usage_facts``
-row, so the census differs chunk to chunk; chunk 0 (always ``ready`` — first in
-:data:`_STATUS_ORDER`, so present whenever ``--chunks >= 1``) is always the
-cost-*partial* one (``cost_usd=None``, via ``usage_seed``'s ``--no-cost`` path),
-guaranteeing the "at least one cost-partial chunk" requirement independent of
-``--chunks``.
-
-**Cap-park vs. ceiling-pause**: this module seeds a **ceiling-paused runner**, not a
-``--cause cap`` escalation. A second escalation on an already-``needs_human`` chunk is
-redundant, and one landed anywhere else would flip that chunk's derived status out from
-under the deterministic census; the ceiling-pause fact is independent of chunk status
-entirely (pinned by tests/test_mock_data_scenario_seed.py::
-test_a_runner_is_ceiling_paused_with_a_reason).
-
-``--stress`` layers four deliberately extreme properties across three
-additional rows on top (see :func:`_compose_stress_extras`): a runner with a
-long identity, a chunk with a long custom node name, and one more
-``waiting_on_human`` chunk carrying two *additional* independent question
-trails (multi-question). The same chunk carries both extremes deliberately: an
-open question outranks nearly every other status, so attaching extra open
-questions to a chunk of any other status would flip its derived status (pinned
-by tests/test_pin_mock.py::
-test_the_stress_multi_question_chunk_is_an_already_waiting_on_human_chunk).
+Mints one graph, spreads ``--chunks`` chunks across the nine derived statuses
+(:data:`_STATUS_ORDER`, deterministic under ``--seed``), a cost spread, a
+ceiling-paused runner, a runner fleet, and a mixed event log.
 """
 
 from __future__ import annotations
@@ -80,8 +41,7 @@ from blizzard_mock.mock_data.domain.runner_pause_seed import compose_runner_paus
 from blizzard_mock.mock_data.domain.usage_seed import RESUME, SPAWN, compose_usage
 
 #: The nine statuses, board-interesting-first — the priority list
-#: :func:`compose_board_scenario`'s deterministic assignment cycles through
-#: (module docstring, "Status distribution algorithm").
+#: :func:`compose_board_scenario`'s deterministic assignment cycles through.
 _STATUS_ORDER: tuple[str, ...] = (
     READY,
     RUNNING,
@@ -103,8 +63,7 @@ _CEILING_PAUSE_REASON = "spend ceiling $50.00 reached over the trailing 24h (spe
 _DEFAULT_EVENT_RUNNER_ID = "mock-data"
 
 #: Deliberately long strings for ``--stress``'s overflow-UI extremes — long
-#: enough to blow past any reasonable column/badge width, short enough to stay
-#: readable in a test failure message.
+#: enough to blow past any reasonable column/badge width.
 _STRESS_LONG_RUNNER_ID = "runner-" + (
     "-".join(["extremely", "long", "runner", "identity", "for", "narrow", "viewport", "checks"]) * 3
 )
@@ -158,9 +117,7 @@ class BoardScenario:
 
 
 def _runner_registration_row(runner_id: str, workspace_id: str, now: datetime) -> FactRow:
-    """The same ``runner_registrations`` row shape ``cli.py``'s ``create runner``
-    builds inline — ``create runner`` keeps that verb's own shape rather than a
-    ``domain/*_seed.py`` composer, so this module follows the same seam."""
+    """The same ``runner_registrations`` row shape ``create runner`` builds inline."""
     return FactRow(
         table="runner_registrations",
         values={"runner_id": runner_id, "workspace_id": workspace_id, "registered_at": now, "last_seen_at": now},
@@ -168,23 +125,18 @@ def _runner_registration_row(runner_id: str, workspace_id: str, now: datetime) -
 
 
 def _status_node_id(status: str, graph: GraphContext) -> str:
-    """The node a status's own composed transition (if any) lands on — the
-    node ``compose_usage``'s attribution attaches its usage fact to. Mirrors
-    ``compose_chunk``'s own per-status node defaults (``domain/chunk_seed.py``)."""
+    """The node a status's own composed transition (if any) lands on — mirrors
+    :func:`compose_chunk`'s per-status node defaults."""
     if status in (DELIVERING, DONE):
         return graph.node(DELIVER_NODE_NAME).node_id
     return graph.node(BUILD_NODE_NAME).node_id
 
 
 def _extend_graph_with_node(graph: GraphContext, name: str, clock: Clock, rng: Random) -> tuple[GraphContext, FactRow]:
-    """Mint one extra ``graph_nodes`` row onto ``graph`` — the same row shape
-    ``graph_seed.compose_graph`` builds for its own ``build``/``deliver`` nodes,
-    parameterized with a caller-chosen ``name`` (``--stress``'s long
-    custom-node-name extreme; ``compose_graph`` itself mints only the two fixed
-    node names, so this is the one place a third, differently-named node comes
-    from). Deliberately mints no ``graph_choices``/``graph_edges`` for it — a
-    structural dead end (nothing transitions *out* of this node), harmless
-    because nothing in this tool's hydration path validates node reachability."""
+    """Mint one extra ``graph_nodes`` row onto ``graph``, under a caller-chosen
+    ``name``. Deliberately mints no ``graph_choices``/``graph_edges`` for it — a
+    structural dead end, harmless because nothing here validates reachability.
+    """
     node_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     row = FactRow(
         table="graph_nodes",
@@ -211,11 +163,9 @@ class _StressExtras:
 
 
 def _compose_stress_extras(*, graph: GraphContext, clock: Clock, rng: Random) -> _StressExtras:
-    """The four ``--stress`` extremes (module docstring): a long-identity
-    runner, a chunk landed on a deliberately long custom node name, and one
-    ``waiting_on_human`` chunk carrying two extra independent question trails
-    (proving ``question_seed.py``'s "two calls, two independent trails" property
-    holds here too)."""
+    """The four ``--stress`` extremes: a long-identity runner, a chunk landed on
+    a long custom node name, and one ``waiting_on_human`` chunk carrying two
+    extra independent question trails."""
     rows: list[FactRow] = []
     now = clock.now()
     long_runner_id = _STRESS_LONG_RUNNER_ID
@@ -261,12 +211,9 @@ def compose_board_scenario(
     graph_name: str | None = None,
 ) -> BoardScenario:
     """Compose one whole scenario board: a graph, ``chunks`` chunks spread
-    across the nine statuses (see the module docstring's distribution
-    algorithm), a cost spread with at least one cost-partial usage fact, one
-    ceiling-paused runner, a runner per chunk, a mixed event log, and —
-    with ``stress=True`` — the four narrow-viewport/overflow extremes.
-
-    Raises :class:`ScenarioCompositionError` for ``chunks < 1``.
+    across the nine statuses, a cost spread, one ceiling-paused runner, a
+    runner per chunk, a mixed event log, and — with ``stress=True`` — four
+    extra extremes. Raises :class:`ScenarioCompositionError` for ``chunks < 1``.
     """
     if chunks < 1:
         raise ScenarioCompositionError(f"--chunks must be at least 1, got {chunks}")

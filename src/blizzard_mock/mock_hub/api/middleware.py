@@ -1,15 +1,8 @@
 """Transport-edge lever middleware — ``unreachable`` and ``delay`` — plus request capture.
 
-The two levers bend a request before it reaches a route, uniformly across the hub
-surface: ``unreachable`` answers 503 (with ``remaining=N`` it heals after N calls — the
-"unreachable *mid-lease*" window), and ``delay`` sleeps ``payload.ms`` first. The control
-plane (``/_levers``, ``/_seed``, ``/_captured``) and liveness (``/api/health``,
-``/api/ready``) are exempt so a test can always arm/clear a lever, read a capture, and
-gate on startup even while the API is "down".
-
-``RequestCaptureMiddleware`` is the header-inspection lever (issue #86b): it records
-every ``/api/*`` request's method, path, and headers, independent of what the lever
-middleware does with it.
+Two levers bend a request before it reaches a route: ``unreachable`` answers
+503; ``delay`` sleeps ``payload.ms`` first. Control-plane and liveness routes
+are exempt. ``RequestCaptureMiddleware`` records every ``/api/*`` request.
 """
 
 from __future__ import annotations
@@ -71,12 +64,9 @@ _CAPTURE_EXEMPT_PREFIXES = ("/api/health", "/api/ready")
 
 
 class RequestCaptureMiddleware(BaseHTTPMiddleware):
-    """Records every hub-mirror ``/api/*`` request's method, path, and headers (issue #86b).
+    """Records every hub-mirror ``/api/*`` request's method, path, headers (issue #86b).
 
-    Scoped to the fleet-facing surface — the control plane's own reads/writes
-    (``/_levers``, ``/_seed``, ``/_captured``) and liveness (``/api/health``,
-    ``/api/ready``) are not interesting to capture and would otherwise record a test's
-    own setup/inspection polling rather than the runner-under-test's calls.
+    Excludes the control plane and liveness routes.
     """
 
     def __init__(self, app: object, captured: ICaptureStore) -> None:

@@ -1,11 +1,8 @@
-"""Composes one ``usage_facts`` row — one harness invocation's usage/cost telemetry
-(``blizzard/hub/store/schema.py``'s ``usage_facts``, issue #59, ``bzh:facts-not-status``).
+"""Composes one ``usage_facts`` row — one harness invocation's usage/cost
+telemetry (issue #59).
 
-``cost_usd`` is genuinely nullable, and the hub's cost derivation reads NULL as a
-lower-bound ``cost_partial`` signal, so ``compose_usage`` never substitutes ``0.0`` for
-an absent cost — the caller's ``cost_usd=None`` lands a genuine SQL NULL (pinned by
-tests/test_mock_data_usage_seed.py::
-test_compose_usage_no_cost_lands_a_genuine_none_never_zero).
+``cost_usd`` is genuinely nullable; ``compose_usage`` never substitutes ``0.0``
+(pinned by tests/test_mock_data_usage_seed.py).
 """
 
 from __future__ import annotations
@@ -19,8 +16,8 @@ RESUME = "resume"
 JUDGE = "judge"
 NUDGE = "nudge"
 
-#: Every usage kind ``usage_facts.kind`` accepts (``blizzard.runner.harness.adapter``'s
-#: own usage-kind vocabulary, independently mirrored — no ``blizzard`` import).
+#: Every usage kind ``usage_facts.kind`` accepts, mirrored independently (no
+#: ``blizzard`` import).
 KINDS = (SPAWN, RESUME, JUDGE, NUDGE)
 
 

@@ -1,19 +1,8 @@
-"""Composes one ``escalations`` row (``blizzard/hub/store/schema.py``, ``bzh:facts-not-status``).
+"""Composes one ``escalations`` row (``bzh:facts-not-status``).
 
-``--cause cap`` folds a spend-cap reason phrasing (placeholder amounts) onto the front
-of the generic resume-command placeholder, so a chunk seeded this way is recognizable
-as a cap-park. That prefix is a deliberate mock-only synthesis, not a literal
-reproduction of a stored value — the real cap-specific wording is log-line prose and is
-never written to any column. ``--cause retries`` (the default) carries no such prefix
-(pinned by tests/test_mock_data_escalation_seed.py::
-test_cause_cap_composes_the_recognizable_spend_cap_wording and
-::test_cause_retries_is_the_same_as_the_default).
-
-``wrapped_takeover_command`` defaults to a synthesized placeholder for either cause
-unless ``--wrapped-takeover-command`` overrides it, and follows the raw value — an
-emptied ``takeover_command`` suppresses it, and a wrapped command alongside an empty raw
-one is rejected, because wrapped implies raw, never the reverse (``humans.md``
-§Escalation).
+``--cause cap`` folds a spend-cap reason phrasing onto the generic
+resume-command placeholder; ``--cause retries`` (default) carries no prefix.
+Wrapped implies raw, never the reverse.
 """
 
 from __future__ import annotations
@@ -28,12 +17,12 @@ CAUSE_CAP = "cap"
 #: The two causes ``compose_escalation`` accepts.
 CAUSES = (CAUSE_RETRIES, CAUSE_CAP)
 
-#: The generic placeholder resume command every plain retries-exhausted escalation
-#: carries — the same shape ``domain/chunk_seed.py``'s ``needs_human`` status composes.
+#: The generic placeholder resume command every plain retries-exhausted
+#: escalation carries.
 _RETRIES_TAKEOVER_TEMPLATE = "cd <workdir> && <resume {chunk_id}>"
 
-#: ``--cause cap``'s default — mirrors ``_park_on_cost_cap``'s log-only reason wording
-#: (see module docstring) prefixed onto the generic resume-command placeholder.
+#: ``--cause cap``'s default: the recognizable spend-cap wording prefixed onto
+#: the generic resume-command placeholder.
 _CAP_TAKEOVER_TEMPLATE = "spend cap <cap> reached (spend <spend>) — cd <workdir> && <resume {chunk_id}>"
 
 #: The wrapped entry point's placeholder (issue #251), mirroring the real runner's own
@@ -57,19 +46,9 @@ def compose_escalation(
 ) -> FactRow:
     """One ``escalations`` row.
 
-    ``takeover_command`` explicitly supplied overrides either ``cause`` default
-    verbatim. Otherwise ``cause`` selects the default: ``cap`` composes the
-    recognizable spend-cap wording (see module docstring), ``retries`` (the default)
-    the plain generic resume-command placeholder. ``wrapped_takeover_command``
-    explicitly supplied overrides its own default the same way; left unset, its
-    default is the synthesized placeholder ``blizzard runner takeover`` command
-    regardless of ``cause`` (see module docstring) — but only when the resolved
-    ``takeover_command`` is non-empty, because wrapped implies raw, never the
-    reverse (``blizzard-context:/domain/humans.md`` §Escalation). Raises
-    :class:`EscalationCompositionError` for an unknown ``cause``, or for an
-    explicit wrapped command alongside an empty raw one — that row shape is
-    impossible in the real store, so it fails loud rather than seeding it.
-    """
+    ``takeover_command``/``wrapped_takeover_command`` explicit override the
+    ``cause`` defaults; raises :class:`EscalationCompositionError` for an
+    unknown ``cause`` or a bad wrapped/raw pairing."""
     if cause not in CAUSES:
         raise EscalationCompositionError(f"unknown cause {cause!r} — one of {CAUSES}")
     if takeover_command is None:

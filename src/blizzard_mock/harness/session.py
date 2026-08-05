@@ -1,10 +1,8 @@
 """Persisted mock-harness session state (framework-free core).
 
-A real coding harness persists a session so a headless ``--resume`` can pick a
-conversation back up; the mock does the same so a resumed behavior-script can
-read *what it asked* and act on the answer it was resumed with. State is a small
-JSON document keyed by session id — no ORM, no server, importable at the unit
-tier.
+A resumed behavior-script reads what it asked and the answer it was resumed
+with. State is a small JSON document keyed by session id — no ORM, no server,
+importable at the unit tier.
 """
 
 from __future__ import annotations
@@ -28,8 +26,7 @@ class Ask:
 class Invocation:
     """One turn's observed model/effort flags (issue #144).
 
-    ``None`` means the flag was **absent from argv** — a recorded observation, not
-    an absence of information.
+    ``None`` means the flag was absent from argv, not unknown.
     """
 
     kind: str  # spawn | resume
@@ -41,16 +38,7 @@ class Invocation:
 class SessionState:
     """The durable state of one mock-harness session, keyed by ``session_id``.
 
-    ``turns`` counts spawn + each resume; ``asks`` is every ask fired across the
-    session's life; ``resumes`` is the sequence of resume messages delivered —
-    what the *human* said, so a ``<behavior-script>``-tagged resume records its
-    prose alone and an untagged one (code end to end) the whole raw message;
-    ``verdicts`` is every verdict emitted. A resumed script reads
-    ``asks``/``resumes`` to reconstruct context.
-
-    ``invocations`` records the **model and effort flags each turn received**
-    (issue #144), one entry per turn in order. The facade sees only what it was
-    handed, so this is a record of the *flag*, never of the effective model.
+    ``invocations`` records the observed model/effort flag per turn (issue #144).
     """
 
     session_id: str
@@ -83,8 +71,7 @@ class SessionState:
 class SessionStore:
     """File-backed session persistence: one ``<session_id>.json`` per session.
 
-    Kept dependency-free (plain files) so spawn and a later resume — two
-    separate processes — share state through the filesystem.
+    Dependency-free plain files, so spawn and resume share state via disk.
     """
 
     def __init__(self, root: Path) -> None:

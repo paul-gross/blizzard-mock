@@ -1,20 +1,8 @@
 """Levers — the forge's first-class edge-state controls.
 
-A lever is an explicit control a test or agent pulls to steer the forge into a
-named state instead of contriving it (``implementation/mocking.md``). Two shapes:
-
-* **State levers** persist until cleared and bend later requests — ``merge_conflict``,
-  ``merge_rejected`` (per pull request); ``rate_limited``, ``token_rejected``,
-  ``unreachable`` (request-scoped, per-repo or global). The API middleware and
-  the merge rules consult the active set.
-* **Action levers** fire once and mutate state immediately — ``externally_merged``
-  performs a real merge into ``base`` outside the PR flow (the direct push to
-  ``main`` a delivery flow must detect, D-065); ``comment_midflight`` appends a
-  comment to a live thread (D-074).
-
-Scope is ``(repo full name, number)`` where meaningful; a lever with neither is
-global. This module holds only the vocabulary and the store seam — the git and
-state effects live in ``ForgeService`` and the middleware.
+A lever is an explicit control a test or agent pulls to steer the forge into
+a named state. **State levers** persist until cleared; **action levers** fire
+once and mutate state immediately.
 """
 
 from __future__ import annotations
@@ -35,16 +23,14 @@ class LeverKind(StrEnum):
     RATE_LIMITED = "rate_limited"
     TOKEN_REJECTED = "token_rejected"
     UNREACHABLE = "unreachable"
-    #: Forces a PR to read ``mergeable_state: behind`` — base moved, no conflict.
-    #: ``PUT .../update-branch`` clears it (and advances the head), so the PR then
-    #: reads ``clean``: the self-heal path.
+    #: Forces ``mergeable_state: behind`` — base moved, no conflict; cleared by
+    #: ``update-branch``, which also advances the head (self-heal path).
     STALE_BRANCH = "stale_branch"
     #: Forces ``mergeable_state: blocked`` — required checks/reviews not green yet;
     #: cleared explicitly to stand in for "CI went green".
     CHECKS_PENDING = "checks_pending"
-    #: Per PR: the PR head carries one completed/failure check run. Forces
-    #: ``mergeable_state: blocked`` too — an armed PR must be a coherent world,
-    #: never a green PR with a red check.
+    #: Per PR: the head carries one completed/failure check run; also forces
+    #: ``mergeable_state: blocked`` — an armed PR is never green with a red check.
     CHECKS_FAILED = "checks_failed"
     #: Per repo: the base branch's own latest check run is completed/failure —
     #: "the base gate was already red", independent of any PR.

@@ -1,13 +1,8 @@
 """The SQLAlchemy reflection adapter — the ``ISeedStore`` implementation.
 
 Reflects the target store's live schema once per invocation (never imports
-``blizzard``, so it works against whatever the daemon's Alembic tree migrated),
-and writes every row a command composes in a single FK-safe transaction —
-parents before children (``meta.sorted_tables``), the inverse of ``reset``'s
-children-before-parents delete order. The drift guard
-(``domain/schema_contract.py``) runs first, over a schema-agnostic snapshot
-this module builds from the reflected ``MetaData`` — the only SQLAlchemy-aware
-piece of the drift check; the rules themselves live in the domain.
+``blizzard``), and writes every row in a single FK-safe transaction — parents
+before children. The drift guard runs first; its rules live in the domain.
 """
 
 from __future__ import annotations
@@ -28,17 +23,12 @@ from blizzard_mock.mock_data.domain.schema_contract import (
 )
 from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary, SeedIntegrityError
 
-# A live hub/runner daemon may hold the same sqlite file open — set a busy timeout so a
-# lock contends and *waits* rather than this tool immediately raising "database is
-# locked". A no-op for postgres (pinned by tests/test_pin_mock.py::
-# test_the_sqlite_seed_engine_sets_a_busy_timeout_and_postgres_does_not).
+# A live daemon may hold the same sqlite file open — set a busy timeout so a
+# lock waits rather than immediately raising (pinned by tests/test_pin_mock.py).
 _SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
 
-#: Alembic's own bookkeeping table, reflected alongside every domain table since
-#: reflection has no notion of "ours vs. the daemon's." ``reset`` must never touch it:
-#: deleting its one row un-stamps the store's migration state and breaks the next daemon
-#: init/migrate (pinned by tests/test_mock_data_reflected_store.py::
-#: test_reset_leaves_the_migration_tracking_table_alone).
+#: Alembic's own bookkeeping table. ``reset`` must never touch it — deleting
+#: it breaks the next daemon migrate (pinned by tests/test_mock_data_reflected_store.py).
 _MIGRATION_TRACKING_TABLE = "alembic_version"
 
 

@@ -1,17 +1,8 @@
 """Composes one question's ``FactRow`` set — the ``questions``/``question_answers``/
-``answer_deliveries`` trail (``blizzard/hub/store/schema.py``, the ask/answer
-rendezvous, ``bzh:facts-not-status``).
+``answer_deliveries`` trail (``bzh:facts-not-status``).
 
-A question is open exactly while no ``question_answers`` row exists for it (the
-primary key IS the question id — first-write-wins CAS); an answer is *delivered* once
-``answer_deliveries`` carries a row (board-detail only, does not affect derived
-status). The real schema has no dedicated "resumed" row beyond that delivery, so
-``--resumed`` (``cli.py``) is a pure marker requiring ``--delivered``, not a fact this
-module composes.
-
-Each call mints its own ``qn_<ulid>`` question id, so two calls against the same chunk
-land two independent, non-colliding trails — the multi-question-per-chunk shape a UI
-trail test needs.
+A question is open while no ``question_answers`` row exists for it; it is
+delivered once ``answer_deliveries`` carries a row.
 """
 
 from __future__ import annotations
@@ -56,11 +47,8 @@ def compose_question(
 ) -> QuestionSeed:
     """Compose one question, optionally already answered and/or delivered.
 
-    ``answer``/``answered_by`` must both be given or both omitted — an answer with no
-    author (or vice versa) is not a fact the real schema can hold.
-    ``delivered=True`` requires an answer already given — a delivery is the resume
-    executed *around* an answer, so one cannot exist without the other. Raises
-    :class:`QuestionCompositionError` for either violation.
+    ``answer``/``answered_by`` must both be given or both omitted;
+    ``delivered=True`` requires an answer already given.
     """
     if (answer is None) != (answered_by is None):
         raise QuestionCompositionError("--answer and --answered-by must be supplied together, or neither")

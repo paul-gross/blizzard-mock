@@ -1,13 +1,8 @@
-"""The stub IdP's levered control surface — namespaced ``/_levers``, outside the
-OIDC/GitHub-shaped surface (mirrors ``blizzard_mock.forge.api.levers``).
+"""The stub IdP's levered control surface — namespaced ``/_levers``, outside
+the OIDC/GitHub-shaped surface.
 
-- ``PUT /_levers/profile`` — the identity the *next* completed authorize dance
-  resolves to (unverified-email, handle-rename: just set a new profile with the same
-  ``subject`` and a different ``handle``/``email_verified``).
-- ``PUT /_levers/refuse_callback`` — armed, ``authorize`` redirects back with
-  ``error=access_denied`` instead of a code (the refused-callback lever).
-- ``POST /_levers/reset`` — back to the default profile, lever cleared, codes/tokens
-  forgotten.
+``PUT /profile`` sets the next authorize dance's identity; ``PUT
+/refuse_callback`` arms the refused-callback lever; ``POST /reset`` restores defaults.
 """
 
 from __future__ import annotations

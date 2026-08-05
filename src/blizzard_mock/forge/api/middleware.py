@@ -1,10 +1,8 @@
 """Request-scoped lever middleware — the network/auth/rate edge states.
 
 Three state levers bend a request before it reaches a route: ``unreachable``
-(503), ``token_rejected`` (401), and ``rate_limited`` (403 with GitHub's
-rate-limit headers). They are consulted here so every GitHub route inherits them
-uniformly. The ``/_levers`` control surface and health check are exempt, so a
-test can always clear a lever it armed.
+(503), ``token_rejected`` (401), ``rate_limited`` (403). ``/_levers`` and the
+health check are exempt, so a test can always clear a lever it armed.
 """
 
 from __future__ import annotations

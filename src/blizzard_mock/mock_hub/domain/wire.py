@@ -1,10 +1,8 @@
 """Wire-mirror response bodies — byte-compatible with the hub OpenAPI a runner reads.
 
-Every model here reproduces a ``blizzard.wire`` response shape field-for-field so a real
-``HttpHubClient`` deserializes the mock's replies unchanged, **without ``blizzard`` being
-a dependency of ``blizzard-mock``** (the forge mirrors GitHub the same way). Request
-bodies the mock *accepts* are permissive dicts parsed in the service; only the responses
-need shape fidelity.
+Every model here reproduces a ``blizzard.wire`` response shape field-for-field,
+without ``blizzard`` being a dependency. Request bodies the mock accepts are
+permissive dicts; only responses need shape fidelity.
 """
 
 from __future__ import annotations
@@ -99,9 +97,8 @@ class RouteView(BaseModel):
 class EscalationView(BaseModel):
     epoch: int
     takeover_command: str
-    # The ``blizzard runner takeover`` wrapped entry point; empty whenever the runner
-    # didn't compose one — see ``blizzard-context:/domain/humans.md`` §Escalation for
-    # the full account of when each command is present.
+    # The ``blizzard runner takeover`` wrapped entry point; empty whenever the
+    # runner didn't compose one.
     wrapped_takeover_command: str = ""
 
 
@@ -140,9 +137,8 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
-    # The chunk's default model preference and effort (issue #144) — mirrored here so
-    # a real runner's wire model deserializes the mock's replies unchanged
-    # (`bzh:wire-change-extends-mock`).
+    # The chunk's default model preference and effort (issue #144), mirrored
+    # so a real runner's wire model deserializes the mock's replies unchanged.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     route: RouteView | None = None
@@ -167,9 +163,8 @@ class RunnerView(BaseModel):
     registered_at: str
     last_seen_at: str
     online: bool
-    # Two brakes, mirroring the real hub's contract (blizzard#43): the fleet's, and the
-    # runner's own, which it reports up. The mock only models the first — it stands in
-    # for the hub, and the hub never sets the second.
+    # Two brakes (issue #43): the fleet's, and the runner's own reported-up
+    # one. The mock only models the first.
     hub_paused: bool
     locally_paused: bool = False
     locally_paused_by: str | None = None
@@ -185,11 +180,8 @@ class RunnerFactAck(BaseModel):
 
 
 class WorkItemEntry(BaseModel):
-    """One pointer's pass-through work item — mirrors ``blizzard.wire.chunk.WorkItemEntry``.
-
-    The mock carries no forge integration, so ``title``/``body`` are canned rather than
-    vendor-fetched — the point of this route existing in the mock is the wire shape and
-    the auth-header capture (issue #86b/#87), not work-item-content fidelity."""
+    """One pointer's pass-through work item; ``title``/``body`` are canned,
+    the mock carries no forge integration."""
 
     source: str
     ref: str

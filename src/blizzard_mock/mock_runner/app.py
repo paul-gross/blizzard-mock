@@ -1,10 +1,8 @@
 """Composition root — wire the mock runner and build its FastAPI app (``bzh:dependency-injection``).
 
-The single place collaborators are constructed: the httpx client to the hub, the httpx
-gateway over it, the shared lever store, the clock, and the ``MockRunnerService``. The
-client is created here and closed on shutdown so no other code touches httpx. Tests call
-``create_app`` with an injected gateway (an in-process mock hub over ``ASGITransport``);
-the CLI builds a real ``httpx.Client`` from ``hub_url``.
+The single place collaborators are constructed: the httpx client and gateway,
+the shared lever store, the clock, and the ``MockRunnerService``. The client
+is created here and closed on shutdown so no other code touches httpx.
 """
 
 from __future__ import annotations

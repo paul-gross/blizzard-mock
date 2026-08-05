@@ -1,26 +1,16 @@
-"""Deterministic mock usage/cost synthesis (blizzard epic #57, phase 1 of #58).
+"""Deterministic mock usage/cost synthesis (epic #57, phase 1 of #58).
 
-The mock stands in for a real coding harness, so it must emit the same two usage
-carriers a real Claude Code run does — a result envelope's ``usage`` + ``total_cost_usd``,
-and per-message ``usage`` on every assistant transcript record — with no tokens spent.
-
-The figures are illustrative, not a pricing table: they exist only so the envelope
-carries *a* dollar figure, and are tied to no real Claude pricing. Deterministic (a
-pure function of the rendered text's length, no randomness), so a test asserting
-against them is reproducible.
-
-Not a coding-harness facade itself; shared plumbing for :mod:`.claude_code`'s wire
-and :mod:`._transcript`'s writer — the two places that mint Claude-Code-shaped
-usage-bearing records.
+Emits illustrative ``usage``/``total_cost_usd`` figures, tied to no real
+Claude pricing, as a pure deterministic function of the rendered text's
+length — so a test asserting against them is reproducible.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-#: The model every mock-claude-code usage-bearing record carries — mirrors the
-#: runner adapter's pinned default (``blizzard.runner.harness.internal.
-#: claude_code_adapter.DEFAULT_WORKER_MODEL``).
+#: The model every mock-claude-code usage-bearing record carries, mirroring
+#: the real runner adapter's pinned default.
 MOCK_MODEL = "claude-opus-4-8"
 
 #: Illustrative per-token rates used only to derive the mock's ``total_cost_usd`` —
@@ -30,9 +20,8 @@ _OUTPUT_RATE_USD = 1.5e-5
 _CACHE_READ_RATE_USD = 3.0e-7
 _CACHE_CREATE_RATE_USD = 3.75e-6
 
-#: A fixed cache footprint every synthesized usage object carries, so the mock's
-#: token split exercises all four classes the real envelope's ``usage`` object
-#: does, not just the two that scale with the rendered text.
+#: A fixed cache footprint every synthesized usage object carries, so all four
+#: usage classes are exercised, not just the two that scale with text length.
 _CACHE_READ_TOKENS = 500
 _CACHE_CREATE_TOKENS = 20
 
@@ -54,9 +43,8 @@ def synthesize_usage_tokens(text: str, *, base_input: int = 200, base_output: in
 def synthesize_cost_usd(usage: Mapping[str, int]) -> float:
     """A deterministic, illustrative dollar figure off ``usage``'s token counts.
 
-    Rounded to the same six-decimal precision real ``total_cost_usd`` figures use.
-    Only the result-envelope wire carries a cost figure at all, so callers minting a
-    transcript record use :func:`synthesize_usage_tokens` alone.
+    Rounded to the same six-decimal precision real ``total_cost_usd`` figures
+    use.
     """
     cost = (
         usage["input_tokens"] * _INPUT_RATE_USD

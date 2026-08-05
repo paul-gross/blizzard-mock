@@ -1,11 +1,8 @@
 """The forge-state seam — issue and pull-request metadata.
 
-Git is the on-disk truth for refs and commits; the *metadata* around them —
-issue bodies, comment threads, PR merge dispositions — is forge state held
-behind this seam (the in-memory adapter lives in ``forge.internal.state_store``).
-Split read/write per ``bzh:repository-split``: the read routes hold the read-only
-Protocol, the domain service holds the write one. Issue and pull numbers are
-drawn from **one shared per-repo counter**, mirroring GitHub.
+Git is the on-disk truth for refs and commits; the *metadata* — issue bodies,
+comments, PR merge dispositions — is forge state held behind this seam. Issue
+and pull numbers share one per-repo counter, mirroring GitHub.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ from blizzard_mock.forge.domain.models import Comment, Issue, Label, PullRequest
 
 
 class IReadForgeState(Protocol):
-    """Read-only queries over issue/PR metadata. Read routes depend on this."""
+    """Read-only queries over issue/PR metadata."""
 
     def get_issue(self, repo: str, number: int) -> Issue | None: ...
     def list_issues(self, repo: str, state: str | None, labels: list[str] | None = None) -> list[Issue]: ...
@@ -27,7 +24,7 @@ class IReadForgeState(Protocol):
 
 
 class IWriteForgeState(IReadForgeState, Protocol):
-    """Read-write variant. Only the domain (``ForgeService``) depends on this."""
+    """Read-write variant, for callers that mutate state."""
 
     def next_number(self, repo: str) -> int:
         """Draw the next issue/PR number from the shared per-repo counter."""

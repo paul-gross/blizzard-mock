@@ -1,11 +1,8 @@
 """The fixture-workspace minting service — the domain core.
 
-Owns the *what* and *order* of minting a fixture; the *how* of touching git,
-running winter, and reading the wall clock is inverted behind Protocol seams
-(``bzh:dependency-inversion``) implemented under ``internal/`` and injected at the
-composition root (the CLI). The service imports no ``subprocess``, ``httpx``, or
-``click`` — only its own domain modules and the standard library — so it is unit
-testable with a real git adapter and a fake winter runner.
+Owns the *what* and *order* of minting a fixture; the *how* of touching git and
+running winter is inverted behind Protocol seams (``bzh:dependency-inversion``),
+implemented under ``internal/``.
 """
 
 from __future__ import annotations
@@ -105,8 +102,7 @@ class FixtureWorkspaceService:
             self._git.seed_repo(bare, repo.files, repo.message)
 
         # The winter framework comes from a LOCAL source's committed master — no
-        # network. Cloning the whole workspace yields tools/winter-cli plus a real
-        # workspace skeleton; we then replace its config with our own.
+        # network; we replace the cloned config with our own.
         self._git.clone_local(self._winter_source, layout.workspace)
         self._write_config(layout)
 

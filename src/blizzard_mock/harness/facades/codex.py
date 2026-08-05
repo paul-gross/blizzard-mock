@@ -1,9 +1,8 @@
 """Mock Codex facade (``mock-codex``).
 
-Shares the exec engine with every other facade and differs only in Codex's wire
-shape (``design/harness-adapters.md``): ``codex exec --json`` emits a **JSONL
-event stream**, sessions are self-assigned (the id rides ``thread.started``), and
-automated follow-ups are ``codex exec resume <id>`` / ``--last``.
+Shares the exec engine with every other facade and differs only in Codex's
+wire shape: ``codex exec --json`` emits a JSONL event stream, sessions are
+self-assigned, and automated follow-ups are ``codex exec resume <id>``.
 """
 
 from __future__ import annotations

@@ -1,18 +1,8 @@
 """Prefixed-ULID id minting for seeded rows.
 
-Every hub-entity id blizzard mints is a prefixed ULID (``blizzard.foundation.ids``):
-a short type tag, an underscore, then a Crockford-base32 ULID whose leading 48
-bits are the mint instant, so a plain string sort is a chronological sort. This
-module re-implements the same encoding independently — no ``blizzard`` import,
-per the mock-data contract's first property — so an id this tool mints looks
-native next to a real one.
-
-The one deliberate difference: the ULID's random tail is drawn from an
-**injected, seedable** ``random.Random`` rather than ``os.urandom`` — a later
-phase's ``--seed`` CLI flag then mints byte-identical ids on every run, so a
-whole seeded scenario is reproducible. The mint instant still comes from the
-injected :class:`~blizzard_mock.clock.Clock` (``bzh:injected-clock``), never
-the wall clock directly.
+Every hub-entity id blizzard mints is a prefixed ULID (type tag, underscore,
+Crockford-base32 ULID) — re-implemented independently, no ``blizzard``
+import. The random tail is seedable, so ``--seed`` reproduces byte-identical ids.
 """
 
 from __future__ import annotations
@@ -26,9 +16,8 @@ _TIME_CHARS = 10  # 48 bits of millisecond timestamp
 _RAND_CHARS = 16  # 80 bits of randomness
 _ULID_CHARS = _TIME_CHARS + _RAND_CHARS
 
-# The id-prefix registry — kept in step by hand with ``blizzard.foundation.ids``
-# (no import: this tool never imports ``blizzard``), so a composer mints an id
-# that looks native alongside a real one.
+# The id-prefix registry — kept in step by hand with the real one (no import),
+# so a composer mints an id that looks native alongside a real one.
 CHUNK_PREFIX = "ch"
 GRAPH_PREFIX = "gr"
 NODE_PREFIX = "nd"

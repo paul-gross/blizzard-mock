@@ -1,9 +1,8 @@
 """Shared FastAPI dependencies and request bodies for the mock-hub routers.
 
-The composition root stashes the wired ``MockHubService`` and the lever store on
-``app.state``; routers reach them through these dependencies rather than constructing
-collaborators (``bzh:dependency-injection``). Request bodies are permissive mirrors of
-the ``blizzard.wire`` shapes the runner posts — only the fields the mock reads are named.
+The composition root stashes the wired ``MockHubService`` and lever store on
+``app.state``; routers reach them through these dependencies
+(``bzh:dependency-injection``). Request bodies name only the fields the mock reads.
 """
 
 from __future__ import annotations
@@ -51,9 +50,8 @@ class DecisionBody(BaseModel):
 class RunnerRegistrationBody(BaseModel):
     runner_id: str
     workspace_id: str = "workspace-mock"
-    # The runner's optional federation identity (issue #95) — named here (unlike most
-    # of this module's "only the fields the mock reads" convention) because the mock
-    # hub round-trips them into `MockHubService.register`, mirroring the real hub.
+    # The runner's optional federation identity (issue #95) — round-tripped
+    # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list)
 

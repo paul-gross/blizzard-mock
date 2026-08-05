@@ -1,13 +1,8 @@
 """The git backend seam — the single git truth behind the forge.
 
-The forge's backing model is a directory of **bare git repos** (the same
-``file://`` origins the fixture workspace pushes to). Mergeability is computed
-against real refs, and a merge performs a real merge into the bare repo's base
-branch. The domain declares this seam as read/write Protocols
-(``bzh:repository-split`` / ``bzh:dependency-inversion``); the GitPython adapter
-in ``forge.internal.git_backend`` implements it. Domain code depends on the
-narrowest Protocol its job needs — the merge rules hold the write variant, the
-read routes the read-only one (``bzh:controller-read-only``).
+Backed by a directory of bare git repos: mergeability is computed against
+real refs, and merging performs a real merge into the base branch. Declared
+as read/write Protocols (``bzh:repository-split`` / ``bzh:dependency-inversion``).
 """
 
 from __future__ import annotations
@@ -38,9 +33,7 @@ class GitCommit:
 
 
 class IReadGitBackend(Protocol):
-    """Read-only operations over the directory of bare repos.
-
-    Controllers (the read routes) and the mergeability check depend on this."""
+    """Read-only operations over the directory of bare repos."""
 
     def get_repo(self, owner: str, name: str) -> Repo:
         """Resolve ``owner/name`` to a backing bare repo, reading its default
@@ -68,7 +61,7 @@ class IReadGitBackend(Protocol):
 
 
 class IWriteGitBackend(IReadGitBackend, Protocol):
-    """Read-write variant. Only the domain (``ForgeService``) depends on this."""
+    """Read-write variant, for callers that mutate state."""
 
     def merge(self, repo: Repo, base: str, head: str, message: str) -> str:
         """Really merge ``head`` into ``base`` in the bare repo and return the

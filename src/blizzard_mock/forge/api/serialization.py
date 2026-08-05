@@ -1,9 +1,8 @@
 """Render forge domain objects into vendor-native GitHub REST v3 JSON.
 
 The wire shape lives here, not in the domain (``bzh:domain-core``): URLs,
-nested ``user``/``owner`` login objects, and ``mergeable_state`` all get built
-against the configured ``base_url`` so a GitHub-shaped client consumes the mock
-unmodified.
+nested ``user``/``owner`` objects, and ``mergeable_state`` are built against
+``base_url`` so a GitHub-shaped client consumes the mock unmodified.
 """
 
 from __future__ import annotations
