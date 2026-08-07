@@ -159,9 +159,9 @@ class MockHubService:
 
     def rekey_route_token(self, chunk_id: str) -> RouteTokenRekeyResponse:
         """Rotate the chunk's live route capability token (issue paul-gross/blizzard#84b) —
-        the lost-plaintext recovery mirror of the real hub's
-        ``POST /api/fleet/chunks/{id}/route-token``. Deterministic, like the claim's own
-        token, but a counter folded in so a re-key never echoes the claim's token back."""
+        mirrors the real hub's ``POST /api/fleet/chunks/{id}/route-token``. Why it exists:
+        `blizzard/src/blizzard/hub/domain/claim.py`'s ``ClaimService.rekey``. Deterministic,
+        like the claim's own token, but a counter folded in so a re-key never echoes it back."""
         chunk = self._require(chunk_id)
         if not chunk.claimed:
             raise ChunkNotFound(f"chunk {chunk_id} has no live route")

@@ -2,7 +2,7 @@
 
 ``--cause cap`` folds a spend-cap reason phrasing onto the generic
 resume-command placeholder; ``--cause retries`` (default) carries no prefix.
-Wrapped implies raw, never the reverse.
+Wrapped-vs-raw rules: `blizzard-context:/domain/humans.md` §Escalation.
 """
 
 from __future__ import annotations

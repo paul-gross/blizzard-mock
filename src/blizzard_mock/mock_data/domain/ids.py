@@ -1,8 +1,8 @@
 """Prefixed-ULID id minting for seeded rows.
 
-Every hub-entity id blizzard mints is a prefixed ULID (type tag, underscore,
-Crockford-base32 ULID) — re-implemented independently, no ``blizzard``
-import. The random tail is seedable, so ``--seed`` reproduces byte-identical ids.
+Id format: `blizzard/src/blizzard/foundation/ids.py` — re-implemented independently,
+no ``blizzard`` import. The random tail is seedable, so ``--seed`` reproduces
+byte-identical ids.
 """
 
 from __future__ import annotations
