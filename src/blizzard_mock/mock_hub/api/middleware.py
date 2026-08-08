@@ -48,6 +48,12 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
             self._levers.consume(unreachable)
             return JSONResponse(status_code=503, content={"detail": "the hub is unreachable"})
 
+        if path.startswith("/api/fleet/transcripts"):
+            unreachable_transcripts = self._levers.find(HubLever.UNREACHABLE_TRANSCRIPTS.value, chunk_id)
+            if unreachable_transcripts is not None:
+                self._levers.consume(unreachable_transcripts)
+                return JSONResponse(status_code=503, content={"detail": "the transcript route is unreachable"})
+
         delay = self._levers.find(HubLever.DELAY.value, chunk_id)
         if delay is not None:
             self._levers.consume(delay)

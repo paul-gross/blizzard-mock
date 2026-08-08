@@ -7,6 +7,7 @@ are consulted here; transport-edge levers live in the middleware.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -63,6 +64,13 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
+#: Mirrors the real hub's own caps (blizzard#247's ``hub/domain/transcripts.py``) —
+#: restated, not imported (review F8, blizzard#246): the mock fleet carries no dependency
+#: on the ``blizzard`` package itself. The runner-daily-rate cap is deliberately not
+#: mirrored here — it needs a wall-clock window no scenario today exercises.
+_TRANSCRIPT_RECORD_MAX_BYTES = 4 * 1024 * 1024
+_TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
+
 
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
@@ -93,6 +101,10 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
+        #: Accepted bytes per chunk, the chunk-budget cap's own running total (blizzard#247,
+        #: review F8/blizzard#246 — makes cap-rejection something a mock-driven tier can
+        #: actually exercise, not just structurally route to a real hub).
+        self._transcript_chunk_bytes: dict[str, int] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -123,6 +135,7 @@ class MockHubService:
         self._levers.clear_all()
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
+        self._transcript_chunk_bytes.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -281,24 +294,36 @@ class MockHubService:
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
         )
 
+    # -- transcript intake (its own lane, its own high-water — D3) ---------
+
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
         high-water mark (blizzard#247, D7) — a separate sequence from
-        :meth:`ingest_facts`'s fact lane. No cap policy: the mock applies every record
-        unconditionally, so ``capped`` is always empty."""
+        :meth:`ingest_facts`'s fact lane. Mirrors the real hub's own two independent caps
+        (review F8, blizzard#246): an over-cap record is capped but still acknowledged —
+        the mark advances past it regardless, but its bytes earn no storage credit toward
+        the chunk budget below (real-hub parity — a capped record's bytes don't count)."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
+        capped: list[int] = []
         for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
             seq = int(record.get("seq", 0))
             if seq <= mark:
                 already_applied.append(seq)
                 continue
-            applied.append(seq)
             mark = max(mark, seq)
+            chunk_id = str(record.get("chunk_id", ""))
+            size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
+            stored = self._transcript_chunk_bytes.get(chunk_id, 0)
+            if size > _TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
+                capped.append(seq)
+                continue
+            self._transcript_chunk_bytes[chunk_id] = stored + size
+            applied.append(seq)
         self._transcript_high_water[runner_id] = mark
         return TranscriptSegmentAck(
-            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=[]
+            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=capped
         )
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:

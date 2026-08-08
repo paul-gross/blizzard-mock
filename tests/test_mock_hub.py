@@ -2,7 +2,7 @@
 
 Drives the hub-mirror surface over a ``TestClient`` (in-process, no network): the happy
 path — seed → peek → claim → fence → complete → a hub node derives ``done`` — plus **each
-of the seven levers**, asserting the named edge state a runner-under-test would then have
+of the eight levers**, asserting the named edge state a runner-under-test would then have
 to survive, and the full ``/events`` fact vocabulary (blizzard-mock#4). No ``blizzard``
 import: the mock stands alone.
 """
@@ -164,13 +164,14 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_seven(client: TestClient) -> None:
+def test_lever_catalog_lists_all_eight(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
         "drop_ack",
         "conflicting_fact",
         "unreachable",
+        "unreachable_transcripts",
         "replay",
         "stale_envelope",
         "chunk_unknown",
@@ -184,6 +185,21 @@ def test_lever_unreachable_heals_mid_lease(client: TestClient) -> None:
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 503
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 503
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 200  # healed after 2
+
+
+def test_lever_unreachable_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
+    """D6: a wedged transcript flush never blocks the fact lane — the lever fails
+    ``/transcripts`` alone, and ``/events`` (and everything else) stays healthy."""
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    assert client.post("/_levers/unreachable_transcripts", json={}).status_code == 200
+
+    failed = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []})
+    assert failed.status_code == 503
+
+    healthy = client.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+    assert healthy.status_code == 200
+    assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 200
 
 
 def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> None:
@@ -775,8 +791,8 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 # --- transcript segments (blizzard#247) ---------------------------------------
 
 
-def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0) -> dict:
-    return {
+def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, **overrides: object) -> dict:
+    record: dict = {
         "seq": seq,
         "segment_id": "sg_1",
         "chunk_id": chunk_id,
@@ -790,6 +806,8 @@ def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, tu
         "harness_version": "claude-code-1.0",
         "turns": [{"index": turn_range_start, "kind": "asst", "text": "hi"}],
     }
+    record.update(overrides)
+    return record
 
 
 def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
@@ -824,6 +842,79 @@ def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestC
     replayed = client.post("/api/fleet/transcripts", json=payload)
     assert replayed.json()["already_applied"] == [1]
     assert replayed.json()["applied"] == []
+
+
+def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_advances_past_it(
+    client: TestClient,
+) -> None:
+    """review F8, blizzard#246: mirrors the real hub's ``TranscriptIngestService._apply``
+    (blizzard#247) — an over-cap record is capped (never applied, never stored), but the
+    high-water mark still advances past it (D6), unlike an unseen seq. Without this, no mock
+    or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
+    regression in the runner drain's own cap-handling."""
+    chunk_id = _seed(client)
+    huge_turns = [{"text": "x" * (4 * 1024 * 1024 + 1000)}]
+
+    first = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert first.json()["capped"] == [1]
+    assert first.json()["high_water"] == 1  # advances past a capped record too (D6)
+
+    # A replay of the same now-behind-the-mark seq is already_applied, not re-adjudicated —
+    # the mock does not implement blizzard#247's natural-key re-adjudication (03b2b5d8);
+    # once the mark has passed a seq, it stays passed.
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert replay.json()["already_applied"] == [1]
+
+    # A LATER, in-cap record in the same batch as a cap still applies.
+    ack = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1, turns=huge_turns),
+                _transcript_record(chunk_id, seq=3, turn_range_start=2, turn_range_end=2),
+            ],
+        },
+    )
+    body = ack.json()
+    assert body["capped"] == [2]
+    assert body["applied"] == [3]
+    assert body["high_water"] == 3
+
+
+def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(client: TestClient) -> None:
+    """blizzard#247's second, independent cap: bytes accumulate per chunk, and a record that
+    is well within the per-record cap can still be capped once the chunk's own 64 MB budget
+    is spent — mirrors the real hub's ``_reject_reason`` checking both caps. Loops until the
+    budget actually tips rather than hardcoding a record count against JSON-overhead math."""
+    chunk_id = _seed(client)
+    big_turns = [{"text": "x" * (2 * 1024 * 1024)}]  # under the 4 MB record cap alone
+    seq = 0
+    capped_seq: int | None = None
+    while capped_seq is None:
+        seq += 1
+        ack = client.post(
+            "/api/fleet/transcripts",
+            json={
+                "runner_id": "r1",
+                "records": [
+                    _transcript_record(chunk_id, seq=seq, turn_range_start=seq - 1, turn_range_end=seq - 1, turns=big_turns)
+                ],
+            },
+        )
+        body = ack.json()
+        assert body["high_water"] == seq  # every record advances the mark, applied or capped (D6)
+        if body["capped"]:
+            capped_seq = seq
+        else:
+            assert body["applied"] == [seq]
+    assert capped_seq <= 40  # sanity: the budget must actually bind within a handful of 2 MB records
 
 
 # --- test-control answer route ------------------------------------------------
