@@ -95,7 +95,7 @@ class MockHubService:
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
         #: Retained transcript records, keyed by lease (D2), then by each record's own
-        #: ``(segment_id, turn_range_start)`` natural key — a re-offer replaces, not appends (F9).
+        #: ``(segment_id, turn_range_start)`` natural key — a re-offer replaces, not appends.
         self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
 
     @property
@@ -290,7 +290,7 @@ class MockHubService:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
         high-water mark (D7) — no cap policy, so ``capped`` is always empty. Retained by
         lease (D2) and, within it, by natural key — a re-offer replaces rather than
-        duplicates, matching the real hub's dedupe (review F9, D8)."""
+        duplicates, matching the real hub's dedupe (D8)."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -311,13 +311,21 @@ class MockHubService:
 
     def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
         """The transcript lane's own read-back (D2) — every retained record's turns for
-        one lease, across every spawn generation. Mirrors the real hub's runner-scoped
-        route, but the mock has no caller-identity concept here at all (review F10): no
+        one lease, across every spawn generation, ordered the same way the real store's
+        ``records_for_lease`` orders them: ``(spawn_generation, segment_id,
+        turn_range_start)``, not retention order — a store-and-forward flush or a
+        re-offer can land records out of that order. Mirrors the real hub's
+        runner-scoped route, but the mock has no caller-identity concept here at all: no
         principal, no per-runner filter — it serves whatever the lease holds to anyone."""
         records = self._transcript_segments.get((chunk_id, node_id, epoch), {})
+
+        def _order_key(r: dict[str, Any]) -> tuple[int, str, int]:
+            return int(r.get("spawn_generation", 0)), str(r.get("segment_id", "")), int(r.get("turn_range_start", 0))
+
+        ordered = sorted(records.values(), key=_order_key)
         turns: list[dict[str, Any]] = []
         final = False
-        for record in records.values():
+        for record in ordered:
             turns.extend(record.get("turns", []))
             final = final or bool(record.get("final", False))
         return LeaseTranscriptView(chunk_id=chunk_id, node_id=node_id, epoch=epoch, final=final, turns=turns)

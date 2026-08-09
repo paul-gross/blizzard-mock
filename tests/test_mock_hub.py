@@ -776,15 +776,22 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 
 
 def _transcript_record(
-    chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, node_id: str = "build"
+    chunk_id: str,
+    *,
+    seq: int,
+    turn_range_start: int = 0,
+    turn_range_end: int = 0,
+    node_id: str = "build",
+    segment_id: str = "sg_1",
+    spawn_generation: int = 1,
 ) -> dict:
     return {
         "seq": seq,
-        "segment_id": "sg_1",
+        "segment_id": segment_id,
         "chunk_id": chunk_id,
         "node_id": node_id,
         "epoch": 1,
-        "spawn_generation": 1,
+        "spawn_generation": spawn_generation,
         "turn_range_start": turn_range_start,
         "turn_range_end": turn_range_end,
         "final": False,
@@ -853,9 +860,9 @@ def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestCli
 
 
 def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: TestClient) -> None:
-    """review F11: submitted **reversed** relative to seq, so a pass actually pins
-    'sorts by seq' rather than merely 'preserves arrival order' (indistinguishable on an
-    already-sorted input, which is what this test submitted before)."""
+    """Submitted **reversed** relative to seq, so a pass actually pins 'sorts by seq'
+    rather than merely 'preserves arrival order' (indistinguishable on an already-sorted
+    input)."""
     chunk_id = _seed(client)
     first = _transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)
     second = _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1)
@@ -873,7 +880,7 @@ def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: 
 
 
 def test_lease_transcript_read_does_not_cross_node_ids(client: TestClient) -> None:
-    """review F11: an epoch-crossing case already existed; a node_id-crossing one didn't."""
+    """An epoch-crossing case already existed; a node_id-crossing one didn't."""
     chunk_id = _seed(client)
     client.post(
         "/api/fleet/transcripts",
@@ -887,7 +894,7 @@ def test_lease_transcript_read_does_not_cross_node_ids(client: TestClient) -> No
 
 
 def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> None:
-    """review F11: nor a chunk_id-crossing one."""
+    """Nor a chunk_id-crossing one."""
     chunk_id = _seed(client)
     other_chunk_id = _seed(client)
     client.post(
@@ -904,9 +911,9 @@ def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> N
 
 
 def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: TestClient) -> None:
-    """review F9: the real hub dedupes on the natural key
-    ``(segment_id, turn_range_start)`` regardless of the offered ``seq`` (D8) — a re-offer
-    (e.g. after an ack the runner missed) must not double the retained turns."""
+    """The real hub dedupes on the natural key ``(segment_id, turn_range_start)``
+    regardless of the offered ``seq`` (D8) — a re-offer (e.g. after an ack the runner
+    missed) must not double the retained turns."""
     chunk_id = _seed(client)
     client.post(
         "/api/fleet/transcripts",
@@ -921,6 +928,33 @@ def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: T
 
     assert resp.status_code == 200, resp.text
     assert [t["text"] for t in resp.json()["turns"]] == ["hi"]
+
+
+def test_lease_transcript_read_orders_by_spawn_generation_segment_id_turn_range_not_arrival(
+    client: TestClient,
+) -> None:
+    """The real store's ``records_for_lease`` orders by ``(spawn_generation, segment_id,
+    turn_range_start)`` — not by ingest/seq order, which a fixture whose seq happens to
+    rise alongside its natural key cannot distinguish from a plain-arrival-order
+    read-back. Two segments arrive in an order where seq and segment_id diverge: ``sg_b``
+    first (lower seq), ``sg_a`` second (higher seq) — the read-back must still put
+    ``sg_a`` first, matching the real store's key, not the arrival order."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=1, segment_id="sg_b", turn_range_start=0)],
+        },
+    )
+    second = _transcript_record(chunk_id, seq=2, segment_id="sg_a", turn_range_start=0)
+    second["turns"] = [{"index": 0, "kind": "asst", "text": "from-sg-a"}]
+    client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [second]})
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert [t["text"] for t in resp.json()["turns"]] == ["from-sg-a", "hi"]
 
 
 def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(client: TestClient) -> None:
