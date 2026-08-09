@@ -1,9 +1,9 @@
-"""Transport-edge lever middleware — ``unreachable`` and ``delay`` — plus request capture.
+"""Transport-edge lever middleware — plus request capture.
 
-Two levers bend a request before it reaches a route: ``unreachable`` answers
-503; ``delay`` sleeps ``payload.ms`` first. Control-plane and liveness routes
-are exempt. ``RequestCaptureMiddleware`` records every ``/api/*`` request.
-"""
+Three levers bend a request before it reaches a route: ``unreachable`` answers 503 for every
+route; ``unreachable_transcripts`` answers 503 for the transcripts route alone; ``delay``
+sleeps ``payload.ms`` first. Exempt: control-plane/liveness routes. ``RequestCaptureMiddleware``
+records every ``/api/*`` request."""
 
 from __future__ import annotations
 
