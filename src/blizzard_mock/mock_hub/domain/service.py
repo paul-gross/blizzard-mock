@@ -35,6 +35,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
     HubAdvanceResponse,
+    LeaseTranscriptView,
     NodeConfig,
     NodeEnvelope,
     QuestionView,
@@ -93,6 +94,10 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
+        #: Retained transcript records, keyed by lease (blizzard#249, D2) — every applied
+        #: record's dict, in ingest order; the counterpart read route folds a lease's own
+        #: key into one :class:`LeaseTranscriptView`.
+        self._transcript_segments: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -123,6 +128,7 @@ class MockHubService:
         self._levers.clear_all()
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
+        self._transcript_segments.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -285,7 +291,8 @@ class MockHubService:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
         high-water mark (blizzard#247, D7) — a separate sequence from
         :meth:`ingest_facts`'s fact lane. No cap policy: the mock applies every record
-        unconditionally, so ``capped`` is always empty."""
+        unconditionally, so ``capped`` is always empty. Every applied record is retained
+        (blizzard#249, D2), keyed by its lease, for :meth:`lease_transcript` to read back."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -296,10 +303,26 @@ class MockHubService:
                 continue
             applied.append(seq)
             mark = max(mark, seq)
+            key = (str(record.get("chunk_id", "")), str(record.get("node_id", "")), int(record.get("epoch", 0)))
+            self._transcript_segments.setdefault(key, []).append({**record, "runner_id": runner_id})
         self._transcript_high_water[runner_id] = mark
         return TranscriptSegmentAck(
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=[]
         )
+
+    def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
+        """The transcript lane's own read-back (blizzard#249) — every retained record's
+        turns, concatenated in ingest order, for one lease's ``(chunk_id, node_id, epoch)``
+        across every spawn generation (D2). Mirrors the real hub's runner-scoped fleet
+        route; the mock models no bearer-token confinement, so this serves whatever the
+        lease holds to any caller."""
+        records = self._transcript_segments.get((chunk_id, node_id, epoch), [])
+        turns: list[dict[str, Any]] = []
+        final = False
+        for record in records:
+            turns.extend(record.get("turns", []))
+            final = final or bool(record.get("final", False))
+        return LeaseTranscriptView(chunk_id=chunk_id, node_id=node_id, epoch=epoch, final=final, turns=turns)
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
         """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected.

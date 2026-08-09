@@ -826,6 +826,71 @@ def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestC
     assert replayed.json()["applied"] == []
 
 
+# --- lease-transcript read (blizzard#249) --------------------------------------
+
+
+def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    ack = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)],
+        },
+    )
+    assert ack.status_code == 200, ack.text
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["chunk_id"] == chunk_id
+    assert body["node_id"] == "build"
+    assert body["epoch"] == 1
+    assert [t["text"] for t in body["turns"]] == ["hi"]
+
+
+def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    first = _transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)
+    second = _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1)
+    second["turns"] = [{"index": 1, "kind": "asst", "text": "second"}]
+    second["final"] = True
+    client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [first, second]})
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [t["text"] for t in body["turns"]] == ["hi", "second"]
+    assert body["final"] is True
+    assert body["truncated"] is False
+
+
+def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(client: TestClient) -> None:
+    chunk_id = _seed(client)
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["turns"] == []
+    assert body["final"] is False
+
+
+def test_lease_transcript_read_does_not_cross_epochs(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 2})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
 # --- test-control answer route ------------------------------------------------
 
 

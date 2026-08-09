@@ -54,6 +54,8 @@ so a test can assert a real runner presented its bearer token.
 | `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}` |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
+| `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy (blizzard#247) |
+| `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record (blizzard#249) |
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and the newest usage sample |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 

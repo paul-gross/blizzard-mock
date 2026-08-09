@@ -207,6 +207,21 @@ class TranscriptSegmentAck(BaseModel):
     capped: list[int] = Field(default_factory=list)
 
 
+class LeaseTranscriptView(BaseModel):
+    """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView`` (blizzard#249) —
+    the fleet-plane read route's response, every retained record's turns concatenated for
+    one lease's ``(chunk_id, node_id, epoch)``. The mock applies no cap policy, so
+    ``truncated`` stays ``False``; it also models no bearer-token confinement, unlike the
+    real route's ownership check."""
+
+    chunk_id: str
+    node_id: str
+    epoch: int
+    final: bool
+    truncated: bool = False
+    turns: list[dict[str, object]] = Field(default_factory=list)
+
+
 class WorkItemEntry(BaseModel):
     """One pointer's pass-through work item; ``title``/``body`` are canned,
     the mock carries no forge integration."""
