@@ -791,7 +791,9 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 # --- transcript segments (blizzard#247) ---------------------------------------
 
 
-def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, **overrides: object) -> dict:
+def _transcript_record(
+    chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, **overrides: object
+) -> dict:
     record: dict = {
         "seq": seq,
         "segment_id": "sg_1",
@@ -904,7 +906,9 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
             json={
                 "runner_id": "r1",
                 "records": [
-                    _transcript_record(chunk_id, seq=seq, turn_range_start=seq - 1, turn_range_end=seq - 1, turns=big_turns)
+                    _transcript_record(
+                        chunk_id, seq=seq, turn_range_start=seq - 1, turn_range_end=seq - 1, turns=big_turns
+                    )
                 ],
             },
         )
