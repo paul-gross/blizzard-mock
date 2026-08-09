@@ -775,12 +775,14 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 # --- transcript segments (blizzard#247) ---------------------------------------
 
 
-def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0) -> dict:
+def _transcript_record(
+    chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, node_id: str = "build"
+) -> dict:
     return {
         "seq": seq,
         "segment_id": "sg_1",
         "chunk_id": chunk_id,
-        "node_id": "build",
+        "node_id": node_id,
         "epoch": 1,
         "spawn_generation": 1,
         "turn_range_start": turn_range_start,
@@ -851,12 +853,15 @@ def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestCli
 
 
 def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: TestClient) -> None:
+    """review F11: submitted **reversed** relative to seq, so a pass actually pins
+    'sorts by seq' rather than merely 'preserves arrival order' (indistinguishable on an
+    already-sorted input, which is what this test submitted before)."""
     chunk_id = _seed(client)
     first = _transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)
     second = _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1)
     second["turns"] = [{"index": 1, "kind": "asst", "text": "second"}]
     second["final"] = True
-    client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [first, second]})
+    client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [second, first]})
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
@@ -865,6 +870,57 @@ def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: 
     assert [t["text"] for t in body["turns"]] == ["hi", "second"]
     assert body["final"] is True
     assert body["truncated"] is False
+
+
+def test_lease_transcript_read_does_not_cross_node_ids(client: TestClient) -> None:
+    """review F11: an epoch-crossing case already existed; a node_id-crossing one didn't."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, node_id="build")]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "review", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
+def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> None:
+    """review F11: nor a chunk_id-crossing one."""
+    chunk_id = _seed(client)
+    other_chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]},
+    )
+
+    resp = client.get(
+        f"/api/fleet/chunks/{other_chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
+def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: TestClient) -> None:
+    """review F9: the real hub dedupes on the natural key
+    ``(segment_id, turn_range_start)`` regardless of the offered ``seq`` (D8) — a re-offer
+    (e.g. after an ack the runner missed) must not double the retained turns."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turn_range_start=0)]},
+    )
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=99, turn_range_start=0)]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert [t["text"] for t in resp.json()["turns"]] == ["hi"]
 
 
 def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(client: TestClient) -> None:
