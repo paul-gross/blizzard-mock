@@ -209,10 +209,8 @@ class TranscriptSegmentAck(BaseModel):
 
 class LeaseTranscriptView(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView`` (blizzard#249) —
-    the fleet-plane read route's response, every retained record's turns concatenated for
-    one lease's ``(chunk_id, node_id, epoch)``. The mock applies no cap policy, so
-    ``truncated`` stays ``False``; it also models no bearer-token confinement, unlike the
-    real route's ownership check."""
+    a lease's retained turns, concatenated. No cap policy, so ``truncated`` stays
+    ``False``; no bearer-token confinement either, unlike the real route."""
 
     chunk_id: str
     node_id: str

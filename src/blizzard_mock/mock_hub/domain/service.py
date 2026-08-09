@@ -94,9 +94,8 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
-        #: Retained transcript records, keyed by lease (blizzard#249, D2) — every applied
-        #: record's dict, in ingest order; the counterpart read route folds a lease's own
-        #: key into one :class:`LeaseTranscriptView`.
+        #: Retained transcript records, keyed by lease (blizzard#249, D2) — the counterpart
+        #: read route folds a lease's own key into one :class:`LeaseTranscriptView`.
         self._transcript_segments: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
 
     @property
