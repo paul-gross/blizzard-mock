@@ -660,6 +660,60 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
 
 
+# --- transcript segments (blizzard#247) ---------------------------------------
+
+
+def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0) -> dict:
+    return {
+        "seq": seq,
+        "segment_id": "sg_1",
+        "chunk_id": chunk_id,
+        "node_id": "build",
+        "epoch": 1,
+        "spawn_generation": 1,
+        "turn_range_start": turn_range_start,
+        "turn_range_end": turn_range_end,
+        "final": False,
+        "normalizer_version": "v1",
+        "harness_version": "claude-code-1.0",
+        "turns": [{"index": turn_range_start, "kind": "asst", "text": "hi"}],
+    }
+
+
+def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
+    """The transcript lane's high-water is independent of the fact lane's (D7): a
+    transcript push does not disturb a fact-lane seq already applied, and vice versa."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": 1}}],
+        },
+    )
+
+    ack = client.post(
+        "/api/fleet/transcripts", json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]}
+    )
+    assert ack.status_code == 200, ack.text
+    body = ack.json()
+    assert body["applied"] == [1]
+    assert body["high_water"] == 1
+    assert body["capped"] == []
+
+
+def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    payload = {"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]}
+
+    first = client.post("/api/fleet/transcripts", json=payload)
+    assert first.json()["applied"] == [1]
+
+    replayed = client.post("/api/fleet/transcripts", json=payload)
+    assert replayed.json()["already_applied"] == [1]
+    assert replayed.json()["applied"] == []
+
+
 # --- test-control answer route ------------------------------------------------
 
 
