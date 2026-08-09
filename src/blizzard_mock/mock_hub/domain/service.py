@@ -64,10 +64,8 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
-#: Mirrors the real hub's own caps (blizzard#247's ``hub/domain/transcripts.py``) —
-#: restated, not imported (review F8, blizzard#246): the mock fleet carries no dependency
-#: on the ``blizzard`` package itself. The runner-daily-rate cap is deliberately not
-#: mirrored here — it needs a wall-clock window no scenario today exercises.
+#: The real hub's caps, restated not imported — the mock depends on no ``blizzard`` package.
+#: The daily-rate cap is left out: it needs a wall-clock window no scenario exercises.
 _TRANSCRIPT_RECORD_MAX_BYTES = 4 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
@@ -101,9 +99,8 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
-        #: Accepted bytes per chunk, the chunk-budget cap's own running total (blizzard#247,
-        #: review F8/blizzard#246 — makes cap-rejection something a mock-driven tier can
-        #: actually exercise, not just structurally route to a real hub).
+        #: Accepted bytes per chunk, the chunk-budget cap's running total — what makes
+        #: cap-rejection something a mock-driven tier can exercise (review F8).
         self._transcript_chunk_bytes: dict[str, int] = {}
 
     @property
@@ -298,11 +295,9 @@ class MockHubService:
 
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
-        high-water mark (blizzard#247, D7) — a separate sequence from
-        :meth:`ingest_facts`'s fact lane. Mirrors the real hub's own two independent caps
-        (review F8, blizzard#246): an over-cap record is capped but still acknowledged —
-        the mark advances past it regardless, but its bytes earn no storage credit toward
-        the chunk budget below (real-hub parity — a capped record's bytes don't count)."""
+        high-water mark (blizzard#247, D7) — a separate sequence from :meth:`ingest_facts`'s
+        fact lane. Mirrors the real hub's two caps (review F8): an over-cap record is capped
+        but still acknowledged, the mark advancing past it, and earns no chunk-budget credit."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
