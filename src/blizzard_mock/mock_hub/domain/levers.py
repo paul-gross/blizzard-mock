@@ -24,9 +24,8 @@ class HubLever(StrEnum):
     #: Every request answers 503 (go unreachable). With ``remaining=N`` it heals after N
     #: affected calls — the "unreachable *mid-lease*, then recover" window.
     UNREACHABLE = "unreachable"
-    #: ``POST /transcripts`` alone answers 503 — every other route, including ``/events``,
-    #: stays healthy (D6, issue #246). The lane-independence lever: a wedged or slow
-    #: transcript flush must never block the fact lane.
+    #: ``POST /transcripts`` alone answers 503 — every other route stays healthy (D6,
+    #: issue #246): the lane-independence lever.
     UNREACHABLE_TRANSCRIPTS = "unreachable_transcripts"
     #: The next completion's apply-response is the *previous* one replayed — a duplicate
     #: delivery the runner must absorb without double-acting.
