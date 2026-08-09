@@ -1,11 +1,13 @@
 """Transport-edge lever middleware — plus request capture.
 
-Three levers bend a request before it reaches a route: ``unreachable`` answers 503 for every
-route; ``unreachable_transcripts`` answers 503 for the transcripts route alone; ``delay``
-sleeps ``payload.ms`` first. Exempt: control-plane/liveness routes. ``RequestCaptureMiddleware``
+Four levers: ``unreachable``/``unreachable_transcripts`` answer 503 (every route / the
+transcripts route alone); ``delay``/``delay_transcripts`` (review F18) sleep first,
+scoped the same way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware``
 records every ``/api/*`` request."""
 
 from __future__ import annotations
+
+import time
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -54,11 +56,14 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
                 self._levers.consume(unreachable_transcripts)
                 return JSONResponse(status_code=503, content={"detail": "the transcript route is unreachable"})
 
+            delay_transcripts = self._levers.find(HubLever.DELAY_TRANSCRIPTS.value, chunk_id)
+            if delay_transcripts is not None:
+                self._levers.consume(delay_transcripts)
+                time.sleep(int(delay_transcripts.payload.get("ms", 0)) / 1000.0)
+
         delay = self._levers.find(HubLever.DELAY.value, chunk_id)
         if delay is not None:
             self._levers.consume(delay)
-            import time
-
             time.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
 
         return await call_next(request)

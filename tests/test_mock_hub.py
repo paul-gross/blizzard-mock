@@ -164,10 +164,11 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_eight(client: TestClient) -> None:
+def test_lever_catalog_lists_all_nine(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
+        "delay_transcripts",
         "drop_ack",
         "conflicting_fact",
         "unreachable",
@@ -200,6 +201,31 @@ def test_lever_unreachable_transcripts_is_scoped_to_its_own_route(client: TestCl
     healthy = client.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
     assert healthy.status_code == 200
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 200
+
+
+def test_lever_delay_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
+    """review F18: D6's lane-independence claim is "a wedged OR SLOW transcript flush
+    never blocks the fact lane" — ``unreachable_transcripts`` above only ever proves the
+    hard-down half. This lever proves the slow half: ``/transcripts`` alone sleeps,
+    ``/events`` (and everything else) stays fast."""
+    import time
+
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    # Global, not chunk-scoped (matching `unreachable_transcripts` above): the transcripts
+    # route's path carries no `chunks/{id}` segment at all (`chunk_id` lives in each
+    # record's own JSON body), so a per-chunk-scoped lever could never match it.
+    client.post("/_levers/delay_transcripts", json={"payload": {"ms": 200}})
+
+    started = time.monotonic()
+    slow = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []})
+    assert time.monotonic() - started >= 0.18
+    assert slow.status_code == 200  # delayed, not failed
+
+    started = time.monotonic()
+    fast = client.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+    assert time.monotonic() - started < 0.1
+    assert fast.status_code == 200
 
 
 def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> None:
@@ -810,6 +836,23 @@ def _transcript_record(
     }
     record.update(overrides)
     return record
+
+
+def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClient) -> None:
+    """review F11: ``turns`` used to be a freeform ``list[dict]`` here — a real field
+    rename on the wire (e.g. a turn's ``text`` renamed) would have shipped green through
+    every `service-test` scenario, since nothing driving the mock ever validated turn
+    shape. Now typed field-for-field against ``blizzard.wire.transcript_segment
+    .TurnSegmentView`` (``bzh:wire-change-extends-mock``), an unrecognized required field
+    (``input_shape`` missing from a ``tool``) 422s instead of silently passing through."""
+    chunk_id = _seed(client)
+    bad_record = _transcript_record(
+        chunk_id, seq=1, turns=[{"index": 0, "kind": "tool", "tool": {"name": "Bash", "input": {}}}]
+    )
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
 
 
 def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:

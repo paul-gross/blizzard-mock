@@ -69,10 +69,49 @@ class RunnerFactBatchBody(BaseModel):
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
+class ToolCallSegmentBody(BaseModel):
+    """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field
+    (review F11) — a freeform ``dict`` here would let a real field rename ship green
+    through `service-test` (which drives the mock, not the real hub) with no warning."""
+
+    name: str
+    input: dict[str, object]
+    input_unparsed: str | None = None
+    input_shape: str
+    tool_use_id: str | None = None
+    output: str | None = None
+    output_truncated: bool = False
+
+
+class SidechainSegmentBody(BaseModel):
+    """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` (review F11)."""
+
+    agent_id: str | None = None
+    agent_type: str | None = None
+    link: str
+    turns: list[TurnSegmentBody] = Field(default_factory=list)
+
+
+class TurnSegmentBody(BaseModel):
+    """Mirrors ``TurnSegmentView`` field-for-field (review F11) — the mock still never
+    *interprets* turn content, but a typed shape here fails validation on a real field
+    rename instead of silently passing through as an untyped dict."""
+
+    index: int = 0
+    kind: str = ""
+    timestamp: str | None = None
+    text: str = ""
+    tool: ToolCallSegmentBody | None = None
+    thinking_redacted: bool = False
+    sidechain: SidechainSegmentBody | None = None
+    truncated: bool = False
+
+
+SidechainSegmentBody.model_rebuild()
+
+
 class TranscriptSegmentRecordBody(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247).
-    ``turns`` stays freeform (``list[dict]``) — the mock never interprets turn content,
-    only counts and stores it, same as the real hub's store-shaped ``turns_json``."""
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)."""
 
     seq: int
     segment_id: str
@@ -85,7 +124,8 @@ class TranscriptSegmentRecordBody(BaseModel):
     final: bool = False
     normalizer_version: str = ""
     harness_version: str | None = None
-    turns: list[dict[str, object]] = Field(default_factory=list)
+    record_truncated: bool = False
+    turns: list[TurnSegmentBody] = Field(default_factory=list)
 
 
 class TranscriptSegmentBatchBody(BaseModel):

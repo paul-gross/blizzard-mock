@@ -27,6 +27,9 @@ class HubLever(StrEnum):
     #: ``POST /transcripts`` alone answers 503 — every other route stays healthy (D6,
     #: issue #246): the lane-independence lever.
     UNREACHABLE_TRANSCRIPTS = "unreachable_transcripts"
+    #: ``POST /transcripts`` alone sleeps ``payload.ms`` (D6, review F18) — the "slow, not
+    #: just hard-down" half the generic ``delay`` lever can't isolate.
+    DELAY_TRANSCRIPTS = "delay_transcripts"
     #: The next completion's apply-response is the *previous* one replayed — a duplicate
     #: delivery the runner must absorb without double-acting.
     REPLAY = "replay"
@@ -45,6 +48,9 @@ CATALOG: dict[str, str] = {
     HubLever.UNREACHABLE.value: "all requests 503; remaining=N heals after N calls (unreachable mid-lease)",
     HubLever.UNREACHABLE_TRANSCRIPTS.value: (
         "POST /transcripts alone 503s; every other route (incl. /events) stays healthy (D6)"
+    ),
+    HubLever.DELAY_TRANSCRIPTS.value: (
+        "POST /transcripts alone sleeps payload.ms; every other route (incl. /events) stays fast (D6)"
     ),
     HubLever.REPLAY.value: "re-emit the previous completion apply-response (duplicate delivery)",
     HubLever.STALE_ENVELOPE.value: "GET envelope stamps a stale (latest_epoch-1) fence (D-007)",
