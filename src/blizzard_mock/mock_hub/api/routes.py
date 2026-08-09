@@ -148,7 +148,13 @@ def push_transcripts(
 
 @fleet_router.post("/runners", status_code=201)
 def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    first = service.register(body.runner_id, body.workspace_id, url=body.url, redirect_uris=tuple(body.redirect_uris))
+    first = service.register(
+        body.runner_id,
+        workspace_id=body.workspace_id,
+        url=body.url,
+        redirect_uris=tuple(body.redirect_uris),
+        env_capacity=body.env_capacity,
+    )
     return {"runner_id": body.runner_id, "first_registration": first}
 
 

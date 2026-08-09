@@ -1,8 +1,8 @@
 """Wire-mirror response bodies — byte-compatible with the hub OpenAPI a runner reads.
 
-Every model here reproduces a ``blizzard.wire`` response shape field-for-field,
-without ``blizzard`` being a dependency. Request bodies the mock accepts are
-permissive dicts; only responses need shape fidelity.
+Every model here mirrors a hub response schema without ``blizzard`` being a
+dependency. Field-set agreement — and each model's declared omissions — is
+asserted against the committed hub OpenAPI by ``tests/test_wire_parity.py``.
 """
 
 from __future__ import annotations
@@ -157,6 +157,18 @@ class QueuePeekResponse(BaseModel):
     entries: list[QueuePeekEntry] = Field(default_factory=list)
 
 
+class ExternalSubscriptionUsageWindowView(BaseModel):
+    window: str
+    utilization_pct: float
+    resets_at: str
+    window_seconds: int
+
+
+class ExternalSubscriptionUsageView(BaseModel):
+    sampled_at: str
+    windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
+
+
 class RunnerView(BaseModel):
     runner_id: str
     workspace_id: str
@@ -169,6 +181,10 @@ class RunnerView(BaseModel):
     locally_paused: bool = False
     locally_paused_by: str | None = None
     locally_paused_reason: str | None = None
+    env_capacity: int | None = None
+    # Mirrored from the newest `external_subscription_usage.sampled` fact the
+    # mock ingested (issue #218); null until one arrives.
+    external_subscription_usage: ExternalSubscriptionUsageView | None = None
 
 
 class RunnerFactAck(BaseModel):

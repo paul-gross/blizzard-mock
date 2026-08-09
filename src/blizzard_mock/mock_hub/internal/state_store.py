@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
-from blizzard_mock.mock_hub.domain.state import RunnerRow
+from blizzard_mock.mock_hub.domain.state import ReportedRunnerFacts, RunnerRow
 
 
 class InMemoryHubState:
@@ -18,6 +18,7 @@ class InMemoryHubState:
     def __init__(self) -> None:
         self._chunks: dict[str, ChunkState] = {}
         self._runners: dict[str, RunnerRow] = {}
+        self._reported: dict[str, ReportedRunnerFacts] = {}
         self._questions: dict[str, QuestionState] = {}
 
     def put_chunk(self, chunk: ChunkState) -> None:
@@ -32,21 +33,33 @@ class InMemoryHubState:
     def upsert_runner(
         self,
         runner_id: str,
+        *,
         workspace_id: str,
         at: datetime,
-        *,
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
+        env_capacity: int | None = None,
     ) -> bool:
         existing = self._runners.get(runner_id)
         if existing is None:
-            self._runners[runner_id] = RunnerRow(runner_id, workspace_id, at, url=url, redirect_uris=redirect_uris)
+            self._runners[runner_id] = RunnerRow(
+                runner_id,
+                workspace_id=workspace_id,
+                at=at,
+                url=url,
+                redirect_uris=redirect_uris,
+                env_capacity=env_capacity,
+            )
             return True
         existing.last_seen_at = at
         existing.workspace_id = workspace_id
         existing.url = url
         existing.redirect_uris = redirect_uris
+        existing.env_capacity = env_capacity
         return False
+
+    def reported_facts(self, runner_id: str) -> ReportedRunnerFacts:
+        return self._reported.setdefault(runner_id, ReportedRunnerFacts())
 
     def get_runner(self, runner_id: str) -> RunnerRow | None:
         return self._runners.get(runner_id)

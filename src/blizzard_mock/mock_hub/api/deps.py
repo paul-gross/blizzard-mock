@@ -50,6 +50,8 @@ class DecisionBody(BaseModel):
 class RunnerRegistrationBody(BaseModel):
     runner_id: str
     workspace_id: str = "workspace-mock"
+    # The runner's configured environment-pool size — None when it reports none.
+    env_capacity: int | None = None
     # The runner's optional federation identity (issue #95) — round-tripped
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None

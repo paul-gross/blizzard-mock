@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from pydantic import ValidationError
+
 from blizzard_mock.clock import Clock
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain.levers import HubLever
@@ -30,6 +32,8 @@ from blizzard_mock.mock_hub.domain.wire import (
     ChunkDetail,
     EnvelopeChoice,
     EscalationView,
+    ExternalSubscriptionUsageView,
+    ExternalSubscriptionUsageWindowView,
     HubAdvanceResponse,
     NodeConfig,
     NodeEnvelope,
@@ -47,8 +51,8 @@ from blizzard_mock.mock_hub.domain.wire import (
     WorkItemsView,
 )
 
-#: The runner-fact vocabulary (``blizzard.wire.facts``) the batched ``/events`` push
-#: dispatches by kind — mirrors ``blizzard.hub.domain.facts.FactIngestService.ingest``.
+#: The runner-fact vocabulary the batched ``/events`` push dispatches by kind; agreement
+#: with the real vocabulary is asserted by ``tests/test_wire_parity.py``.
 LEASE_MINTED = "lease.minted"
 ESCALATION_RECORDED = "escalation.recorded"
 QUESTION_ASKED = "question.asked"
@@ -348,25 +352,28 @@ class MockHubService:
             question.delivered_at = self._clock.now().isoformat()
             self._state.put_question(question)
             return True
+        # The three runner-scoped kinds land on facts held per runner_id, not on the registry
+        # row: the real hub accepts and *persists* each without a registration, so a report
+        # that outruns its registration is still readable once that lands.
         if kind == RUNNER_LOCALLY_PAUSED:
-            row = self._state.get_runner(runner_id)
-            if row is None:
-                return False
-            row.locally_paused = True
-            row.locally_paused_by = str(payload.get("by", "operator"))
-            row.locally_paused_reason = payload.get("reason")
+            reported = self._state.reported_facts(runner_id)
+            reported.locally_paused = True
+            reported.locally_paused_by = str(payload.get("by", "operator"))
+            reported.locally_paused_reason = payload.get("reason")
             return True
         if kind == RUNNER_LOCALLY_RESUMED:
-            row = self._state.get_runner(runner_id)
-            if row is None:
-                return False
-            row.locally_paused = False
-            row.locally_paused_by = None
-            row.locally_paused_reason = None
+            reported = self._state.reported_facts(runner_id)
+            reported.locally_paused = False
+            reported.locally_paused_by = None
+            reported.locally_paused_reason = None
             return True
-        # usage.recorded / event.recorded (issue #125) and
-        # external_subscription_usage.sampled (issue #218) are accepted as no-ops.
-        return kind in (USAGE_RECORDED, EVENT_RECORDED, EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED)
+        if kind == EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED:
+            # Coerced here, never at the read: an accepted fact must not be able to make a
+            # later `GET /runners/{id}` raise. Defaults mirror the real hub's own ingest.
+            self._state.reported_facts(runner_id).external_subscription_usage = self._usage_view(payload)
+            return True
+        # usage.recorded / event.recorded (issue #125) are accepted as no-ops.
+        return kind in (USAGE_RECORDED, EVENT_RECORDED)
 
     # -- completion apply --------------------------------------------------
 
@@ -483,16 +490,30 @@ class MockHubService:
     # -- registry ----------------------------------------------------------
 
     def register(
-        self, runner_id: str, workspace_id: str, *, url: str | None = None, redirect_uris: tuple[str, ...] = ()
+        self,
+        runner_id: str,
+        *,
+        workspace_id: str,
+        url: str | None = None,
+        redirect_uris: tuple[str, ...] = (),
+        env_capacity: int | None = None,
     ) -> bool:
         return self._state.upsert_runner(
-            runner_id, workspace_id, self._clock.now(), url=url, redirect_uris=redirect_uris
+            runner_id,
+            workspace_id=workspace_id,
+            at=self._clock.now(),
+            url=url,
+            redirect_uris=redirect_uris,
+            env_capacity=env_capacity,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
         row = self._state.get_runner(runner_id)
         if row is None:
             return None
+        # Reported facts are merged in at the read, so one that arrived before this
+        # registration surfaces the moment the registration lands.
+        reported = self._state.reported_facts(runner_id)
         return RunnerView(
             runner_id=row.runner_id,
             workspace_id=row.workspace_id,
@@ -500,9 +521,27 @@ class MockHubService:
             last_seen_at=row.last_seen_at.isoformat(),
             online=True,
             hub_paused=row.paused,
-            locally_paused=row.locally_paused,
-            locally_paused_by=row.locally_paused_by,
-            locally_paused_reason=row.locally_paused_reason,
+            locally_paused=reported.locally_paused,
+            locally_paused_by=reported.locally_paused_by,
+            locally_paused_reason=reported.locally_paused_reason,
+            env_capacity=row.env_capacity,
+            external_subscription_usage=reported.external_subscription_usage,
+        )
+
+    def _usage_view(self, payload: dict[str, Any]) -> ExternalSubscriptionUsageView:
+        """One sampled payload as the mirrored view, total over any payload shape.
+
+        ``sampled_at`` and ``windows`` default exactly as the real hub's ingest defaults them;
+        a window that does not validate is dropped rather than failing the whole fact."""
+        windows = []
+        for entry in payload.get("windows") or []:
+            try:
+                windows.append(ExternalSubscriptionUsageWindowView.model_validate(entry))
+            except ValidationError:
+                continue
+        sampled_at = payload.get("sampled_at")
+        return ExternalSubscriptionUsageView(
+            sampled_at=str(sampled_at) if sampled_at else self._clock.now().isoformat(), windows=windows
         )
 
     def set_paused(self, runner_id: str, paused: bool) -> None:

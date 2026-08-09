@@ -54,7 +54,7 @@ so a test can assert a real runner presented its bearer token.
 | `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}` |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register / read the pause brakes (D-070/D-043) |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and the newest usage sample |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 
 ## Batched fact push (`POST /api/fleet/events`)
@@ -74,6 +74,13 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
 | `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled (issue #125) |
+| `external_subscription_usage.sampled` | Upserts the runner's newest sample — readable via `GET /runners/{id}` (issue #218) |
+
+The three runner-scoped kinds — both `runner.locally_*` and the usage sample — are held
+per `runner_id` and applied whether or not that runner has registered, so a report the
+outbound buffer replays ahead of its registration is readable once that registration
+lands. The usage payload is coerced at ingest (defaulted `sampled_at`, unusable windows
+dropped), so an accepted fact can never make a later read raise.
 
 ## Control plane
 

@@ -572,11 +572,123 @@ def test_events_usage_recorded_is_accepted(client: TestClient) -> None:
     assert ack.json()["rejected"] == []
 
 
+def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client: TestClient) -> None:
+    """The outbound buffer replays an outage in FIFO order, so a self-report can legitimately
+    reach the hub before the registration that follows it. The real hub persists both kinds
+    without a known runner; acking and discarding would make that ordering untestable."""
+    for seq, kind, payload in (
+        (1, "runner.locally_paused", {"by": "op", "reason": "maintenance"}),
+        (2, "external_subscription_usage.sampled", {"sampled_at": "2026-08-01T12:00:00+00:00", "windows": []}),
+    ):
+        ack = client.post(
+            "/api/fleet/events",
+            json={"runner_id": "late", "facts": [{"seq": seq, "kind": kind, "payload": payload}]},
+        )
+        assert ack.json()["applied"] == [seq]
+
+    client.post("/api/fleet/runners", json={"runner_id": "late", "workspace_id": "ws"})
+
+    view = client.get("/api/fleet/runners/late").json()
+    assert view["locally_paused"] is True
+    assert view["locally_paused_by"] == "op"
+    assert view["external_subscription_usage"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
+
+
+def test_a_partial_usage_payload_never_poisons_the_runner_read(client: TestClient) -> None:
+    """An accepted fact must not be able to make a later read raise. The payload is coerced
+    at ingest the way the real hub defaults it, so a missing ``sampled_at`` and an unusable
+    window degrade the sample rather than 500-ing every subsequent ``GET /runners/{id}``."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"windows": [{"window": "5h", "utilization_pct": 10.0}]},
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+
+    view = client.get("/api/fleet/runners/r1")
+
+    assert view.status_code == 200
+    assert view.json()["external_subscription_usage"]["sampled_at"]  # defaulted, never absent
+    assert view.json()["external_subscription_usage"]["windows"] == []  # the unusable window dropped
+
+
+def test_events_event_recorded_is_accepted(client: TestClient) -> None:
+    """An operational event (issue #125) is never token-gated and needs no chunk — it
+    lands off a runner-scoped batch with no claim in play."""
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "event.recorded",
+                    "payload": {"severity": "error", "kind": "spawn.failed", "message": "no environment free"},
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+    assert ack.json()["rejected"] == []
+
+
+def test_events_newest_external_usage_sample_wins_on_the_runner_view(client: TestClient) -> None:
+    """The newest sample overwrites the one before it and is served on the runner view — the
+    mirror field a real client reads, not an accepted-and-discarded fact. Which store holds it
+    is ``test_a_report_that_outruns_its_registration_is_readable_once_it_lands``'s question."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    for seq, pct in ((1, 42.0), (2, 71.5)):
+        ack = client.post(
+            "/api/fleet/events",
+            json={
+                "runner_id": "r1",
+                "facts": [
+                    {
+                        "seq": seq,
+                        "kind": "external_subscription_usage.sampled",
+                        "payload": {
+                            "sampled_at": f"2026-08-01T1{seq}:00:00+00:00",
+                            "windows": [
+                                {
+                                    "window": "5h",
+                                    "utilization_pct": pct,
+                                    "resets_at": "2026-08-01T17:00:00+00:00",
+                                    "window_seconds": 18000,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+        assert ack.json()["applied"] == [seq]
+    view = client.get("/api/fleet/runners/r1").json()
+    assert view["external_subscription_usage"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
+    assert view["external_subscription_usage"]["windows"][0]["utilization_pct"] == 71.5
+
+
+def test_registration_round_trips_env_capacity_onto_the_runner_view(client: TestClient) -> None:
+    """``env_capacity`` is reported at registration and overwritten on every re-register,
+    exactly like ``workspace_id``."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws", "env_capacity": 4})
+    assert client.get("/api/fleet/runners/r1").json()["env_capacity"] == 4
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws", "env_capacity": 2})
+    assert client.get("/api/fleet/runners/r1").json()["env_capacity"] == 2
+
+
 def test_events_external_subscription_usage_sampled_is_accepted(client: TestClient) -> None:
     """A sampled external-subscription-usage snapshot (issue #218) is runner-scoped and
-    advisory-only, mirroring ``usage.recorded``/``event.recorded``: the mock has no
-    fleet-registry display field to refresh it into, so accepting without modeling
-    further is the honest minimum."""
+    advisory-only: applied for a runner the registry has never seen. That it survives to be
+    read is pinned by ``test_a_report_that_outruns_its_registration_is_readable_once_it_lands``."""
     ack = client.post(
         "/api/fleet/events",
         json={

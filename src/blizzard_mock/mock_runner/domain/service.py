@@ -64,7 +64,7 @@ class MockRunnerService:
 
     def register(self) -> dict[str, Any]:
         self._apply_delay(None)
-        status, body = self._gw.register(self._runner_id, self._workspace_id)
+        status, body = self._gw.register(self._runner_id, workspace_id=self._workspace_id)
         return {"status": status, "response": body}
 
     def peek(self) -> dict[str, Any]:
@@ -96,6 +96,7 @@ class MockRunnerService:
     def complete(
         self,
         chunk_id: str,
+        *,
         choice: str,
         artifacts: list[dict[str, Any]] | None = None,
         check_results: list[dict[str, Any]] | None = None,
@@ -219,7 +220,7 @@ class MockRunnerService:
         status, response = self._gw.submit_decision(chunk_id, body)
         return {"drove": True, "status": status, "response": response}
 
-    def ask(self, chunk_id: str, question: str, options: list[str] | None = None) -> dict[str, Any]:
+    def ask(self, chunk_id: str, *, question: str, options: list[str] | None = None) -> dict[str, Any]:
         """Push a ``question.asked`` fact via ``/events`` — mints a pollable question
         hub-side. Returns the minted ``question_id`` so a test can poll it."""
         self._apply_delay(chunk_id)

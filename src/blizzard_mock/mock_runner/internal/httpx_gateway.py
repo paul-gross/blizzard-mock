@@ -30,7 +30,7 @@ class HttpxHubGateway:
     def __init__(self, client: httpx.Client) -> None:
         self._client = client
 
-    def register(self, runner_id: str, workspace_id: str) -> tuple[int, dict[str, Any]]:
+    def register(self, runner_id: str, *, workspace_id: str) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/runners", {"runner_id": runner_id, "workspace_id": workspace_id})
 
     def peek(self) -> tuple[int, dict[str, Any]]:

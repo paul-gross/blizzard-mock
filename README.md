@@ -37,6 +37,12 @@ uv run pytest
 
 (mise tasks `install` / `lint` / `format` / `typecheck` / `test` wrap these.)
 
+`uv run pytest` needs a sibling `blizzard` checkout: the wire-parity guard
+(`tests/test_wire_parity.py`) compares the hub mirrors against that repo's committed
+OpenAPI and fact-kind constants, and **fails** rather than skips when it cannot resolve
+one — parity it never checked is not a green. A winter feature env supplies the sibling
+by construction; elsewhere, point `$BLIZZARD_SOURCE` at the checkout.
+
 ## Acceptance proof
 
 `tests/test_acceptance_loop_e2e.py` (pytest marker `e2e`) is the fleet's standing

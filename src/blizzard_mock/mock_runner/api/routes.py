@@ -80,7 +80,9 @@ def drive_claim(body: ClaimBody, service: Annotated[MockRunnerService, Depends(g
 
 @drive_router.post("/complete")
 def drive_complete(body: CompleteBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.complete(body.chunk_id, body.choice, body.artifacts, body.check_results)
+    return service.complete(
+        body.chunk_id, choice=body.choice, artifacts=body.artifacts, check_results=body.check_results
+    )
 
 
 @drive_router.post("/get-chunk")
@@ -129,7 +131,7 @@ def drive_decide(body: DecideBody, service: Annotated[MockRunnerService, Depends
 
 @drive_router.post("/ask")
 def drive_ask(body: AskBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.ask(body.chunk_id, body.question, body.options)
+    return service.ask(body.chunk_id, question=body.question, options=body.options)
 
 
 @drive_router.post("/report-event")
