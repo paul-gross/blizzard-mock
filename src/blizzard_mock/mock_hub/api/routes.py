@@ -20,6 +20,7 @@ from blizzard_mock.mock_hub.api.deps import (
     RouteClaimBody,
     RunnerFactBatchBody,
     RunnerRegistrationBody,
+    TranscriptSegmentBatchBody,
     get_service,
 )
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService, QuestionNotFound
@@ -134,6 +135,15 @@ def submit_decision(
 @fleet_router.post("/events")
 def push_facts(body: RunnerFactBatchBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     return service.ingest_facts(body.runner_id, [f.model_dump() for f in body.facts])
+
+
+@fleet_router.post("/transcripts")
+def push_transcripts(
+    body: TranscriptSegmentBatchBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """The transcript lane's own push (blizzard#247) — distinct from :func:`push_facts`,
+    mirroring the real hub's ``POST /api/fleet/transcripts``."""
+    return service.ingest_transcripts(body.runner_id, [r.model_dump() for r in body.records])
 
 
 @fleet_router.post("/runners", status_code=201)

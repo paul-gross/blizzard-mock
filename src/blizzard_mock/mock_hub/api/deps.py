@@ -67,6 +67,30 @@ class RunnerFactBatchBody(BaseModel):
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
+class TranscriptSegmentRecordBody(BaseModel):
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247).
+    ``turns`` stays freeform (``list[dict]``) — the mock never interprets turn content,
+    only counts and stores it, same as the real hub's store-shaped ``turns_json``."""
+
+    seq: int
+    segment_id: str
+    chunk_id: str
+    node_id: str
+    epoch: int
+    spawn_generation: int
+    turn_range_start: int
+    turn_range_end: int
+    final: bool = False
+    normalizer_version: str = ""
+    harness_version: str | None = None
+    turns: list[dict[str, object]] = Field(default_factory=list)
+
+
+class TranscriptSegmentBatchBody(BaseModel):
+    runner_id: str
+    records: list[TranscriptSegmentRecordBody] = Field(default_factory=list)
+
+
 class PauseBody(BaseModel):
     paused: bool = True
 

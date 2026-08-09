@@ -179,6 +179,18 @@ class RunnerFactAck(BaseModel):
     rejected: list[int] = Field(default_factory=list)
 
 
+class TranscriptSegmentAck(BaseModel):
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck`` (blizzard#247)
+    — the transcript lane's own ack, distinct from :class:`RunnerFactAck`. The mock
+    applies every record unconditionally (no cap policy), so ``capped`` stays empty."""
+
+    runner_id: str
+    high_water: int
+    applied: list[int] = Field(default_factory=list)
+    already_applied: list[int] = Field(default_factory=list)
+    capped: list[int] = Field(default_factory=list)
+
+
 class WorkItemEntry(BaseModel):
     """One pointer's pass-through work item; ``title``/``body`` are canned,
     the mock carries no forge integration."""

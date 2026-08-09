@@ -42,6 +42,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteView,
     RunnerFactAck,
     RunnerView,
+    TranscriptSegmentAck,
     WorkItemEntry,
     WorkItemsView,
 )
@@ -85,6 +86,9 @@ class MockHubService:
         #: Per-runner fact high-water mark — a seq at/under this mark is
         #: re-acked as ``already_applied`` rather than re-applied.
         self._fact_high_water: dict[str, int] = {}
+        #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
+        #: per-runner sequence from the fact lane's above.
+        self._transcript_high_water: dict[str, int] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -114,6 +118,7 @@ class MockHubService:
         self._state.clear()
         self._levers.clear_all()
         self._fact_high_water.clear()
+        self._transcript_high_water.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -270,6 +275,26 @@ class MockHubService:
         self._fact_high_water[runner_id] = mark
         return RunnerFactAck(
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
+        )
+
+    def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
+        """Apply a batched ``POST /transcripts`` push against the transcript lane's own
+        high-water mark (blizzard#247, D7) — a separate sequence from
+        :meth:`ingest_facts`'s fact lane. No cap policy: the mock applies every record
+        unconditionally, so ``capped`` is always empty."""
+        mark = self._transcript_high_water.get(runner_id, 0)
+        applied: list[int] = []
+        already_applied: list[int] = []
+        for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
+            seq = int(record.get("seq", 0))
+            if seq <= mark:
+                already_applied.append(seq)
+                continue
+            applied.append(seq)
+            mark = max(mark, seq)
+        self._transcript_high_water[runner_id] = mark
+        return TranscriptSegmentAck(
+            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=[]
         )
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
