@@ -126,12 +126,31 @@ def _mirror_models() -> dict[str, type[BaseModel]]:
     }
 
 
+def _deps_mirror_bodies() -> dict[str, type[BaseModel]]:
+    """Every ``deps`` request body marked ``MirroredWireBody`` (F10) — the request-body
+    counterpart to ``_mirror_models``'s module-membership scan, since ``deps`` also holds
+    bodies that are deliberately NOT field-for-field mirrors."""
+    return {
+        name: obj
+        for name, obj in vars(deps).items()
+        if inspect.isclass(obj) and issubclass(obj, deps.MirroredWireBody) and obj is not deps.MirroredWireBody
+    }
+
+
 def _hub_schemas() -> dict[str, Any]:
     return json.loads(_sibling(_HUB_SPEC))["components"]["schemas"]
 
 
 def test_every_mirror_model_is_mapped_to_a_real_schema() -> None:
     assert set(_mirror_models()) == set(_MIRRORED) | _UNSCHEMAED
+
+
+def test_every_mirrored_wire_body_is_mapped_to_a_real_schema() -> None:
+    """F10 (review round 8): ``_MIRRORED_BODIES`` used to be checked only from below —
+    every KEY in it was field-diffed, but nothing asserted the map was complete, so a new
+    ``MirroredWireBody`` added to ``deps`` without a matching entry shipped silently
+    unchecked. Mirrors ``test_every_mirror_model_is_mapped_to_a_real_schema`` above."""
+    assert set(_deps_mirror_bodies()) == set(_MIRRORED_BODIES)
 
 
 @pytest.mark.parametrize("name", sorted(_MIRRORED_BODIES))

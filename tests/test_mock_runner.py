@@ -322,6 +322,35 @@ def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
     assert any(q["question_id"] == question_id for q in detail["questions"])
 
 
+def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """review round 8 F7: no service test previously drove a transcript push from a mock
+    runner — ``IHubGateway`` stopped at ``push_facts``. ``push_transcripts`` closes that
+    gap, proving the transcript lane's own route (``/transcripts``, distinct from
+    ``/events``) is reachable end to end through the mock runner's driver, not just via a
+    raw client straight at the mock hub."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+
+    pushed = runner.post("/_drive/push-transcript", json={"chunk_id": chunk_id, "segment_id": "sg_1"}).json()
+
+    assert pushed["drove"] is True
+    assert pushed["status"] == 200
+    assert pushed["response"]["applied"] == [1]
+    assert pushed["response"]["capped"] == []
+
+
+def test_drive_push_transcript_requires_a_held_chunk(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+
+    pushed = runner.post("/_drive/push-transcript", json={"chunk_id": chunk_id}).json()
+
+    assert pushed["drove"] is False
+
+
 def test_drive_poll_answer_reflects_an_operator_answer(stack: tuple[TestClient, TestClient]) -> None:
     """Drives the answered path through the hub's test-control answer route
     (``POST /_seed/answer``, added alongside this parity work by the hub side)."""

@@ -27,6 +27,20 @@ RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 EVENT_RECORDED = "event.recorded"
 
 
+def _placeholder_turn(timestamp: str) -> dict[str, Any]:
+    """A minimal, validation-passing turn — the mock hub never interprets content."""
+    return {
+        "index": 0,
+        "kind": "asst",
+        "timestamp": timestamp,
+        "text": "mock turn",
+        "tool": None,
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+
+
 class MockRunnerService:
     """The composition-root-wired driver every mock-runner control route delegates to."""
 
@@ -42,6 +56,8 @@ class MockRunnerService:
         #: Monotonic sequence for facts that are not chunk-scoped leases —
         #: independent of a ``Held``'s own per-chunk lease-fact counter.
         self._runner_seq = 0
+        #: The transcript lane's own sequence (D3) — independent of ``_runner_seq``'s.
+        self._transcript_seq = 0
         #: The mock's own local git-commit declaration store (issue #143) —
         #: ``lease_id -> repo -> {forge, repo, branch, commit}``, latest-wins.
         self._git_commit_declarations: dict[str, dict[str, dict[str, str]]] = {}
@@ -57,6 +73,7 @@ class MockRunnerService:
     def reset(self) -> None:
         self._held.clear()
         self._runner_seq = 0
+        self._transcript_seq = 0
         self._git_commit_declarations.clear()
         self._levers.clear_all()
 
@@ -245,6 +262,43 @@ class MockRunnerService:
             }
         )
         return {"drove": True, "question_id": question_id, "status": status, "response": response}
+
+    def push_transcript(
+        self,
+        chunk_id: str,
+        *,
+        segment_id: str = "sg_mock",
+        turns: list[dict[str, Any]] | None = None,
+        final: bool = False,
+        record_truncated: bool = False,
+    ) -> dict[str, Any]:
+        """Push one transcript segment record via ``/transcripts`` (blizzard#246/#247) —
+        the transcript lane's counterpart to ``ask``'s ``/events`` push, letting a
+        hub-service test drive a transcript push from a mock runner (``bzh:wire-change-
+        extends-mock``) rather than a raw client."""
+        self._apply_delay(chunk_id)
+        held = self._held.get(chunk_id)
+        if held is None:
+            return {"drove": False, "reason": f"chunk {chunk_id} not claimed by this driver"}
+        self._transcript_seq += 1
+        turn_list = turns or [_placeholder_turn(self._clock.now().isoformat())]
+        record = {
+            "seq": self._transcript_seq,
+            "segment_id": segment_id,
+            "chunk_id": chunk_id,
+            "node_id": held.from_node_id,
+            "epoch": held.epoch,
+            "spawn_generation": 1,
+            "turn_range_start": 0,
+            "turn_range_end": len(turn_list) - 1,
+            "final": final,
+            "normalizer_version": "mock/1",
+            "harness_version": None,
+            "record_truncated": record_truncated,
+            "turns": turn_list,
+        }
+        status, response = self._gw.push_transcripts({"runner_id": self._runner_id, "records": [record]})
+        return {"drove": True, "status": status, "response": response}
 
     def poll_answer(self, question_id: str) -> dict[str, Any]:
         """``GET /questions/{id}`` — the runner's answer poll."""

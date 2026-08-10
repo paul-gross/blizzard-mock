@@ -25,6 +25,7 @@ from blizzard_mock.mock_runner.domain.models import (
     LeaseQueryBody,
     PauseBody,
     PollAnswerBody,
+    PushTranscriptBody,
     ReportEventBody,
     ResumeBody,
 )
@@ -154,6 +155,19 @@ def drive_poll_answer(
     body: PollAnswerBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
     return service.poll_answer(body.question_id)
+
+
+@drive_router.post("/push-transcript")
+def drive_push_transcript(
+    body: PushTranscriptBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.push_transcript(
+        body.chunk_id,
+        segment_id=body.segment_id,
+        turns=body.turns,
+        final=body.final,
+        record_truncated=body.record_truncated,
+    )
 
 
 @drive_router.post("/pause")

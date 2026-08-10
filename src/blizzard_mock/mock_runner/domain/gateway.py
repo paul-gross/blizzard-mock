@@ -41,3 +41,7 @@ class IHubGateway(Protocol):
     #: The generic batched ``POST /events`` push, for facts that are not chunk-scoped
     #: leases (``question.asked``, ``runner.locally_paused``/``_resumed``).
     def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
+
+    #: The dedicated ``POST /transcripts`` route (blizzard#246/#247) — the transcript
+    #: lane's own push, structurally independent of ``push_facts``'s ``/events``.
+    def push_transcripts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...

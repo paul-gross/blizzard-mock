@@ -69,7 +69,14 @@ class RunnerFactBatchBody(BaseModel):
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
-class ToolCallSegmentBody(BaseModel):
+class MirroredWireBody(BaseModel):
+    """Marker base for a request body meant to mirror a real wire schema field-for-field
+    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
+    of intended mirrors mechanically (F10), the request-body counterpart to the
+    response-model mirror module's own module-membership scan."""
+
+
+class ToolCallSegmentBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
     including which fields are REQUIRED — a defaulted field here would let a real field
     rename ship green through `service-test` (which drives the mock, not the real hub)
@@ -88,7 +95,7 @@ class ToolCallSegmentBody(BaseModel):
     input_truncated: bool = False
 
 
-class SidechainSegmentBody(BaseModel):
+class SidechainSegmentBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` field-for-field,
     including required-ness."""
 
@@ -98,7 +105,7 @@ class SidechainSegmentBody(BaseModel):
     turns: list[TurnSegmentBody]
 
 
-class TurnSegmentBody(BaseModel):
+class TurnSegmentBody(MirroredWireBody):
     """Mirrors ``TurnSegmentView`` field-for-field, including required-ness — the mock
     still never *interprets* turn content, but a typed, non-defaulted shape here fails
     validation on a real field rename or drop instead of silently passing through as an
@@ -117,7 +124,7 @@ class TurnSegmentBody(BaseModel):
 SidechainSegmentBody.model_rebuild()
 
 
-class TranscriptSegmentRecordBody(BaseModel):
+class TranscriptSegmentRecordBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)
     field-for-field, including required-ness — as exposed to a silent rename as the turn
     bodies above, bar ``record_truncated``, which the real model defaults too."""
@@ -137,7 +144,7 @@ class TranscriptSegmentRecordBody(BaseModel):
     turns: list[TurnSegmentBody]
 
 
-class TranscriptSegmentBatchBody(BaseModel):
+class TranscriptSegmentBatchBody(MirroredWireBody):
     runner_id: str
     records: list[TranscriptSegmentRecordBody] = Field(default_factory=list)
 

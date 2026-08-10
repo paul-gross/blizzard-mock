@@ -120,6 +120,18 @@ class PollAnswerBody(BaseModel):
     question_id: str
 
 
+class PushTranscriptBody(BaseModel):
+    """POST /_drive/push-transcript — push one transcript segment record via
+    ``POST /transcripts`` (blizzard#246/#247), the transcript lane's counterpart to
+    ``AskBody``'s ``/events`` push. ``turns`` defaults to one placeholder turn when empty."""
+
+    chunk_id: str
+    segment_id: str = "sg_mock"
+    turns: list[dict[str, Any]] = Field(default_factory=list)
+    final: bool = False
+    record_truncated: bool = False
+
+
 class PauseBody(BaseModel):
     """POST /_drive/pause — push a runner-scoped ``runner.locally_paused`` fact."""
 

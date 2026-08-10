@@ -63,6 +63,9 @@ class HttpxHubGateway:
     def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/events", body)
 
+    def push_transcripts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        return self._post(f"{_API}/transcripts", body)
+
     def _get(self, path: str) -> tuple[int, dict[str, Any]]:
         try:
             return _result(self._client.get(path))
