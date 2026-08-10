@@ -26,6 +26,7 @@ import pytest
 from pydantic import BaseModel
 
 import blizzard_mock.mock_hub.domain.wire as mirror
+from blizzard_mock.mock_hub.api import deps
 from blizzard_mock.mock_hub.domain import service as hub_service
 from blizzard_mock.mock_hub.domain import state as hub_state
 from blizzard_mock.mock_runner.domain import gateway as runner_gateway
@@ -101,6 +102,21 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
 #: absent from the spec entirely and this guard cannot reach it.
 _UNSCHEMAED = {"RouteClaimConflict"}
 
+#: Request-BODY mirrors, which live in ``mock_hub.api.deps`` rather than the mirror module
+#: above and so are invisible to ``_mirror_models``. Only the transcript lane's five are
+#: mapped here (blizzard#246): their own docstrings rest the rename defense on being typed
+#: and required, and `ToolCallSegmentBody.input_truncated` is now defaulted, which alone
+#: would let a rename of that field pass validation silently.
+#: The two recursive views carry FastAPI's ``-Input``/``-Output`` split; a request body
+#: mirrors the ``-Input`` half by construction.
+_MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
+    "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
+    "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),
+    "TranscriptSegmentBatchBody": ("TranscriptSegmentBatch", frozenset()),
+    "TranscriptSegmentRecordBody": ("TranscriptSegmentRecord", frozenset()),
+    "TurnSegmentBody": ("TurnSegmentView-Input", frozenset()),
+}
+
 
 def _mirror_models() -> dict[str, type[BaseModel]]:
     return {
@@ -116,6 +132,19 @@ def _hub_schemas() -> dict[str, Any]:
 
 def test_every_mirror_model_is_mapped_to_a_real_schema() -> None:
     assert set(_mirror_models()) == set(_MIRRORED) | _UNSCHEMAED
+
+
+@pytest.mark.parametrize("name", sorted(_MIRRORED_BODIES))
+def test_transcript_body_field_set_agrees_with_the_real_schema(name: str) -> None:
+    """The same field-set diff for the transcript lane's request bodies, which
+    ``_mirror_models`` cannot see (`bzh:wire-change-extends-mock`)."""
+    schema_name, omitted = _MIRRORED_BODIES[name]
+    schemas = _hub_schemas()
+    assert schema_name in schemas, f"{schema_name} is gone from the hub spec — the mirror names a schema that left"
+    real = set(schemas[schema_name].get("properties", {}))
+    mirrored = set(getattr(deps, name).model_fields)
+    assert mirrored - real == set(), f"{name} carries fields the real schema has not: {sorted(mirrored - real)}"
+    assert real - mirrored == omitted, f"{name} omits {sorted(real - mirrored)}, declared {sorted(omitted)}"
 
 
 @pytest.mark.parametrize("name", sorted(_MIRRORED))
