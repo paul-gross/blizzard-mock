@@ -109,6 +109,8 @@ dropped), so an accepted fact can never make a later read raise.
 | `drop_ack` | — | Apply the completion's write, then answer 503 — the ack is dropped though the transition landed; the re-flush is idempotent (D-090) |
 | `conflicting_fact` | `{runner_id}` | `GET /chunks/{id}` reports a route held by a *different* runner — a conflicting locator fact |
 | `unreachable` | `remaining?` | All requests → 503; `remaining=N` heals after N calls (go unreachable *mid-lease*) |
+| `unreachable_transcripts` | `remaining?` | `POST /transcripts` alone → 503; every other route (incl. `/events`) stays healthy (D6) |
+| `delay_transcripts` | `{ms}` | `POST /transcripts` alone sleeps `ms`; every other route (incl. `/events`) stays fast (D6) |
 | `replay` | — | The next completion returns the *previous* apply-response replayed — a duplicate delivery, no re-advance |
 | `stale_envelope` | — | `GET /chunks/{id}/envelope` stamps a stale (`latest_epoch-1`) fence, so a completion from it is fenced out (D-007) |
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |

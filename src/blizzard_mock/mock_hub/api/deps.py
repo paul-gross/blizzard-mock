@@ -2,8 +2,8 @@
 
 The composition root stashes the wired ``MockHubService`` and lever store on
 ``app.state``; routers reach them through these dependencies
-(``bzh:dependency-injection``). Request bodies name only the fields the mock reads.
-"""
+(``bzh:dependency-injection``). Request bodies name only the fields the mock reads —
+EXCEPT the transcript segment mirror bodies, field-for-field including required-ness."""
 
 from __future__ import annotations
 
