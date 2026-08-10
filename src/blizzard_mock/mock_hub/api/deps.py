@@ -73,7 +73,10 @@ class ToolCallSegmentBody(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
     including which fields are REQUIRED — a defaulted field here would let a real field
     rename ship green through `service-test` (which drives the mock, not the real hub)
-    with no warning, same as a freeform ``dict`` would."""
+    with no warning, same as a freeform ``dict`` would. ``input_truncated`` is the one
+    deliberate exception: it mirrors the real view's own default too (review round 6 F4),
+    since matching required-ness means matching defaultedness for a field the real hub
+    added forward-compatibly."""
 
     name: str
     input: dict[str, object]
@@ -82,7 +85,7 @@ class ToolCallSegmentBody(BaseModel):
     tool_use_id: str | None
     output: str | None
     output_truncated: bool
-    input_truncated: bool
+    input_truncated: bool = False
 
 
 class SidechainSegmentBody(BaseModel):

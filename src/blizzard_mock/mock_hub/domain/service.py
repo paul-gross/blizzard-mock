@@ -101,9 +101,16 @@ class MockHubService:
         self._transcript_high_water: dict[str, int] = {}
         #: Accepted bytes per chunk — the chunk-budget cap's running total.
         self._transcript_chunk_bytes: dict[str, int] = {}
-        #: The real hub's natural key (D8) — the durable record of a cap decision, so a
-        #: replayed seq still reports `capped` rather than bare idempotency.
-        self._transcript_capped_keys: set[tuple[str, int]] = set()
+        #: The real hub's natural key (D8) — the durable record of a key's own accept/
+        #: reject decision, independent of seq, mirroring `IWriteTranscriptSegments
+        #: .natural_key_state`'s "absent"/"accepted"/"rejected" (review round 6 F10). A
+        #: key absent from this dict reads as "absent". Used two ways: a replayed seq
+        #: (`seq <= mark`) still reports its key's own outcome rather than bare
+        #: idempotency, and a re-offered key under a FRESH seq (`seq > mark`) short-
+        #: circuits to `applied` with no re-adjudication and no re-crediting the chunk
+        #: budget once already "accepted" — mirroring `TranscriptIngestService._apply`'s
+        #: own early return on `state == "accepted"`.
+        self._transcript_key_state: dict[tuple[str, int], str] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -135,7 +142,7 @@ class MockHubService:
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
         self._transcript_chunk_bytes.clear()
-        self._transcript_capped_keys.clear()
+        self._transcript_key_state.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -300,7 +307,11 @@ class MockHubService:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
         high-water mark (blizzard#247, D7) — a separate sequence from :meth:`ingest_facts`'s
         fact lane. Mirrors the real hub's two caps: an over-cap record is capped but still
-        acknowledged, the mark advancing past it, and earns no chunk-budget credit."""
+        acknowledged, the mark advancing past it, and earns no chunk-budget credit. Also
+        mirrors the real hub's natural-key short-circuit (D8, review round 6 F10): a key
+        already `"accepted"` re-offered under a fresh seq applies with no re-adjudication
+        and no re-crediting the chunk budget, and a capped key that is later re-offered and
+        accepted stops reporting `capped` — the state is keyed by natural key, not seq."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -309,17 +320,23 @@ class MockHubService:
             seq = int(record.get("seq", 0))
             key = (str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
             if seq <= mark:
-                # A lost-ack replay of an already-decided seq still reports its cap outcome.
-                (capped if key in self._transcript_capped_keys else already_applied).append(seq)
+                # A lost-ack replay of an already-decided seq still reports its own outcome.
+                (capped if self._transcript_key_state.get(key) == "rejected" else already_applied).append(seq)
                 continue
             mark = max(mark, seq)
+            if self._transcript_key_state.get(key) == "accepted":
+                # Mirrors `TranscriptIngestService._apply`'s own early return: already
+                # accepted under this natural key — no re-adjudication, no re-crediting.
+                applied.append(seq)
+                continue
             chunk_id = str(record.get("chunk_id", ""))
             size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
             stored = self._transcript_chunk_bytes.get(chunk_id, 0)
             if size > _TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
-                self._transcript_capped_keys.add(key)
+                self._transcript_key_state[key] = "rejected"
                 capped.append(seq)
                 continue
+            self._transcript_key_state[key] = "accepted"
             self._transcript_chunk_bytes[chunk_id] = stored + size
             applied.append(seq)
         self._transcript_high_water[runner_id] = mark

@@ -9,6 +9,7 @@ import: the mock stands alone.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -916,6 +917,39 @@ def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClien
     assert resp.status_code == 422
 
 
+def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestClient) -> None:
+    """review round 6 F4: ``input_truncated`` is the one deliberate default in
+    ``ToolCallSegmentBody`` — mirroring the real hub's own ``ToolCallSegmentView``
+    default (round 5's F1 field, made forward-compat in round 6). A record whose tool
+    call omits it entirely must still 200, not 422 like a genuine field rename would."""
+    chunk_id = _seed(client)
+    turn = {
+        "index": 0,
+        "kind": "tool",
+        "timestamp": None,
+        "text": "",
+        "tool": {
+            "name": "Bash",
+            "input": {},
+            "input_unparsed": None,
+            "input_shape": "object",
+            "tool_use_id": "tool_1",
+            "output": None,
+            "output_truncated": False,
+            # "input_truncated" deliberately omitted
+        },
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+    record = _transcript_record(chunk_id, seq=1, turns=[turn])
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [record]})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] == [1]
+
+
 def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient) -> None:
     """review F9: the nested-``tool`` case above is caught by ``ToolCallSegmentBody``'s
     genuinely-required fields alone — every ``TurnSegmentBody`` field used to default,
@@ -1074,6 +1108,113 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
         else:
             assert body["applied"] == [seq]
     assert capped_seq <= 40  # sanity: the budget must actually bind within a handful of 2 MB records
+
+
+def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped(client: TestClient) -> None:
+    """review round 6 F10: the real hub's `update_to_accepted` clears a natural key's
+    `rejected` state when it is re-offered and accepted — the mock's own decision tracking
+    must not be add-only. A key capped once, then later re-offered under a fresh seq and
+    accepted, must stop reporting `capped` on a later replay of the ORIGINAL seq too, not
+    report it forever."""
+    chunk_id = _seed(client)
+    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
+
+    first = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert first.json()["capped"] == [1]
+
+    # The SAME natural key (segment_id="sg_1", turn_range_start=0), re-offered under a
+    # fresh seq, now in-cap and accepted.
+    reoffer = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=2)]},
+    )
+    assert reoffer.json()["applied"] == [2]
+    assert reoffer.json()["capped"] == []
+
+    # A lost-ack replay of the ORIGINAL (now behind-the-mark) seq must no longer report
+    # `capped` — the key's own decision moved to accepted, not stuck at its first outcome.
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert replay.json()["capped"] == []
+    assert replay.json()["already_applied"] == [1]
+
+
+def _turns_of_size(target_bytes: int) -> list[dict]:
+    """A single turn whose ``turns`` JSON encodes to exactly ``target_bytes`` — the exact
+    quantity the mock's own chunk-budget accounting sums (``len(json.dumps(record.get(
+    "turns", [])).encode("utf-8"))``)."""
+    overhead = len(json.dumps([_turn_with_text("")]).encode("utf-8"))
+    return [_turn_with_text("x" * (target_bytes - overhead))]
+
+
+def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recredit_the_chunk_budget(
+    client: TestClient,
+) -> None:
+    """review round 6 F10: the real hub's ``TranscriptIngestService._apply`` returns early,
+    with no re-crediting, once a natural key is already ``"accepted"`` — a re-offer under a
+    fresh seq must not double-count its bytes against the chunk budget. 31 records at
+    exactly 2 MiB each leave exactly 2 MiB of the 64 MiB budget free; re-offering an
+    already-accepted key under a new seq must not consume that headroom, or the following
+    genuinely new 2 MiB record — which fits exactly — gets wrongly capped."""
+    chunk_id = _seed(client)
+    two_mib = 2 * 1024 * 1024
+    seq = 0
+    for turn_range_start in range(31):
+        seq += 1
+        ack = client.post(
+            "/api/fleet/transcripts",
+            json={
+                "runner_id": "r1",
+                "records": [
+                    _transcript_record(
+                        chunk_id,
+                        seq=seq,
+                        turn_range_start=turn_range_start,
+                        turn_range_end=turn_range_start,
+                        turns=_turns_of_size(two_mib),
+                    )
+                ],
+            },
+        )
+        assert ack.json()["applied"] == [seq], ack.text
+
+    # Re-offer the FIRST accepted key (turn_range_start=0) under a fresh seq — must apply
+    # with no re-adjudication and no re-crediting.
+    seq += 1
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(
+                    chunk_id, seq=seq, turn_range_start=0, turn_range_end=0, turns=_turns_of_size(two_mib)
+                )
+            ],
+        },
+    )
+    assert replay.json()["applied"] == [seq]
+
+    # The remaining 2 MiB of headroom is still free — a genuinely new key fits exactly,
+    # which it would not if the replay above had re-credited its own 2 MiB a second time.
+    seq += 1
+    fresh = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(
+                    chunk_id, seq=seq, turn_range_start=31, turn_range_end=31, turns=_turns_of_size(two_mib)
+                )
+            ],
+        },
+    )
+    assert fresh.json()["applied"] == [seq]
+    assert fresh.json()["capped"] == []
 
 
 # --- test-control answer route ------------------------------------------------
