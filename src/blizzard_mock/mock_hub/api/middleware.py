@@ -1,11 +1,13 @@
-"""Transport-edge lever middleware — ``unreachable`` and ``delay`` — plus request capture.
+"""Transport-edge lever middleware — plus request capture.
 
-Two levers bend a request before it reaches a route: ``unreachable`` answers
-503; ``delay`` sleeps ``payload.ms`` first. Control-plane and liveness routes
-are exempt. ``RequestCaptureMiddleware`` records every ``/api/*`` request.
-"""
+Four levers: ``unreachable``/``unreachable_transcripts`` answer 503 (every route / the
+transcripts route alone); ``delay``/``delay_transcripts`` sleep first, scoped the same
+way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware`` records every
+``/api/*`` request."""
 
 from __future__ import annotations
+
+import asyncio
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -48,12 +50,23 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
             self._levers.consume(unreachable)
             return JSONResponse(status_code=503, content={"detail": "the hub is unreachable"})
 
+        if path.startswith("/api/fleet/transcripts"):
+            unreachable_transcripts = self._levers.find(HubLever.UNREACHABLE_TRANSCRIPTS.value, chunk_id)
+            if unreachable_transcripts is not None:
+                self._levers.consume(unreachable_transcripts)
+                return JSONResponse(status_code=503, content={"detail": "the transcript route is unreachable"})
+
+            delay_transcripts = self._levers.find(HubLever.DELAY_TRANSCRIPTS.value, chunk_id)
+            if delay_transcripts is not None:
+                self._levers.consume(delay_transcripts)
+                # `await`, not a blocking sleep: this route stays slow without holding
+                # the single event loop every other route shares.
+                await asyncio.sleep(int(delay_transcripts.payload.get("ms", 0)) / 1000.0)
+
         delay = self._levers.find(HubLever.DELAY.value, chunk_id)
         if delay is not None:
             self._levers.consume(delay)
-            import time
-
-            time.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
+            await asyncio.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
 
         return await call_next(request)
 

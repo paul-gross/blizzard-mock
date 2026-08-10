@@ -2,8 +2,8 @@
 
 The composition root stashes the wired ``MockHubService`` and lever store on
 ``app.state``; routers reach them through these dependencies
-(``bzh:dependency-injection``). Request bodies name only the fields the mock reads.
-"""
+(``bzh:dependency-injection``). Request bodies name only the fields the mock reads —
+EXCEPT the transcript segment mirror bodies, field-for-field including required-ness."""
 
 from __future__ import annotations
 
@@ -69,10 +69,61 @@ class RunnerFactBatchBody(BaseModel):
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
-class TranscriptSegmentRecordBody(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247).
-    ``turns`` stays freeform (``list[dict]``) — the mock never interprets turn content,
-    only counts and stores it, same as the real hub's store-shaped ``turns_json``."""
+class MirroredWireBody(BaseModel):
+    """Marker base for a request body meant to mirror a real wire schema field-for-field
+    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
+    of intended mirrors mechanically (F10), the request-body counterpart to the
+    response-model mirror module's own module-membership scan."""
+
+
+class ToolCallSegmentBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
+    required-ness included, so a real field rename fails `service-test` rather than
+    shipping green. ``input_truncated`` mirrors the real view's own default instead."""
+
+    name: str
+    input: dict[str, object]
+    input_unparsed: str | None
+    input_shape: str
+    tool_use_id: str | None
+    output: str | None
+    output_truncated: bool
+    input_truncated: bool = False
+
+
+class SidechainSegmentBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` field-for-field,
+    including required-ness."""
+
+    agent_id: str | None
+    agent_type: str | None
+    link: str
+    turns: list[TurnSegmentBody]
+
+
+class TurnSegmentBody(MirroredWireBody):
+    """Mirrors ``TurnSegmentView`` field-for-field, including required-ness — the mock
+    still never *interprets* turn content, but a typed, non-defaulted shape here fails
+    validation on a real field rename or drop instead of silently passing through as an
+    untyped dict or a filled-in default."""
+
+    index: int
+    kind: str
+    timestamp: str | None
+    text: str
+    tool: ToolCallSegmentBody | None
+    thinking_redacted: bool
+    sidechain: SidechainSegmentBody | None
+    truncated: bool
+
+
+SidechainSegmentBody.model_rebuild()
+
+
+class TranscriptSegmentRecordBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)
+    field-for-field, including required-ness — as exposed to a silent rename as the turn
+    bodies above, bar ``record_truncated``, which the real model defaults too."""
 
     seq: int
     segment_id: str
@@ -82,13 +133,14 @@ class TranscriptSegmentRecordBody(BaseModel):
     spawn_generation: int
     turn_range_start: int
     turn_range_end: int
-    final: bool = False
-    normalizer_version: str = ""
-    harness_version: str | None = None
-    turns: list[dict[str, object]] = Field(default_factory=list)
+    final: bool
+    normalizer_version: str
+    harness_version: str | None
+    record_truncated: bool = False
+    turns: list[TurnSegmentBody]
 
 
-class TranscriptSegmentBatchBody(BaseModel):
+class TranscriptSegmentBatchBody(MirroredWireBody):
     runner_id: str
     records: list[TranscriptSegmentRecordBody] = Field(default_factory=list)
 

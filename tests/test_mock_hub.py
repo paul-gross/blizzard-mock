@@ -2,13 +2,14 @@
 
 Drives the hub-mirror surface over a ``TestClient`` (in-process, no network): the happy
 path — seed → peek → claim → fence → complete → a hub node derives ``done`` — plus **each
-of the seven levers**, asserting the named edge state a runner-under-test would then have
+of the eight levers**, asserting the named edge state a runner-under-test would then have
 to survive, and the full ``/events`` fact vocabulary (blizzard-mock#4). No ``blizzard``
 import: the mock stands alone.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -164,13 +165,15 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_seven(client: TestClient) -> None:
+def test_lever_catalog_lists_all_nine(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
+        "delay_transcripts",
         "drop_ack",
         "conflicting_fact",
         "unreachable",
+        "unreachable_transcripts",
         "replay",
         "stale_envelope",
         "chunk_unknown",
@@ -184,6 +187,80 @@ def test_lever_unreachable_heals_mid_lease(client: TestClient) -> None:
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 503
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 503
     assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 200  # healed after 2
+
+
+def test_lever_unreachable_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
+    """D6: a wedged transcript flush never blocks the fact lane — the lever fails
+    ``/transcripts`` alone, and ``/events`` (and everything else) stays healthy."""
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    assert client.post("/_levers/unreachable_transcripts", json={}).status_code == 200
+
+    failed = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []})
+    assert failed.status_code == 503
+
+    healthy = client.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+    assert healthy.status_code == 200
+    assert client.get(f"/api/fleet/chunks/{chunk_id}/envelope").status_code == 200
+
+
+def test_lever_delay_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
+    """review F18: D6's lane-independence claim is "a wedged OR SLOW transcript flush
+    never blocks the fact lane" — ``unreachable_transcripts`` above only ever proves the
+    hard-down half. This lever proves the slow half: ``/transcripts`` alone sleeps,
+    ``/events`` (and everything else) stays fast."""
+    import time
+
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    # Global, not chunk-scoped (matching `unreachable_transcripts` above): the transcripts
+    # route's path carries no `chunks/{id}` segment at all (`chunk_id` lives in each
+    # record's own JSON body), so a per-chunk-scoped lever could never match it.
+    client.post("/_levers/delay_transcripts", json={"payload": {"ms": 200}})
+
+    started = time.monotonic()
+    slow = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []})
+    assert time.monotonic() - started >= 0.18
+    assert slow.status_code == 200  # delayed, not failed
+
+    started = time.monotonic()
+    fast = client.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+    assert time.monotonic() - started < 0.1
+    assert fast.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> None:
+    """review F12: a synchronous sleep in the middleware would hold the whole event loop —
+    a concurrent, undelayed request would then wait out the delay too, not just the one
+    lever-targeted route."""
+    import asyncio
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await ac.post("/_levers/delay_transcripts", json={"payload": {"ms": 300}})
+        started = time.monotonic()
+        fast_finished_at = None
+
+        async def fast_call():  # type: ignore[no-untyped-def]
+            nonlocal fast_finished_at
+            resp = await ac.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+            fast_finished_at = time.monotonic() - started
+            return resp
+
+        slow, fast = await asyncio.gather(
+            ac.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []}), fast_call()
+        )
+
+    assert slow.status_code == 200
+    assert fast.status_code == 200
+    assert fast_finished_at is not None
+    # A blocking sleep would freeze the whole loop, so this undelayed request could not
+    # complete until the delay elapsed too.
+    assert fast_finished_at < 0.15
 
 
 def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> None:
@@ -775,8 +852,10 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 # --- transcript segments (blizzard#247) ---------------------------------------
 
 
-def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0) -> dict:
-    return {
+def _transcript_record(
+    chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, **overrides: object
+) -> dict:
+    record: dict = {
         "seq": seq,
         "segment_id": "sg_1",
         "chunk_id": chunk_id,
@@ -788,8 +867,124 @@ def _transcript_record(chunk_id: str, *, seq: int, turn_range_start: int = 0, tu
         "final": False,
         "normalizer_version": "v1",
         "harness_version": "claude-code-1.0",
-        "turns": [{"index": turn_range_start, "kind": "asst", "text": "hi"}],
+        "turns": [
+            {
+                "index": turn_range_start,
+                "kind": "asst",
+                "timestamp": None,
+                "text": "hi",
+                "tool": None,
+                "thinking_redacted": False,
+                "sidechain": None,
+                "truncated": False,
+            }
+        ],
     }
+    record.update(overrides)
+    return record
+
+
+def _turn_with_text(text: str, *, index: int = 0) -> dict:
+    """A full, validation-passing turn (review F9 — every field is now required)
+    carrying just the given oversized ``text``, for cap tests that don't care about
+    turn shape."""
+    return {
+        "index": index,
+        "kind": "asst",
+        "timestamp": None,
+        "text": text,
+        "tool": None,
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+
+
+def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClient) -> None:
+    """review F11: ``turns`` used to be a freeform ``list[dict]`` here — a real field
+    rename on the wire (e.g. a turn's ``text`` renamed) would have shipped green through
+    every `service-test` scenario, since nothing driving the mock ever validated turn
+    shape. Now typed field-for-field against ``blizzard.wire.transcript_segment
+    .TurnSegmentView`` (``bzh:wire-change-extends-mock``), an unrecognized required field
+    (``input_shape`` missing from a ``tool``) 422s instead of silently passing through."""
+    chunk_id = _seed(client)
+    bad_record = _transcript_record(
+        chunk_id, seq=1, turns=[{"index": 0, "kind": "tool", "tool": {"name": "Bash", "input": {}}}]
+    )
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
+
+
+def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestClient) -> None:
+    """review round 6 F4: ``input_truncated`` is the one deliberate default in
+    ``ToolCallSegmentBody`` — mirroring the real hub's own ``ToolCallSegmentView``
+    default (round 5's F1 field, made forward-compat in round 6). A record whose tool
+    call omits it entirely must still 200, not 422 like a genuine field rename would."""
+    chunk_id = _seed(client)
+    turn = {
+        "index": 0,
+        "kind": "tool",
+        "timestamp": None,
+        "text": "",
+        "tool": {
+            "name": "Bash",
+            "input": {},
+            "input_unparsed": None,
+            "input_shape": "object",
+            "tool_use_id": "tool_1",
+            "output": None,
+            "output_truncated": False,
+            # "input_truncated" deliberately omitted
+        },
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+    record = _transcript_record(chunk_id, seq=1, turns=[turn])
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [record]})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] == [1]
+
+
+def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient) -> None:
+    """review F9: the nested-``tool`` case above is caught by ``ToolCallSegmentBody``'s
+    genuinely-required fields alone — every ``TurnSegmentBody`` field used to default,
+    so a top-level rename (e.g. ``text``) validated here while the real hub 422s. Now
+    every field mirrors ``TurnSegmentView``'s own required-ness."""
+    chunk_id = _seed(client)
+    renamed_turn = {
+        "index": 0,
+        "kind": "asst",
+        "timestamp": None,
+        "content": "hi",  # "text" renamed to "content" — every other required field present
+        "tool": None,
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+    bad_record = _transcript_record(chunk_id, seq=1, turns=[renamed_turn])
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
+
+
+def test_transcripts_rejects_a_record_field_renamed_around_the_turns(client: TestClient) -> None:
+    """review F9, the enclosing level: tightening only the turn bodies leaves
+    ``TranscriptSegmentRecordBody``'s own ``final``/``normalizer_version``/
+    ``harness_version``/``turns`` defaulted, so a rename of one of THOSE still validates
+    here while the real hub 422s — the same silent-drift hole one frame out."""
+    chunk_id = _seed(client)
+    bad_record = _transcript_record(chunk_id, seq=1)
+    bad_record["normalizer_name"] = bad_record.pop("normalizer_version")  # renamed on the wire
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
 
 
 def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
@@ -824,6 +1019,202 @@ def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestC
     replayed = client.post("/api/fleet/transcripts", json=payload)
     assert replayed.json()["already_applied"] == [1]
     assert replayed.json()["applied"] == []
+
+
+def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_advances_past_it(
+    client: TestClient,
+) -> None:
+    """review F8, blizzard#246: mirrors the real hub's ``TranscriptIngestService._apply``
+    (blizzard#247) — an over-cap record is capped (never applied, never stored), but the
+    high-water mark still advances past it (D6), unlike an unseen seq. Without this, no mock
+    or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
+    regression in the runner drain's own cap-handling."""
+    chunk_id = _seed(client)
+    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
+
+    first = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert first.json()["capped"] == [1]
+    assert first.json()["high_water"] == 1  # advances past a capped record too (D6)
+
+    # A replay of the same now-behind-the-mark seq still reports its cap outcome, mirroring
+    # the real hub's natural-key (D8) lookup on the already-applied path: a runner that
+    # crashed in its own after-submit.before-ack window must still learn the record was
+    # capped, or the segment-field/warning marking is permanently skipped on retry.
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert replay.json()["capped"] == [1]
+    assert replay.json()["already_applied"] == []
+
+    # A LATER, in-cap record in the same batch as a cap still applies.
+    ack = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1, turns=huge_turns),
+                _transcript_record(chunk_id, seq=3, turn_range_start=2, turn_range_end=2),
+            ],
+        },
+    )
+    body = ack.json()
+    assert body["capped"] == [2]
+    assert body["applied"] == [3]
+    assert body["high_water"] == 3
+
+    # An ordinary, never-capped seq replays as plain idempotency — the cap outcome above
+    # is keyed on the record, not blanket-applied to everything behind the mark.
+    clean_replay = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=3, turn_range_start=2, turn_range_end=2)],
+        },
+    )
+    assert clean_replay.json()["already_applied"] == [3]
+    assert clean_replay.json()["capped"] == []
+
+
+def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(client: TestClient) -> None:
+    """blizzard#247's second, independent cap: bytes accumulate per chunk, and a record that
+    is well within the per-record cap can still be capped once the chunk's own 64 MB budget
+    is spent — mirrors the real hub's ``_reject_reason`` checking both caps. Loops until the
+    budget actually tips rather than hardcoding a record count against JSON-overhead math."""
+    chunk_id = _seed(client)
+    big_turns = [_turn_with_text("x" * (2 * 1024 * 1024))]  # under the 4 MB record cap alone
+    seq = 0
+    capped_seq: int | None = None
+    while capped_seq is None:
+        seq += 1
+        ack = client.post(
+            "/api/fleet/transcripts",
+            json={
+                "runner_id": "r1",
+                "records": [
+                    _transcript_record(
+                        chunk_id, seq=seq, turn_range_start=seq - 1, turn_range_end=seq - 1, turns=big_turns
+                    )
+                ],
+            },
+        )
+        body = ack.json()
+        assert body["high_water"] == seq  # every record advances the mark, applied or capped (D6)
+        if body["capped"]:
+            capped_seq = seq
+        else:
+            assert body["applied"] == [seq]
+    assert capped_seq <= 40  # sanity: the budget must actually bind within a handful of 2 MB records
+
+
+def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped(client: TestClient) -> None:
+    """review round 6 F10: the real hub's `update_to_accepted` clears a natural key's
+    `rejected` state when it is re-offered and accepted — the mock's own decision tracking
+    must not be add-only. A key capped once, then later re-offered under a fresh seq and
+    accepted, must stop reporting `capped` on a later replay of the ORIGINAL seq too, not
+    report it forever."""
+    chunk_id = _seed(client)
+    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
+
+    first = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert first.json()["capped"] == [1]
+
+    # The SAME natural key (segment_id="sg_1", turn_range_start=0), re-offered under a
+    # fresh seq, now in-cap and accepted.
+    reoffer = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=2)]},
+    )
+    assert reoffer.json()["applied"] == [2]
+    assert reoffer.json()["capped"] == []
+
+    # A lost-ack replay of the ORIGINAL (now behind-the-mark) seq must no longer report
+    # `capped` — the key's own decision moved to accepted, not stuck at its first outcome.
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
+    )
+    assert replay.json()["capped"] == []
+    assert replay.json()["already_applied"] == [1]
+
+
+def _turns_of_size(target_bytes: int) -> list[dict]:
+    """A single turn whose ``turns`` JSON encodes to exactly ``target_bytes`` — the exact
+    quantity the mock's own chunk-budget accounting sums (``len(json.dumps(record.get(
+    "turns", [])).encode("utf-8"))``)."""
+    overhead = len(json.dumps([_turn_with_text("")]).encode("utf-8"))
+    return [_turn_with_text("x" * (target_bytes - overhead))]
+
+
+def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recredit_the_chunk_budget(
+    client: TestClient,
+) -> None:
+    """review round 6 F10: the real hub's ``TranscriptIngestService._apply`` returns early,
+    with no re-crediting, once a natural key is already ``"accepted"`` — a re-offer under a
+    fresh seq must not double-count its bytes against the chunk budget. 31 records at
+    exactly 2 MiB each leave exactly 2 MiB of the 64 MiB budget free; re-offering an
+    already-accepted key under a new seq must not consume that headroom, or the following
+    genuinely new 2 MiB record — which fits exactly — gets wrongly capped."""
+    chunk_id = _seed(client)
+    two_mib = 2 * 1024 * 1024
+    seq = 0
+    for turn_range_start in range(31):
+        seq += 1
+        ack = client.post(
+            "/api/fleet/transcripts",
+            json={
+                "runner_id": "r1",
+                "records": [
+                    _transcript_record(
+                        chunk_id,
+                        seq=seq,
+                        turn_range_start=turn_range_start,
+                        turn_range_end=turn_range_start,
+                        turns=_turns_of_size(two_mib),
+                    )
+                ],
+            },
+        )
+        assert ack.json()["applied"] == [seq], ack.text
+
+    # Re-offer the FIRST accepted key (turn_range_start=0) under a fresh seq — must apply
+    # with no re-adjudication and no re-crediting.
+    seq += 1
+    replay = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(
+                    chunk_id, seq=seq, turn_range_start=0, turn_range_end=0, turns=_turns_of_size(two_mib)
+                )
+            ],
+        },
+    )
+    assert replay.json()["applied"] == [seq]
+
+    # The remaining 2 MiB of headroom is still free — a genuinely new key fits exactly,
+    # which it would not if the replay above had re-credited its own 2 MiB a second time.
+    seq += 1
+    fresh = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [
+                _transcript_record(
+                    chunk_id, seq=seq, turn_range_start=31, turn_range_end=31, turns=_turns_of_size(two_mib)
+                )
+            ],
+        },
+    )
+    assert fresh.json()["applied"] == [seq]
+    assert fresh.json()["capped"] == []
 
 
 # --- test-control answer route ------------------------------------------------

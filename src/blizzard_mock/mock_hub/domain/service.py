@@ -7,6 +7,7 @@ are consulted here; transport-edge levers live in the middleware.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -63,6 +64,11 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
+#: The real hub's caps, restated not imported — the mock depends on no ``blizzard`` package.
+#: The daily-rate cap is left out: it needs a wall-clock window no scenario exercises.
+_TRANSCRIPT_RECORD_MAX_BYTES = 4 * 1024 * 1024
+_TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
+
 
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
@@ -93,6 +99,11 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
+        #: Accepted bytes per chunk — the chunk-budget cap's running total.
+        self._transcript_chunk_bytes: dict[str, int] = {}
+        #: The real hub's natural key (D8): a key's own accept/reject decision, independent of
+        #: seq, mirroring `IWriteTranscriptSegments.natural_key_state`. Absent reads as "absent".
+        self._transcript_key_state: dict[tuple[str, int], str] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -123,6 +134,8 @@ class MockHubService:
         self._levers.clear_all()
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
+        self._transcript_chunk_bytes.clear()
+        self._transcript_key_state.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -281,24 +294,47 @@ class MockHubService:
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
         )
 
+    # -- transcript intake (its own lane, its own high-water — D3) ---------
+
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
-        high-water mark (blizzard#247, D7) — a separate sequence from
-        :meth:`ingest_facts`'s fact lane. No cap policy: the mock applies every record
-        unconditionally, so ``capped`` is always empty."""
+        high-water mark (blizzard#247, D7) — a separate sequence from :meth:`ingest_facts`'s
+        fact lane. Mirrors the real hub's two caps: an over-cap record is capped but still
+        acknowledged, the mark advancing past it, and earns no chunk-budget credit. Also
+        mirrors the real hub's natural-key short-circuit (D8, review round 6 F10): a key
+        already `"accepted"` re-offered under a fresh seq applies with no re-adjudication
+        and no re-crediting the chunk budget, and a capped key that is later re-offered and
+        accepted stops reporting `capped` — the state is keyed by natural key, not seq."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
+        capped: list[int] = []
         for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
             seq = int(record.get("seq", 0))
+            key = (str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
             if seq <= mark:
-                already_applied.append(seq)
+                # A lost-ack replay of an already-decided seq still reports its own outcome.
+                (capped if self._transcript_key_state.get(key) == "rejected" else already_applied).append(seq)
                 continue
-            applied.append(seq)
             mark = max(mark, seq)
+            if self._transcript_key_state.get(key) == "accepted":
+                # Mirrors `TranscriptIngestService._apply`'s own early return: already
+                # accepted under this natural key — no re-adjudication, no re-crediting.
+                applied.append(seq)
+                continue
+            chunk_id = str(record.get("chunk_id", ""))
+            size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
+            stored = self._transcript_chunk_bytes.get(chunk_id, 0)
+            if size > _TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
+                self._transcript_key_state[key] = "rejected"
+                capped.append(seq)
+                continue
+            self._transcript_key_state[key] = "accepted"
+            self._transcript_chunk_bytes[chunk_id] = stored + size
+            applied.append(seq)
         self._transcript_high_water[runner_id] = mark
         return TranscriptSegmentAck(
-            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=[]
+            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=capped
         )
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
