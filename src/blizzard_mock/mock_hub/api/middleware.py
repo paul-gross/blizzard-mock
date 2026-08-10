@@ -7,7 +7,7 @@ records every ``/api/*`` request."""
 
 from __future__ import annotations
 
-import time
+import asyncio
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -59,12 +59,14 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
             delay_transcripts = self._levers.find(HubLever.DELAY_TRANSCRIPTS.value, chunk_id)
             if delay_transcripts is not None:
                 self._levers.consume(delay_transcripts)
-                time.sleep(int(delay_transcripts.payload.get("ms", 0)) / 1000.0)
+                # `await`, not a blocking sleep (review F12): this route must stay slow
+                # WITHOUT holding the single event loop every other route shares.
+                await asyncio.sleep(int(delay_transcripts.payload.get("ms", 0)) / 1000.0)
 
         delay = self._levers.find(HubLever.DELAY.value, chunk_id)
         if delay is not None:
             self._levers.consume(delay)
-            time.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
+            await asyncio.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
 
         return await call_next(request)
 

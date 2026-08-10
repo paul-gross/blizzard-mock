@@ -228,6 +228,40 @@ def test_lever_delay_transcripts_is_scoped_to_its_own_route(client: TestClient) 
     assert fast.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> None:
+    """review F12: a synchronous sleep in the middleware would hold the whole event loop —
+    a concurrent, undelayed request would then wait out the delay too, not just the one
+    lever-targeted route."""
+    import asyncio
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await ac.post("/_levers/delay_transcripts", json={"payload": {"ms": 300}})
+        started = time.monotonic()
+        fast_finished_at = None
+
+        async def fast_call():  # type: ignore[no-untyped-def]
+            nonlocal fast_finished_at
+            resp = await ac.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
+            fast_finished_at = time.monotonic() - started
+            return resp
+
+        slow, fast = await asyncio.gather(
+            ac.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": []}), fast_call()
+        )
+
+    assert slow.status_code == 200
+    assert fast.status_code == 200
+    assert fast_finished_at is not None
+    # A blocking sleep would freeze the whole loop, so this undelayed request could not
+    # complete until the delay elapsed too.
+    assert fast_finished_at < 0.15
+
+
 def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
@@ -832,10 +866,37 @@ def _transcript_record(
         "final": False,
         "normalizer_version": "v1",
         "harness_version": "claude-code-1.0",
-        "turns": [{"index": turn_range_start, "kind": "asst", "text": "hi"}],
+        "turns": [
+            {
+                "index": turn_range_start,
+                "kind": "asst",
+                "timestamp": None,
+                "text": "hi",
+                "tool": None,
+                "thinking_redacted": False,
+                "sidechain": None,
+                "truncated": False,
+            }
+        ],
     }
     record.update(overrides)
     return record
+
+
+def _turn_with_text(text: str, *, index: int = 0) -> dict:
+    """A full, validation-passing turn (review F9 — every field is now required)
+    carrying just the given oversized ``text``, for cap tests that don't care about
+    turn shape."""
+    return {
+        "index": index,
+        "kind": "asst",
+        "timestamp": None,
+        "text": text,
+        "tool": None,
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
 
 
 def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClient) -> None:
@@ -849,6 +910,29 @@ def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClien
     bad_record = _transcript_record(
         chunk_id, seq=1, turns=[{"index": 0, "kind": "tool", "tool": {"name": "Bash", "input": {}}}]
     )
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
+
+
+def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient) -> None:
+    """review F9: the nested-``tool`` case above is caught by ``ToolCallSegmentBody``'s
+    genuinely-required fields alone — every ``TurnSegmentBody`` field used to default,
+    so a top-level rename (e.g. ``text``) validated here while the real hub 422s. Now
+    every field mirrors ``TurnSegmentView``'s own required-ness."""
+    chunk_id = _seed(client)
+    renamed_turn = {
+        "index": 0,
+        "kind": "asst",
+        "timestamp": None,
+        "content": "hi",  # "text" renamed to "content" — every other required field present
+        "tool": None,
+        "thinking_redacted": False,
+        "sidechain": None,
+        "truncated": False,
+    }
+    bad_record = _transcript_record(chunk_id, seq=1, turns=[renamed_turn])
 
     resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
 
@@ -898,7 +982,7 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
     or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
     regression in the runner drain's own cap-handling."""
     chunk_id = _seed(client)
-    huge_turns = [{"text": "x" * (4 * 1024 * 1024 + 1000)}]
+    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
 
     first = client.post(
         "/api/fleet/transcripts",
@@ -939,7 +1023,7 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
     is spent — mirrors the real hub's ``_reject_reason`` checking both caps. Loops until the
     budget actually tips rather than hardcoding a record count against JSON-overhead math."""
     chunk_id = _seed(client)
-    big_turns = [{"text": "x" * (2 * 1024 * 1024)}]  # under the 4 MB record cap alone
+    big_turns = [_turn_with_text("x" * (2 * 1024 * 1024))]  # under the 4 MB record cap alone
     seq = 0
     capped_seq: int | None = None
     while capped_seq is None:

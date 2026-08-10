@@ -70,41 +70,44 @@ class RunnerFactBatchBody(BaseModel):
 
 
 class ToolCallSegmentBody(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field
-    (review F11) — a freeform ``dict`` here would let a real field rename ship green
-    through `service-test` (which drives the mock, not the real hub) with no warning."""
+    """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
+    including which fields are REQUIRED (review F9, F11) — a defaulted field here would
+    let a real field rename ship green through `service-test` (which drives the mock, not
+    the real hub) with no warning, same as a freeform ``dict`` would."""
 
     name: str
     input: dict[str, object]
-    input_unparsed: str | None = None
+    input_unparsed: str | None
     input_shape: str
-    tool_use_id: str | None = None
-    output: str | None = None
-    output_truncated: bool = False
+    tool_use_id: str | None
+    output: str | None
+    output_truncated: bool
 
 
 class SidechainSegmentBody(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` (review F11)."""
+    """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` field-for-field,
+    including required-ness (review F9, F11)."""
 
-    agent_id: str | None = None
-    agent_type: str | None = None
+    agent_id: str | None
+    agent_type: str | None
     link: str
-    turns: list[TurnSegmentBody] = Field(default_factory=list)
+    turns: list[TurnSegmentBody]
 
 
 class TurnSegmentBody(BaseModel):
-    """Mirrors ``TurnSegmentView`` field-for-field (review F11) — the mock still never
-    *interprets* turn content, but a typed shape here fails validation on a real field
-    rename instead of silently passing through as an untyped dict."""
+    """Mirrors ``TurnSegmentView`` field-for-field, including required-ness (review F9,
+    F11) — the mock still never *interprets* turn content, but a typed, non-defaulted
+    shape here fails validation on a real field rename or drop instead of silently
+    passing through as an untyped dict or a filled-in default."""
 
-    index: int = 0
-    kind: str = ""
-    timestamp: str | None = None
-    text: str = ""
-    tool: ToolCallSegmentBody | None = None
-    thinking_redacted: bool = False
-    sidechain: SidechainSegmentBody | None = None
-    truncated: bool = False
+    index: int
+    kind: str
+    timestamp: str | None
+    text: str
+    tool: ToolCallSegmentBody | None
+    thinking_redacted: bool
+    sidechain: SidechainSegmentBody | None
+    truncated: bool
 
 
 SidechainSegmentBody.model_rebuild()
