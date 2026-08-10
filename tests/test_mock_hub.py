@@ -939,6 +939,20 @@ def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient)
     assert resp.status_code == 422
 
 
+def test_transcripts_rejects_a_record_field_renamed_around_the_turns(client: TestClient) -> None:
+    """review F9, the enclosing level: tightening only the turn bodies leaves
+    ``TranscriptSegmentRecordBody``'s own ``final``/``normalizer_version``/
+    ``harness_version``/``turns`` defaulted, so a rename of one of THOSE still validates
+    here while the real hub 422s — the same silent-drift hole one frame out."""
+    chunk_id = _seed(client)
+    bad_record = _transcript_record(chunk_id, seq=1)
+    bad_record["normalizer_name"] = bad_record.pop("normalizer_version")  # renamed on the wire
+
+    resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
+
+    assert resp.status_code == 422
+
+
 def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
     """The transcript lane's high-water is independent of the fact lane's (D7): a
     transcript push does not disturb a fact-lane seq already applied, and vice versa."""

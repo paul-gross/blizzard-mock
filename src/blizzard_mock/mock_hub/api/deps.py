@@ -114,7 +114,9 @@ SidechainSegmentBody.model_rebuild()
 
 
 class TranscriptSegmentRecordBody(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)."""
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)
+    field-for-field, including required-ness (review F9) — as exposed to a silent rename as
+    the turn bodies above, bar ``record_truncated``, which the real model defaults too."""
 
     seq: int
     segment_id: str
@@ -124,11 +126,11 @@ class TranscriptSegmentRecordBody(BaseModel):
     spawn_generation: int
     turn_range_start: int
     turn_range_end: int
-    final: bool = False
-    normalizer_version: str = ""
-    harness_version: str | None = None
+    final: bool
+    normalizer_version: str
+    harness_version: str | None
     record_truncated: bool = False
-    turns: list[TurnSegmentBody] = Field(default_factory=list)
+    turns: list[TurnSegmentBody]
 
 
 class TranscriptSegmentBatchBody(BaseModel):
