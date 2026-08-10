@@ -99,8 +99,7 @@ class MockHubService:
         #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
-        #: Accepted bytes per chunk, the chunk-budget cap's running total — what makes
-        #: cap-rejection something a mock-driven tier can exercise (review F8).
+        #: Accepted bytes per chunk — the chunk-budget cap's running total.
         self._transcript_chunk_bytes: dict[str, int] = {}
 
     @property
@@ -296,8 +295,8 @@ class MockHubService:
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
         high-water mark (blizzard#247, D7) — a separate sequence from :meth:`ingest_facts`'s
-        fact lane. Mirrors the real hub's two caps (review F8): an over-cap record is capped
-        but still acknowledged, the mark advancing past it, and earns no chunk-budget credit."""
+        fact lane. Mirrors the real hub's two caps: an over-cap record is capped but still
+        acknowledged, the mark advancing past it, and earns no chunk-budget credit."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []

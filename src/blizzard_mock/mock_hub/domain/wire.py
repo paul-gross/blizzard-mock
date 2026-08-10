@@ -198,8 +198,8 @@ class RunnerFactAck(BaseModel):
 class TranscriptSegmentAck(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck`` (blizzard#247) —
     the transcript lane's own ack, distinct from :class:`RunnerFactAck`. ``capped`` is D6's
-    cap-rejection class (review F8, blizzard#246): a record over the per-record or
-    per-chunk cap is capped but still acknowledged, so the mark still advances past it."""
+    cap-rejection class: a record over the per-record or per-chunk cap is capped but
+    still acknowledged, so the mark still advances past it."""
 
     runner_id: str
     high_water: int

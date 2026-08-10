@@ -71,9 +71,9 @@ class RunnerFactBatchBody(BaseModel):
 
 class ToolCallSegmentBody(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
-    including which fields are REQUIRED (review F9, F11) — a defaulted field here would
-    let a real field rename ship green through `service-test` (which drives the mock, not
-    the real hub) with no warning, same as a freeform ``dict`` would."""
+    including which fields are REQUIRED — a defaulted field here would let a real field
+    rename ship green through `service-test` (which drives the mock, not the real hub)
+    with no warning, same as a freeform ``dict`` would."""
 
     name: str
     input: dict[str, object]
@@ -82,11 +82,12 @@ class ToolCallSegmentBody(BaseModel):
     tool_use_id: str | None
     output: str | None
     output_truncated: bool
+    input_truncated: bool
 
 
 class SidechainSegmentBody(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.SidechainSegmentView`` field-for-field,
-    including required-ness (review F9, F11)."""
+    including required-ness."""
 
     agent_id: str | None
     agent_type: str | None
@@ -95,10 +96,10 @@ class SidechainSegmentBody(BaseModel):
 
 
 class TurnSegmentBody(BaseModel):
-    """Mirrors ``TurnSegmentView`` field-for-field, including required-ness (review F9,
-    F11) — the mock still never *interprets* turn content, but a typed, non-defaulted
-    shape here fails validation on a real field rename or drop instead of silently
-    passing through as an untyped dict or a filled-in default."""
+    """Mirrors ``TurnSegmentView`` field-for-field, including required-ness — the mock
+    still never *interprets* turn content, but a typed, non-defaulted shape here fails
+    validation on a real field rename or drop instead of silently passing through as an
+    untyped dict or a filled-in default."""
 
     index: int
     kind: str
@@ -115,8 +116,8 @@ SidechainSegmentBody.model_rebuild()
 
 class TranscriptSegmentRecordBody(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)
-    field-for-field, including required-ness (review F9) — as exposed to a silent rename as
-    the turn bodies above, bar ``record_truncated``, which the real model defaults too."""
+    field-for-field, including required-ness — as exposed to a silent rename as the turn
+    bodies above, bar ``record_truncated``, which the real model defaults too."""
 
     seq: int
     segment_id: str

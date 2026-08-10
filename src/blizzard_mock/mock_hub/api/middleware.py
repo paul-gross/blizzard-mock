@@ -1,9 +1,9 @@
 """Transport-edge lever middleware — plus request capture.
 
 Four levers: ``unreachable``/``unreachable_transcripts`` answer 503 (every route / the
-transcripts route alone); ``delay``/``delay_transcripts`` (review F18) sleep first,
-scoped the same way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware``
-records every ``/api/*`` request."""
+transcripts route alone); ``delay``/``delay_transcripts`` sleep first, scoped the same
+way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware`` records every
+``/api/*`` request."""
 
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
             delay_transcripts = self._levers.find(HubLever.DELAY_TRANSCRIPTS.value, chunk_id)
             if delay_transcripts is not None:
                 self._levers.consume(delay_transcripts)
-                # `await`, not a blocking sleep (review F12): this route must stay slow
-                # WITHOUT holding the single event loop every other route shares.
+                # `await`, not a blocking sleep: this route stays slow without holding
+                # the single event loop every other route shares.
                 await asyncio.sleep(int(delay_transcripts.payload.get("ms", 0)) / 1000.0)
 
         delay = self._levers.find(HubLever.DELAY.value, chunk_id)
