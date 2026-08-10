@@ -1005,14 +1005,16 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
     assert first.json()["capped"] == [1]
     assert first.json()["high_water"] == 1  # advances past a capped record too (D6)
 
-    # A replay of the same now-behind-the-mark seq is already_applied, not re-adjudicated —
-    # the mock does not implement blizzard#247's natural-key re-adjudication (03b2b5d8);
-    # once the mark has passed a seq, it stays passed.
+    # A replay of the same now-behind-the-mark seq still reports its cap outcome, mirroring
+    # the real hub's natural-key (D8) lookup on the already-applied path: a runner that
+    # crashed in its own after-submit.before-ack window must still learn the record was
+    # capped, or the segment-field/warning marking is permanently skipped on retry.
     replay = client.post(
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
-    assert replay.json()["already_applied"] == [1]
+    assert replay.json()["capped"] == [1]
+    assert replay.json()["already_applied"] == []
 
     # A LATER, in-cap record in the same batch as a cap still applies.
     ack = client.post(
@@ -1029,6 +1031,18 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
     assert body["capped"] == [2]
     assert body["applied"] == [3]
     assert body["high_water"] == 3
+
+    # An ordinary, never-capped seq replays as plain idempotency — the cap outcome above
+    # is keyed on the record, not blanket-applied to everything behind the mark.
+    clean_replay = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=3, turn_range_start=2, turn_range_end=2)],
+        },
+    )
+    assert clean_replay.json()["already_applied"] == [3]
+    assert clean_replay.json()["capped"] == []
 
 
 def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(client: TestClient) -> None:

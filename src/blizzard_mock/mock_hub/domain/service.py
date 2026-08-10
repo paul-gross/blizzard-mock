@@ -101,6 +101,9 @@ class MockHubService:
         self._transcript_high_water: dict[str, int] = {}
         #: Accepted bytes per chunk — the chunk-budget cap's running total.
         self._transcript_chunk_bytes: dict[str, int] = {}
+        #: The real hub's natural key (D8) — the durable record of a cap decision, so a
+        #: replayed seq still reports `capped` rather than bare idempotency.
+        self._transcript_capped_keys: set[tuple[str, int]] = set()
 
     @property
     def levers(self) -> ILeverStore:
@@ -132,6 +135,7 @@ class MockHubService:
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
         self._transcript_chunk_bytes.clear()
+        self._transcript_capped_keys.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -303,14 +307,17 @@ class MockHubService:
         capped: list[int] = []
         for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
             seq = int(record.get("seq", 0))
+            key = (str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
             if seq <= mark:
-                already_applied.append(seq)
+                # A lost-ack replay of an already-decided seq still reports its cap outcome.
+                (capped if key in self._transcript_capped_keys else already_applied).append(seq)
                 continue
             mark = max(mark, seq)
             chunk_id = str(record.get("chunk_id", ""))
             size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
             stored = self._transcript_chunk_bytes.get(chunk_id, 0)
             if size > _TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
+                self._transcript_capped_keys.add(key)
                 capped.append(seq)
                 continue
             self._transcript_chunk_bytes[chunk_id] = stored + size
