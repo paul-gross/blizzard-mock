@@ -1217,6 +1217,155 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
     assert fresh.json()["capped"] == []
 
 
+# --- lease-transcript read (blizzard#249) --------------------------------------
+
+
+def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    ack = client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)],
+        },
+    )
+    assert ack.status_code == 200, ack.text
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["chunk_id"] == chunk_id
+    assert body["node_id"] == "build"
+    assert body["epoch"] == 1
+    assert [t["text"] for t in body["turns"]] == ["hi"]
+
+
+def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: TestClient) -> None:
+    """Submitted **reversed** relative to seq, so a pass actually pins 'sorts by seq'
+    rather than merely 'preserves arrival order' (indistinguishable on an already-sorted
+    input)."""
+    chunk_id = _seed(client)
+    first = _transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)
+    second = _transcript_record(chunk_id, seq=2, turn_range_start=1, turn_range_end=1)
+    second["turns"] = [_turn_with_text("second", index=1)]
+    second["final"] = True
+    ack = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [second, first]})
+    assert ack.status_code == 200, ack.text
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [t["text"] for t in body["turns"]] == ["hi", "second"]
+    # Renumbered across the whole read, like the real route: a segment's own index is
+    # generation-local, so a lease's concatenation would otherwise restart it mid-list.
+    assert [t["index"] for t in body["turns"]] == [0, 1]
+    assert body["truncated"] is False
+
+
+def test_lease_transcript_read_does_not_cross_node_ids(client: TestClient) -> None:
+    """An epoch-crossing case already existed; a node_id-crossing one didn't."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, node_id="build")]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "review", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
+def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> None:
+    """Nor a chunk_id-crossing one."""
+    chunk_id = _seed(client)
+    other_chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]},
+    )
+
+    resp = client.get(
+        f"/api/fleet/chunks/{other_chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
+def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: TestClient) -> None:
+    """The real hub dedupes on the natural key ``(segment_id, turn_range_start)``
+    regardless of the offered ``seq`` (D8) — a re-offer (e.g. after an ack the runner
+    missed) must not double the retained turns."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turn_range_start=0)]},
+    )
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=99, turn_range_start=0)]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert [t["text"] for t in resp.json()["turns"]] == ["hi"]
+
+
+def test_lease_transcript_read_orders_by_spawn_generation_segment_id_turn_range_not_arrival(
+    client: TestClient,
+) -> None:
+    """The real store's ``records_for_lease`` orders by ``(spawn_generation, segment_id,
+    turn_range_start)`` — not by ingest/seq order, which a fixture whose seq happens to
+    rise alongside its natural key cannot distinguish from a plain-arrival-order
+    read-back. Two segments arrive in an order where seq and segment_id diverge: ``sg_b``
+    first (lower seq), ``sg_a`` second (higher seq) — the read-back must still put
+    ``sg_a`` first, matching the real store's key, not the arrival order."""
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={
+            "runner_id": "r1",
+            "records": [_transcript_record(chunk_id, seq=1, segment_id="sg_b", turn_range_start=0)],
+        },
+    )
+    second = _transcript_record(chunk_id, seq=2, segment_id="sg_a", turn_range_start=0)
+    second["turns"] = [_turn_with_text("from-sg-a")]
+    ack = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [second]})
+    assert ack.status_code == 200, ack.text
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert [t["text"] for t in resp.json()["turns"]] == ["from-sg-a", "hi"]
+
+
+def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(client: TestClient) -> None:
+    chunk_id = _seed(client)
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["turns"] == []
+
+
+def test_lease_transcript_read_does_not_cross_epochs(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post(
+        "/api/fleet/transcripts",
+        json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]},
+    )
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 2})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"] == []
+
+
 # --- test-control answer route ------------------------------------------------
 
 

@@ -36,6 +36,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
     HubAdvanceResponse,
+    LeaseTranscriptView,
     NodeConfig,
     NodeEnvelope,
     QuestionView,
@@ -104,6 +105,9 @@ class MockHubService:
         #: The real hub's natural key (D8): a key's own accept/reject decision, independent of
         #: seq, mirroring `IWriteTranscriptSegments.natural_key_state`. Absent reads as "absent".
         self._transcript_key_state: dict[tuple[str, int], str] = {}
+        #: Retained transcript records, keyed by lease (D2), then by each record's own
+        #: natural key — only accepted records land here, so a capped one never reads back.
+        self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
 
     @property
     def levers(self) -> ILeverStore:
@@ -136,6 +140,7 @@ class MockHubService:
         self._transcript_high_water.clear()
         self._transcript_chunk_bytes.clear()
         self._transcript_key_state.clear()
+        self._transcript_segments.clear()
 
     # -- queue -------------------------------------------------------------
 
@@ -298,13 +303,10 @@ class MockHubService:
 
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
-        high-water mark (blizzard#247, D7) — a separate sequence from :meth:`ingest_facts`'s
-        fact lane. Mirrors the real hub's two caps: an over-cap record is capped but still
-        acknowledged, the mark advancing past it, and earns no chunk-budget credit. Also
-        mirrors the real hub's natural-key short-circuit (D8, review round 6 F10): a key
-        already `"accepted"` re-offered under a fresh seq applies with no re-adjudication
-        and no re-crediting the chunk budget, and a capped key that is later re-offered and
-        accepted stops reporting `capped` — the state is keyed by natural key, not seq."""
+        high-water mark (blizzard#247, D7). Mirrors the real hub's two caps and its
+        natural-key short-circuit (D8), the state keyed by natural key rather than seq, and
+        retains each accepted record by lease (blizzard#249, D2) for
+        :meth:`lease_transcript` — a capped record is never retained, so it never reads back."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -318,8 +320,8 @@ class MockHubService:
                 continue
             mark = max(mark, seq)
             if self._transcript_key_state.get(key) == "accepted":
-                # Mirrors `TranscriptIngestService._apply`'s own early return: already
-                # accepted under this natural key — no re-adjudication, no re-crediting.
+                # Mirrors `TranscriptIngestService._apply`'s early return: already accepted
+                # under this key — no re-adjudication, re-crediting, or re-retention.
                 applied.append(seq)
                 continue
             chunk_id = str(record.get("chunk_id", ""))
@@ -331,11 +333,30 @@ class MockHubService:
                 continue
             self._transcript_key_state[key] = "accepted"
             self._transcript_chunk_bytes[chunk_id] = stored + size
+            lease_key = (chunk_id, str(record.get("node_id", "")), int(record.get("epoch", 0)))
+            self._transcript_segments.setdefault(lease_key, {})[key] = dict(record)
             applied.append(seq)
         self._transcript_high_water[runner_id] = mark
         return TranscriptSegmentAck(
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=capped
         )
+
+    def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
+        """The transcript lane's own read-back (D2) — one lease's retained turns across every
+        spawn generation, ordered like the real store's ``records_for_lease``
+        (``spawn_generation, segment_id, turn_range_start``) rather than by retention, which a
+        flush or a re-offer can disorder. The mock has no caller-identity concept here at
+        all — no principal, no per-runner filter — so it serves the lease to anyone."""
+        records = self._transcript_segments.get((chunk_id, node_id, epoch), {})
+
+        def _order_key(r: dict[str, Any]) -> tuple[int, str, int]:
+            return int(r.get("spawn_generation", 0)), str(r.get("segment_id", "")), int(r.get("turn_range_start", 0))
+
+        turns: list[dict[str, Any]] = []
+        for record in sorted(records.values(), key=_order_key):
+            turns.extend(record.get("turns", []))
+        renumbered = [{**turn, "index": i} for i, turn in enumerate(turns)]
+        return LeaseTranscriptView(chunk_id=chunk_id, node_id=node_id, epoch=epoch, turns=renumbered)
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
         """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected.

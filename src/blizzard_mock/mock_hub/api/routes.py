@@ -146,6 +146,16 @@ def push_transcripts(
     return service.ingest_transcripts(body.runner_id, [r.model_dump() for r in body.records])
 
 
+@fleet_router.get("/chunks/{chunk_id}/transcript-segments")
+def get_lease_transcript_segments(
+    chunk_id: str, node_id: str, epoch: int, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """A lease's retained transcript (blizzard#249) — mirrors the real hub's runner-scoped
+    ``GET /api/fleet/chunks/{chunk_id}/transcript-segments``; the mock enforces no
+    bearer-token confinement."""
+    return service.lease_transcript(chunk_id, node_id=node_id, epoch=epoch)
+
+
 @fleet_router.post("/runners", status_code=201)
 def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     first = service.register(
