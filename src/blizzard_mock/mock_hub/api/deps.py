@@ -137,6 +137,7 @@ class TranscriptSegmentRecordBody(MirroredWireBody):
     normalizer_version: str
     harness_version: str | None
     record_truncated: bool = False
+    supersedes: str | None = None
     turns: list[TurnSegmentBody]
 
 
