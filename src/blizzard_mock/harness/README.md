@@ -197,6 +197,16 @@ engine no-ops for them.
   envelope-less fallback. The figures are synthesized deterministically by output
   length in `facades/_usage.py` and are **illustrative, not a pricing table** —
   blizzard never derives cost from one; `total_cost_usd` is the harness's own number.
+  Blizzard also reads `message.usage` **per turn** rather than summed, for the session
+  context behind `rotate.max_context_tokens` (`ClaudeCodeTranscriptSource.context_tokens`);
+  this writer mints one usage-bearing record per message, so that read is faithful here.
+- **The `message.id` gap.** This writer mints no `message.id`, and one record per
+  message. The real harness splits a multi-content-block reply across several records
+  that each repeat their message's one `usage`, which is why `sum_transcript_usage`
+  collapses by `message.id` — against this writer that collapse never engages, and the
+  id-less fallback branch counts each record instead. Equivalent totals here, but the
+  dedupe itself is exercised only by `blizzard:unit-test` fixtures, never mock-driven.
+  Minting a repeated `message.id` across split records would close it.
 
 ## Hook execution
 
