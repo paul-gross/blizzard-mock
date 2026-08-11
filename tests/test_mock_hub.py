@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
+from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES
 
 _SPEC = {
     "entry": "build",
@@ -1030,7 +1031,7 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
     or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
     regression in the runner drain's own cap-handling."""
     chunk_id = _seed(client)
-    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
+    huge_turns = [_turn_with_text("x" * (_TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
 
     first = client.post(
         "/api/fleet/transcripts",
@@ -1085,7 +1086,7 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
     is spent — mirrors the real hub's ``_reject_reason`` checking both caps. Loops until the
     budget actually tips rather than hardcoding a record count against JSON-overhead math."""
     chunk_id = _seed(client)
-    big_turns = [_turn_with_text("x" * (2 * 1024 * 1024))]  # under the 4 MB record cap alone
+    big_turns = [_turn_with_text("x" * (2 * 1024 * 1024))]  # under the per-record cap alone
     seq = 0
     capped_seq: int | None = None
     while capped_seq is None:
@@ -1117,7 +1118,7 @@ def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped
     accepted, must stop reporting `capped` on a later replay of the ORIGINAL seq too, not
     report it forever."""
     chunk_id = _seed(client)
-    huge_turns = [_turn_with_text("x" * (4 * 1024 * 1024 + 1000))]
+    huge_turns = [_turn_with_text("x" * (_TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
 
     first = client.post(
         "/api/fleet/transcripts",

@@ -65,9 +65,9 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
-#: The real hub's caps, restated not imported — the mock depends on no ``blizzard`` package.
-#: The daily-rate cap is left out: it needs a wall-clock window no scenario exercises.
-_TRANSCRIPT_RECORD_MAX_BYTES = 4 * 1024 * 1024
+#: The real hub's caps, restated not imported (no ``blizzard`` dep); the daily-rate one needs
+#: a wall clock. Keep the record cap >= the RUNNER's, or this rejects what the real hub stores.
+_TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
 
