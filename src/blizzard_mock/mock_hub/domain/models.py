@@ -99,7 +99,7 @@ class NodeSpec(BaseModel):
 
 
 class EscalationState(BaseModel):
-    """Retries exhausted (``escalation.recorded``) — mirrors ``blizzard.wire.chunk.EscalationView``."""
+    """Retries exhausted (``escalation.recorded``) — mirrors ``blizzard.wire.chunk.ChunkEscalationView``."""
 
     epoch: int
     takeover_command: str = ""

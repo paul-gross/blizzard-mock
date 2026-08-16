@@ -94,7 +94,7 @@ class RouteView(BaseModel):
     environment_ids: list[str] = Field(default_factory=list)
 
 
-class EscalationView(BaseModel):
+class ChunkEscalationView(BaseModel):
     epoch: int
     takeover_command: str
     # The ``blizzard runner takeover`` wrapped entry point; empty whenever the
@@ -142,7 +142,7 @@ class ChunkDetail(BaseModel):
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     route: RouteView | None = None
-    escalation: EscalationView | None = None
+    escalation: ChunkEscalationView | None = None
     questions: list[QuestionView] = Field(default_factory=list)
 
 

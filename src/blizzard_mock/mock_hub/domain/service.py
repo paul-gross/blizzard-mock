@@ -31,8 +31,8 @@ from blizzard_mock.mock_hub.domain.state import IHubState
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     ChunkDetail,
+    ChunkEscalationView,
     EnvelopeChoice,
-    EscalationView,
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
     HubAdvanceResponse,
@@ -218,7 +218,7 @@ class MockHubService:
             )
         escalation = None
         if chunk.escalation is not None:
-            escalation = EscalationView(
+            escalation = ChunkEscalationView(
                 epoch=chunk.escalation.epoch,
                 takeover_command=chunk.escalation.takeover_command,
                 wrapped_takeover_command=chunk.escalation.wrapped_takeover_command,
