@@ -89,6 +89,7 @@ class ToolCallSegmentBody(MirroredWireBody):
     output: str | None
     output_truncated: bool
     input_truncated: bool = False
+    output_patch: bool = False
 
 
 class SidechainSegmentBody(MirroredWireBody):
@@ -99,6 +100,7 @@ class SidechainSegmentBody(MirroredWireBody):
     agent_type: str | None
     link: str
     turns: list[TurnSegmentBody]
+    parent_tool_use_id: str | None = None
 
 
 class TurnSegmentBody(MirroredWireBody):
