@@ -51,6 +51,15 @@ class NodeConfig(BaseModel):
     choices: list[EnvelopeChoice] = Field(default_factory=list)
 
 
+class GraphArtifact(BaseModel):
+    """One graph-scoped artifact baked into the mint — mirrors
+    ``blizzard.wire.envelope.GraphArtifact``."""
+
+    name: str
+    kind: str
+    content: str
+
+
 class NodeEnvelope(BaseModel):
     chunk_id: str
     graph_id: str
@@ -60,6 +69,7 @@ class NodeEnvelope(BaseModel):
     judgement_prompt: str | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
     artifacts: list[dict[str, object]] = Field(default_factory=list)
+    graph_artifacts: list[GraphArtifact] = Field(default_factory=list)
 
 
 class RouteClaimResponse(BaseModel):

@@ -44,6 +44,15 @@ class ChunkStatus(StrEnum):
 TERMINAL = "done"
 
 
+class GraphArtifactKind(StrEnum):
+    """The one kind a graph-scoped artifact carries (subset of the real ``ArtifactKind``,
+    which also has ``git_commit`` for node-scoped ones). The hub synthesizes ``asset`` for
+    every graph-scope entry, so the seed vocabulary cannot express another kind — a mock
+    that could would green a runner behavior the real hub never drives."""
+
+    ASSET = "asset"
+
+
 class ApplyOutcome(StrEnum):
     """Mirrors ``blizzard.wire.envelope.ApplyOutcome`` (value-identical)."""
 
@@ -138,6 +147,17 @@ class WorkRefSpec(BaseModel):
     ref: str
 
 
+class GraphArtifactSpec(BaseModel):
+    """One graph-scoped artifact baked into the seeded chunk's mint — mirrors the hub's
+    ``GraphArtifact`` wire model. ``kind`` is constrained to the only kind the real hub
+    ever synthesizes at this slice, so seeding one is optional and naming any other is a
+    422."""
+
+    name: str
+    kind: GraphArtifactKind = GraphArtifactKind.ASSET
+    content: str
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
@@ -150,6 +170,7 @@ class ChunkSpec(BaseModel):
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
+    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -165,6 +186,7 @@ class ChunkState(BaseModel):
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
+    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

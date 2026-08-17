@@ -86,9 +86,11 @@ dropped), so an accepted fact can never make a later read raise.
 
 ## Control plane
 
-- `POST /_seed/chunk` — install a scripted chunk (`ChunkSpec`: an `entry` node and a
-  `nodes` map, each node's `prompt`/`judgement_prompt` riding straight into the
-  envelope, `choices` naming the `to` node). `POST /_seed/reset` clears all state.
+- `POST /_seed/chunk` — install a scripted chunk. `ChunkSpec` is the authoritative
+  field list (work refs and graph-scoped artifacts included, both riding into the
+  claim envelope alongside the node graph); notably, each node's
+  `prompt`/`judgement_prompt` rides straight into the envelope, and `choices` names
+  the `to` node. `POST /_seed/reset` clears all state.
 - `POST /_seed/answer {question_id, answer, answered_by?}` — test-control only, plays
   the operator's answer so a scenario can make the runner's poll return
   `answered=True` without a real operator surface (the fleet mirror carries no

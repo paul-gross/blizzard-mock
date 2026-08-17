@@ -80,6 +80,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "ChunkEscalationView": ("ChunkEscalationView", frozenset()),
     "ExternalSubscriptionUsageView": ("ExternalSubscriptionUsageView", frozenset()),
     "ExternalSubscriptionUsageWindowView": ("ExternalSubscriptionUsageWindowView", frozenset()),
+    "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
     "NodeConfig": ("NodeConfig", frozenset()),

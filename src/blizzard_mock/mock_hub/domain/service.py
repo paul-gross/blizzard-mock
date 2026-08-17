@@ -35,6 +35,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     EnvelopeChoice,
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
+    GraphArtifact,
     HubAdvanceResponse,
     LeaseTranscriptView,
     NodeConfig,
@@ -129,6 +130,7 @@ class MockHubService:
             entry=spec.entry,
             nodes=spec.nodes,
             work_refs=spec.work_refs,
+            graph_artifacts=spec.graph_artifacts,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -735,6 +737,7 @@ class MockHubService:
             prompt=node.prompt,
             judgement_prompt=node.judgement_prompt,
             work_refs=[p.model_dump() for p in chunk.work_refs],
+            graph_artifacts=[GraphArtifact(name=a.name, kind=a.kind, content=a.content) for a in chunk.graph_artifacts],
         )
 
     def _require(self, chunk_id: str) -> ChunkState:

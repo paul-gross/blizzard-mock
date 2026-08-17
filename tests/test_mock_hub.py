@@ -1497,3 +1497,26 @@ def test_a_node_declaring_no_session_carries_the_pre_144_shape(client: TestClien
     assert node["session_model"] == []
     assert node["session_effort"] is None
     assert node["session_rotate"] is None
+
+
+# --- graph-scoped artifacts --------------------------------------------------
+
+
+def test_seeded_graph_artifacts_ride_the_claim_envelope(client: TestClient) -> None:
+    spec = dict(_SPEC)
+    spec["graph_artifacts"] = [
+        {"name": "runbook", "kind": "asset", "content": "how to ship it"},
+        {"name": "docket", "content": "the work item text"},
+    ]
+    resp = client.post("/_seed/chunk", json=spec)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    # Authored order, so a silent sort flips these; "runbook" seeds its kind explicitly
+    # while "docket" leans on the default, so both spellings have to reach the envelope.
+    assert claim.json()["envelope"]["graph_artifacts"] == [
+        {"name": "runbook", "kind": "asset", "content": "how to ship it"},
+        {"name": "docket", "kind": "asset", "content": "the work item text"},
+    ]
