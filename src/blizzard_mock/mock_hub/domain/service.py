@@ -719,6 +719,7 @@ class MockHubService:
                 session_name=node.session_name,
                 session_model=list(node.session_model),
                 session_effort=node.session_effort,
+                session_compaction_window=node.session_compaction_window,
                 session_rotate=RotatePolicyView(**node.session_rotate.model_dump())
                 if node.session_rotate is not None
                 else None,
