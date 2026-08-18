@@ -94,6 +94,7 @@ class NodeSpec(BaseModel):
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
     session_effort: str | None = None
+    session_compaction_window: str | None = None
     session_rotate: RotatePolicySpec | None = None
     judged_by: JudgedBy = JudgedBy.WORKER
     prompt: str | None = None

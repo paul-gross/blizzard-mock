@@ -1428,6 +1428,7 @@ _SESSION_SPEC = {
             "session_name": "code",
             "session_model": ["blizzard:basic", "gpt-5.3-codex"],
             "session_effort": "medium",
+            "session_compaction_window": "100000",
             "session_rotate": {"max_context_tokens": 120000, "max_invocations": 30},
             "choices": [{"name": "pass", "description": "p", "to": "review"}],
         },
@@ -1460,6 +1461,7 @@ def test_a_seeded_session_declaration_rides_the_claim_envelope(client: TestClien
     assert node["session_name"] == "code"
     assert node["session_model"] == ["blizzard:basic", "gpt-5.3-codex"]
     assert node["session_effort"] == "medium"
+    assert node["session_compaction_window"] == "100000"
     assert node["session_rotate"] == {
         "max_context_tokens": 120000,
         "max_transcript_bytes": None,
@@ -1496,6 +1498,7 @@ def test_a_node_declaring_no_session_carries_the_pre_144_shape(client: TestClien
     assert node["session_name"] is None
     assert node["session_model"] == []
     assert node["session_effort"] is None
+    assert node["session_compaction_window"] is None
     assert node["session_rotate"] is None
 
 

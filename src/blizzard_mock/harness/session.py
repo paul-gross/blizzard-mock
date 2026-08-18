@@ -24,7 +24,7 @@ class Ask:
 
 @dataclass
 class Invocation:
-    """One turn's observed model/effort flags (issue #144).
+    """One turn's observed model/effort/compaction-window flags (issue #144, blizzard#343).
 
     ``None`` means the flag was absent from argv, not unknown.
     """
@@ -32,6 +32,7 @@ class Invocation:
     kind: str  # spawn | resume
     model: str | None = None
     effort: str | None = None
+    compaction_window: str | None = None
 
 
 @dataclass
