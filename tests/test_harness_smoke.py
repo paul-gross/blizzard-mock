@@ -1119,7 +1119,7 @@ def test_synthesize_cost_usd_grows_with_token_counts() -> None:
 
 
 def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool = False, **flags) -> None:
-    """One `mock-claude-code` turn, with whichever of `--model`/`--effort` was given."""
+    """One `mock-claude-code` turn, with whichever session flags were given."""
     session_flag = ["--resume", session] if resume else ["--session-id", session]
     extra = [arg for name, value in flags.items() if value for arg in (f"--{name}", value)]
     proc = subprocess.run(
@@ -1161,8 +1161,8 @@ def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(fen
     state = _session_state(cwd, "sess-1")
 
     assert state["invocations"] == [
-        {"kind": "spawn", "model": "sonnet", "effort": "high"},
-        {"kind": "resume", "model": None, "effort": "high"},
+        {"kind": "spawn", "model": "sonnet", "effort": "high", "compaction_window": None},
+        {"kind": "resume", "model": None, "effort": "high", "compaction_window": None},
     ]
 
 
@@ -1170,4 +1170,21 @@ def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -
     cwd, env = fenced_repo
     _run_claude(cwd, env, "sess-2", "verdict('pass')")
 
-    assert _session_state(cwd, "sess-2")["invocations"] == [{"kind": "spawn", "model": None, "effort": None}]
+    assert _session_state(cwd, "sess-2")["invocations"] == [
+        {"kind": "spawn", "model": None, "effort": None, "compaction_window": None}
+    ]
+
+
+def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_repo) -> None:
+    """`--autocompact` (blizzard#343) is recorded the same way as `--model`/`--effort` —
+    reasserted on a resume, never acted on: the mock only ever sees argv."""
+    cwd, env = fenced_repo
+    _run_claude(cwd, env, "sess-3", "verdict('pass')", autocompact="150000")
+    _run_claude(cwd, env, "sess-3", "verdict('pass')", resume=True, autocompact="150000")
+
+    state = _session_state(cwd, "sess-3")
+
+    assert state["invocations"] == [
+        {"kind": "spawn", "model": None, "effort": None, "compaction_window": "150000"},
+        {"kind": "resume", "model": None, "effort": None, "compaction_window": "150000"},
+    ]

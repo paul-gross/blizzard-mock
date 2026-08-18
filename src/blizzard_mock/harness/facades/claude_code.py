@@ -86,9 +86,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
     )
-    # Both are RECORDED onto the session state (issue #144) and otherwise ignored.
+    # All three are RECORDED onto the session state (issue #144, blizzard#343) and
+    # otherwise ignored.
     parser.add_argument("--model", default=None, help="recorded onto the session, not acted on")
     parser.add_argument("--effort", default=None, help="recorded onto the session, not acted on")
+    parser.add_argument("--autocompact", default=None, dest="compaction_window", help="recorded, not acted on")
     return parser
 
 
@@ -136,9 +138,10 @@ def main(argv: list[str] | None = None) -> None:
         is_resume=is_resume,
         transcript=transcript,
         hooks=hooks,
-        # Recorded onto the session state, not acted on (issue #144).
+        # Recorded onto the session state, not acted on (issue #144, blizzard#343).
         model=args.model,
         effort=args.effort,
+        compaction_window=args.compaction_window,
     )
     raise SystemExit(code)
 

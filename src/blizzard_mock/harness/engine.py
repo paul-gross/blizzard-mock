@@ -434,6 +434,7 @@ def run_prompt(
     hooks: IHookRunner | None = None,
     model: str | None = None,
     effort: str | None = None,
+    compaction_window: str | None = None,
     whole_message: bool = False,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
@@ -491,8 +492,15 @@ def run_prompt(
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
     state.turns += 1
-    # What this turn was actually launched with (issue #144).
-    state.invocations.append(Invocation(kind="resume" if is_resume else "spawn", model=model, effort=effort))
+    # What this turn was actually launched with (issue #144, blizzard#343).
+    state.invocations.append(
+        Invocation(
+            kind="resume" if is_resume else "spawn",
+            model=model,
+            effort=effort,
+            compaction_window=compaction_window,
+        )
+    )
 
     ctx = RunContext(
         session=state,
