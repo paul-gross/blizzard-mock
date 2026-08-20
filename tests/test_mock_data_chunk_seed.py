@@ -14,13 +14,14 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
 from blizzard_mock.clock import FixedClock
-from blizzard_mock.mock_data.domain.chunk_seed import ChunkCompositionError, ChunkSeed, compose_chunk
 from blizzard_mock.mock_data.domain.facts import FactRow
-from blizzard_mock.mock_data.domain.graph_seed import GraphCompositionError, GraphContext, NodeRef
+from blizzard_mock.mock_data.domain.hub.chunk_seed import ChunkCompositionError, ChunkSeed, compose_chunk
+from blizzard_mock.mock_data.domain.hub.graph_seed import GraphCompositionError, GraphContext, NodeRef
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -52,6 +53,7 @@ def _compose(
     runner_id: str = "runner-seed",
     epoch: int = 1,
     workspace_id: str = _DEFAULT_WORKSPACE_ID,
+    mirrored: bool = False,
 ) -> ChunkSeed:
     return compose_chunk(
         status=status,
@@ -64,6 +66,7 @@ def _compose(
         runner_id=runner_id,
         epoch=epoch,
         workspace_id=workspace_id,
+        mirrored=mirrored,
     )
 
 
@@ -75,11 +78,33 @@ def test_stopped_lands_only_chunk_stopped_beyond_the_base_row() -> None:
     assert _tables(seed.rows) == {"chunks", "chunk_promoted", "chunk_stopped"}
 
 
-def test_done_lands_a_terminal_transition() -> None:
+def test_done_lands_a_two_hop_terminal_path() -> None:
+    """``done`` travels its full two-hop path — ``build``->``deliver``, then
+    ``deliver``->the reserved terminal — sharing one epoch, so the chunk carries
+    two selectable node-steps rather than one."""
     seed = _compose("done")
     assert _tables(seed.rows) == {"chunks", "chunk_promoted", "lease_facts", "transitions"}
-    transition = next(row for row in seed.rows if row.table == "transitions")
-    assert transition.values["to_node_id"] == "done"
+    transitions = sorted(
+        (row for row in seed.rows if row.table == "transitions"),
+        key=lambda r: cast(datetime, r.values["recorded_at"]),
+    )
+    assert len(transitions) == 2
+    hop1, hop2 = transitions
+    assert (hop1.values["from_node_id"], hop1.values["to_node_id"]) == ("nd_build", "nd_deliver")
+    assert hop1.values["choice_name"] == "approved"
+    assert (hop2.values["from_node_id"], hop2.values["to_node_id"]) == ("nd_deliver", "done")
+    assert hop2.values["choice_name"] == "landed"
+    assert hop1.values["epoch"] == hop2.values["epoch"]
+
+
+def test_done_landing_from_build_lands_one_hop_not_a_self_edge() -> None:
+    """``--node build`` names the terminal hop's own origin, so there is no
+    predecessor hop left to compose — one transition, not a ``build``->``build``
+    self-edge keying the same node-step twice."""
+    seed = _compose("done", node_name="build")
+    transitions = [row for row in seed.rows if row.table == "transitions"]
+    assert len(transitions) == 1
+    assert (transitions[0].values["from_node_id"], transitions[0].values["to_node_id"]) == ("nd_build", "done")
 
 
 def test_needs_human_lands_an_escalation_and_no_route_or_terminal() -> None:
@@ -219,3 +244,25 @@ def test_explicit_chunk_id_and_epoch_and_runner_id_are_honored() -> None:
     assert escalation.values["epoch"] == 7
     chunk_row = next(row for row in seed.rows if row.table == "chunks")
     assert chunk_row.values["chunk_id"] == "ch_fixed"
+
+
+# --- mirrored (``scenario fleet``'s pinned mode) -----------------------------
+
+
+def test_mirrored_lands_a_route_created_for_a_status_that_mints_none_of_its_own() -> None:
+    seed = _compose("needs_human", mirrored=True)
+    routes = [row for row in seed.rows if row.table == "route_created"]
+    assert len(routes) == 1
+    assert routes[0].values["runner_id"] == "runner-seed"
+
+
+def test_mirrored_is_a_no_op_for_a_status_that_already_mints_one() -> None:
+    """``running``/``delivering`` already land a live route — mirroring adds no second one."""
+    seed = _compose("running", mirrored=True)
+    routes = [row for row in seed.rows if row.table == "route_created"]
+    assert len(routes) == 1
+
+
+def test_unmirrored_lands_no_route_for_a_status_that_mints_none_of_its_own() -> None:
+    seed = _compose("needs_human", mirrored=False)
+    assert not any(row.table == "route_created" for row in seed.rows)

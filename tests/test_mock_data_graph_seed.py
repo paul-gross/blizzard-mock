@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from blizzard_mock.clock import FixedClock
-from blizzard_mock.mock_data.domain.graph_seed import (
+from blizzard_mock.mock_data.domain.hub.graph_seed import (
     BUILD_NODE_NAME,
     DELIVER_NODE_NAME,
     GraphCompositionError,

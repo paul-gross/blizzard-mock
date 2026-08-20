@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from blizzard_mock.mock_data.domain.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
+from blizzard_mock.mock_data.domain.hub.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

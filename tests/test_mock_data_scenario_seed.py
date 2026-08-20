@@ -17,7 +17,14 @@ import pytest
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_data.domain.facts import FactRow
-from blizzard_mock.mock_data.domain.scenario_seed import ScenarioCompositionError, compose_board_scenario
+from blizzard_mock.mock_data.domain.hub.chunk_seed import (
+    DONE,
+    MIRRORED_STATUSES,
+    NOT_READY,
+    PAUSED,
+    READY,
+)
+from blizzard_mock.mock_data.domain.hub.scenario_seed import ScenarioCompositionError, compose_board_scenario
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -99,6 +106,48 @@ def test_census_reports_the_cost_partial_count() -> None:
     assert scenario.census is not None
     assert scenario.census.cost_partial_count >= 1
     assert scenario.census.usage_fact_count >= scenario.census.cost_partial_count
+
+
+# --- artifact spread -----------------------------------------------------------
+
+
+def test_census_reports_the_artifact_count_matching_the_composed_rows() -> None:
+    scenario = _compose(6)
+    assert scenario.census is not None
+    assert scenario.census.artifact_count == len(_rows_for(scenario.rows, "artifacts"))
+    assert scenario.census.artifact_count >= 2
+
+
+def test_artifacts_spread_across_more_than_one_chunk() -> None:
+    scenario = _compose(6)
+    chunk_ids = {row.values["chunk_id"] for row in _rows_for(scenario.rows, "artifacts")}
+    assert len(chunk_ids) > 1
+
+
+def test_the_done_chunks_two_steps_each_carry_their_own_artifact() -> None:
+    """The ``done`` chunk's two-hop path gives it two ``(node_id, epoch)`` steps —
+    one artifact lands on each, so both are visible under their own step."""
+    scenario = _compose(6)
+    assert scenario.census is not None
+    done_entry = next(entry for entry in scenario.census.chunk_entries if entry.status == "done")
+    transitions = [
+        row for row in _rows_for(scenario.rows, "transitions") if row.values["chunk_id"] == done_entry.chunk_id
+    ]
+    assert len(transitions) == 2
+    step_ids = {(t.values["from_node_id"], t.values["epoch"]) for t in transitions}
+    assert len(step_ids) == 2
+
+    artifacts = [row for row in _rows_for(scenario.rows, "artifacts") if row.values["chunk_id"] == done_entry.chunk_id]
+    assert len(artifacts) == 2
+    artifact_steps = {(row.values["node_id"], row.values["epoch"]) for row in artifacts}
+    assert artifact_steps == step_ids
+
+
+def test_stress_adds_a_deliberately_long_artifact_name() -> None:
+    scenario = _compose(6, stress=True)
+    artifact_rows = _rows_for(scenario.rows, "artifacts")
+    long_names = [row.values["name"] for row in artifact_rows if len(str(row.values["name"])) > 100]
+    assert long_names, "expected a deliberately long artifacts.name among the stress rows"
 
 
 # --- workspace attribution ----------------------------------------------------
@@ -213,3 +262,82 @@ def test_compose_board_scenario_differs_with_a_different_seed() -> None:
     a_ids = [entry.chunk_id for entry in a.census.chunk_entries]
     b_ids = [entry.chunk_id for entry in b.census.chunk_entries]
     assert a_ids != b_ids
+
+
+# --- pinned runner mode (``scenario fleet``) ---------------------------------
+
+
+def test_unset_runner_id_composes_exactly_what_it_always_has() -> None:
+    """Regression guard: the pinned-runner mode must be strictly opt-in."""
+    a = _compose(6, seed=7)
+    b = _compose(6, seed=7)
+    assert a.census is not None
+    assert a.rows == b.rows
+    assert len(set(a.census.runner_ids)) == a.census.runner_count > 1
+
+
+def test_pinned_runner_id_attributes_every_chunk_to_one_runner() -> None:
+    scenario = compose_board_scenario(chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin")
+    assert scenario.census is not None
+    assert scenario.census.runner_ids == ["runner-pin"]
+    assert scenario.census.runner_count == 1
+    registrations = _rows_for(scenario.rows, "runner_registrations")
+    assert len(registrations) == 1
+    assert registrations[0].values["runner_id"] == "runner-pin"
+
+
+def test_register_runner_false_omits_the_pinned_runners_registration_row() -> None:
+    """``scenario fleet`` passes this when the composition root already found a
+    live registration for the pinned runner — composing a second row would
+    collide on ``runner_registrations``'s PK."""
+    scenario = compose_board_scenario(
+        chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin", register_runner=False
+    )
+    assert scenario.census is not None
+    assert _rows_for(scenario.rows, "runner_registrations") == []
+    # The census still names the runner the fleet is pinned to — only the row
+    # composed for it is skipped, not its presence in the census.
+    assert scenario.census.runner_ids == ["runner-pin"]
+    assert scenario.census.runner_count == 1
+
+
+def test_register_runner_true_is_the_default() -> None:
+    default_on = compose_board_scenario(chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin")
+    explicit_on = compose_board_scenario(
+        chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin", register_runner=True
+    )
+    assert default_on.rows == explicit_on.rows
+
+
+def test_pinned_runner_id_routes_the_mirrored_chunks_to_that_runner() -> None:
+    scenario = compose_board_scenario(chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin")
+    assert scenario.census is not None
+    routed = {route.values["chunk_id"] for route in _rows_for(scenario.rows, "route_created")}
+    mirrored = {e.chunk_id for e in scenario.census.chunk_entries if e.status in MIRRORED_STATUSES}
+    assert mirrored <= routed
+    assert all(route.values["runner_id"] == "runner-pin" for route in _rows_for(scenario.rows, "route_created"))
+
+
+def test_pinned_runner_id_leaves_the_ready_chunk_unrouted() -> None:
+    """A live ``route_created`` sits directly above ``ready`` in the hub's own
+    derivation, so routing a ``ready`` chunk would derive it ``running`` — the census
+    the pinned mode prints would then disagree with the board it seeded."""
+    scenario = compose_board_scenario(chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin")
+    assert scenario.census is not None
+    routed = {route.values["chunk_id"] for route in _rows_for(scenario.rows, "route_created")}
+    unroutable = {e.chunk_id for e in scenario.census.chunk_entries if e.status in (READY, NOT_READY, PAUSED, DONE)}
+    assert unroutable & routed == set()
+
+
+def test_pinned_runner_id_ceiling_pauses_the_one_runner() -> None:
+    scenario = compose_board_scenario(chunks=6, clock=FixedClock(_NOW), rng=random.Random(1), runner_id="runner-pin")
+    assert scenario.census is not None
+    assert scenario.census.ceiling_paused_runner_id == "runner-pin"
+
+
+def test_census_carries_the_minted_build_node_id() -> None:
+    scenario = _compose(6)
+    assert scenario.census is not None
+    assert scenario.census.build_node_id
+    node_rows = _rows_for(scenario.rows, "graph_nodes")
+    assert any(row.values["node_id"] == scenario.census.build_node_id for row in node_rows)

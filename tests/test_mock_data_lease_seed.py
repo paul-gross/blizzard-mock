@@ -1,7 +1,7 @@
 """Unit coverage for the lease-fact composer (``blizzard-mock:unit-test``).
 
 Pure, no store: ``compose_lease_row`` is a plain function over already-loaded data
-(``bzh:domain-takes-objects``) — the same row shape ``domain/chunk_seed.py``'s
+(``bzh:domain-takes-objects``) — the same row shape ``domain/hub/chunk_seed.py``'s
 ``running``/``delivering`` statuses compose internally.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from blizzard_mock.mock_data.domain.lease_seed import compose_lease_row
+from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

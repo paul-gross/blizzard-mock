@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from blizzard_mock.mock_data.domain.event_seed import EventCompositionError, compose_event
+from blizzard_mock.mock_data.domain.hub.event_seed import EventCompositionError, compose_event
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

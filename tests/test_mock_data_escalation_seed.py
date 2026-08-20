@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from blizzard_mock.mock_data.domain.escalation_seed import EscalationCompositionError, compose_escalation
+from blizzard_mock.mock_data.domain.hub.escalation_seed import EscalationCompositionError, compose_escalation
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

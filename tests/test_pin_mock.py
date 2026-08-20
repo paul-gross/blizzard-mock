@@ -26,7 +26,7 @@ from blizzard_mock.forge.config import ForgeConfig
 from blizzard_mock.forge.domain.clock import FixedClock as ForgeFixedClock
 from blizzard_mock.harness import engine
 from blizzard_mock.harness.engine import RunResult
-from blizzard_mock.mock_data.domain.scenario_seed import compose_board_scenario
+from blizzard_mock.mock_data.domain.hub.scenario_seed import compose_board_scenario
 from blizzard_mock.mock_data.internal import reflected_store
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
 from blizzard_mock.mock_runner.app import create_app as create_runner_app

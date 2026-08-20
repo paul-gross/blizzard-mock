@@ -15,8 +15,8 @@ from random import Random
 from blizzard_mock.clock import Clock
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
-from blizzard_mock.mock_data.domain.graph_seed import BUILD_NODE_NAME, DELIVER_NODE_NAME, GraphContext
-from blizzard_mock.mock_data.domain.lease_seed import compose_lease_row
+from blizzard_mock.mock_data.domain.hub.graph_seed import BUILD_NODE_NAME, DELIVER_NODE_NAME, GraphContext
+from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
 
 STOPPED = "stopped"
 DONE = "done"
@@ -31,6 +31,10 @@ READY = "ready"
 #: Every derivable status ``compose_chunk`` accepts, in ``derive_chunk_status``'s own
 #: precedence order (highest first) — the CLI's ``click.Choice`` is built from this.
 STATUSES = (STOPPED, DONE, NEEDS_HUMAN, WAITING_ON_HUMAN, PAUSED, DELIVERING, RUNNING, NOT_READY, READY)
+
+#: The statuses ``scenario fleet`` mirrors — the only ones ``mirrored=True`` is safe
+#: for, since a live route outranks every status below it.
+MIRRORED_STATUSES = frozenset({WAITING_ON_HUMAN, NEEDS_HUMAN})
 
 # A local id-prefix, deliberately not in ``domain/ids.py``'s shared registry,
 # mirroring that the real one is its own module constant too.
@@ -65,12 +69,12 @@ def compose_chunk(
     runner_id: str = "runner-seed",
     epoch: int = 1,
     workspace_id: str = _DEFAULT_WORKSPACE_ID,
+    mirrored: bool = False,
 ) -> ChunkSeed:
-    """Compose one chunk minted onto ``graph``, landing at ``status``.
-
-    Raises :class:`ChunkCompositionError` for an unknown status, an
-    unresolvable node name, or an unreachable ``--node``/``--status`` pairing.
-    """
+    """Compose one chunk minted onto ``graph``, landing at ``status``. Raises
+    :class:`ChunkCompositionError` for an unknown status, an unresolvable node name,
+    or an unreachable ``--node``/``--status`` pairing. ``mirrored=True`` adds a live
+    ``route_created`` — valid only for :data:`MIRRORED_STATUSES`."""
     if status not in STATUSES:
         raise ChunkCompositionError(f"unknown status {status!r} — one of {STATUSES}")
 
@@ -145,6 +149,13 @@ def compose_chunk(
         if node_name is not None:
             raise ChunkCompositionError(f"--status {status} mints no transition — --node has nothing to land on")
 
+    def finish(offset_seconds: int = 5) -> ChunkSeed:
+        """Land the mirroring ``route_created`` this status's own branch didn't, then
+        return. A no-op for ``running``/``delivering``, which already minted one."""
+        if mirrored and not any(row.table == "route_created" for row in rows):
+            rows.append(route_created(offset_seconds))
+        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+
     if status == STOPPED:
         rows.append(promoted())
         if node_name is not None:
@@ -155,21 +166,34 @@ def compose_chunk(
                 values={"chunk_id": minted_chunk_id, "stopped_at": at(3), "stopped_by": "mock-data"},
             )
         )
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == DONE:
         rows.append(promoted())
         rows.append(lease(2))
-        from_node = graph.node(node_name or DELIVER_NODE_NAME)
+        # The graph's own edges: build --approved--> deliver --landed--> the
+        # reserved terminal — one epoch, two node-steps.
+        build_node = graph.node(BUILD_NODE_NAME)
+        deliver_node = graph.node(node_name or DELIVER_NODE_NAME)
+        # A terminal hop already leaving ``build`` has no predecessor: no graph carries a self-edge.
+        if deliver_node.node_id != build_node.node_id:
+            rows.append(
+                transition(
+                    offset_seconds=3,
+                    from_node_id=build_node.node_id,
+                    to_node_id=deliver_node.node_id,
+                    choice_name="approved",
+                )
+            )
         rows.append(
             transition(
-                offset_seconds=3,
+                offset_seconds=4,
+                from_node_id=deliver_node.node_id,
                 to_node_id=_RESERVED_TERMINAL,
-                from_node_id=from_node.node_id,
                 choice_name="landed",
             )
         )
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == NEEDS_HUMAN:
         rows.append(promoted())
@@ -188,7 +212,7 @@ def compose_chunk(
                 },
             )
         )
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == WAITING_ON_HUMAN:
         rows.append(promoted())
@@ -210,7 +234,7 @@ def compose_chunk(
                 },
             )
         )
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == PAUSED:
         rows.append(promoted())
@@ -222,7 +246,7 @@ def compose_chunk(
                 values={"chunk_id": minted_chunk_id, "paused": True, "set_at": at(3), "set_by": "mock-data"},
             )
         )
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == DELIVERING:
         rows.append(promoted())
@@ -235,7 +259,7 @@ def compose_chunk(
             )
         rows.append(route_created(3))
         rows.append(transition(offset_seconds=4, to_node_id=node.node_id))
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == RUNNING:
         rows.append(promoted())
@@ -249,13 +273,13 @@ def compose_chunk(
             )
         rows.append(route_created(3))
         rows.append(transition(offset_seconds=4, to_node_id=node.node_id))
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     if status == NOT_READY:
         refuse_node()
-        return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+        return finish()
 
     assert status == READY
     refuse_node()
     rows.append(promoted())
-    return ChunkSeed(chunk_id=minted_chunk_id, rows=rows)
+    return finish()

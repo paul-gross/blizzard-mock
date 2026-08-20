@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from blizzard_mock.clock import FixedClock
-from blizzard_mock.mock_data.domain.question_seed import QuestionCompositionError, QuestionSeed, compose_question
+from blizzard_mock.mock_data.domain.hub.question_seed import QuestionCompositionError, QuestionSeed, compose_question
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
