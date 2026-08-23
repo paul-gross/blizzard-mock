@@ -70,7 +70,8 @@ def test_unknown_cause_is_refused() -> None:
 
 
 def test_explicitly_empty_takeover_command_suppresses_the_wrapped_default() -> None:
-    """Wrapped implies raw, never the reverse (``humans/escalation.md`` §Escalation): an
+    """Wrapped implies raw, never the converse (``humans/escalation.md``
+    §The commands an escalation carries): an
     explicitly emptied raw command must not leave the wrapped placeholder behind,
     which would seed a row shape the real store cannot produce."""
     row = compose_escalation(chunk_id="ch_1", epoch=1, recorded_at=_NOW, takeover_command="")
