@@ -95,6 +95,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
     "TranscriptSegmentAck": ("TranscriptSegmentAck", frozenset()),
+    "WorkItemAuthorView": ("WorkItemAuthorView", frozenset()),
     "WorkItemEntry": ("WorkItemEntry", frozenset()),
     "WorkItemsView": ("WorkItemsView", frozenset()),
 }

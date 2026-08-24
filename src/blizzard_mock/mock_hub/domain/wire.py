@@ -231,6 +231,18 @@ class LeaseTranscriptView(BaseModel):
     turns: list[dict[str, object]] = Field(default_factory=list)
 
 
+class WorkItemAuthorView(BaseModel):
+    """Mirrors ``blizzard.wire.work_source.WorkItemAuthorView`` (blizzard#362) — who filed
+    a hub-owned work item, legible for display."""
+
+    kind: str
+    user_id: str | None = None
+    login: str | None = None
+    runner_id: str | None = None
+    chunk_id: str | None = None
+    node_name: str | None = None
+
+
 class WorkItemEntry(BaseModel):
     """One pointer's pass-through work item; ``title``/``body`` are canned,
     the mock carries no forge integration."""
@@ -244,6 +256,8 @@ class WorkItemEntry(BaseModel):
     body: str | None = None
     comments: list[str] = Field(default_factory=list)
     error: str | None = None
+    author: WorkItemAuthorView | None = None
+    stated_priority: str | None = None
 
 
 class WorkItemsView(BaseModel):
