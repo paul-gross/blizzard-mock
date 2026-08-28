@@ -95,6 +95,11 @@ dropped), so an accepted fact can never make a later read raise.
   the operator's answer so a scenario can make the runner's poll return
   `answered=True` without a real operator surface (the fleet mirror carries no
   board-facing answer route).
+- `POST /_seed/stop {chunk_id}` — test-control only, plays the operator's stop verb so
+  a scenario can drive a seeded chunk to `stopped` (the fleet mirror carries no
+  board-facing stop route). One write: status goes terminal and the live route
+  releases together, so `GET /chunks/{id}` never serves a route alongside a stopped
+  status; the chunk's seeded graph and escalation state are untouched.
 - `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm), `DELETE
   /_levers/{kind}?chunk_id=` (clear), `POST /_levers/reset`.
 - `GET /_captured` — the header-inspection lever: every fleet-facing
