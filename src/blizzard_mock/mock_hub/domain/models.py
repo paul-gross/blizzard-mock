@@ -38,6 +38,7 @@ class ChunkStatus(StrEnum):
     DELIVERING = "delivering"
     NEEDS_HUMAN = "needs_human"
     DONE = "done"
+    STOPPED = "stopped"
 
 
 #: The reserved terminal node id a choice may point at (mirrors ``graph.RESERVED_TERMINAL``).

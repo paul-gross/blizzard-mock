@@ -176,3 +176,11 @@ class AnswerControlBody(BaseModel):
     question_id: str
     answer: str
     answered_by: str = "operator"
+
+
+class StopControlBody(BaseModel):
+    """``POST /_seed/stop`` — test-control only; plays the operator's stop verb so a
+    scenario can drive a seeded chunk to ``stopped`` (the fleet mirror carries no
+    board-facing stop route)."""
+
+    chunk_id: str

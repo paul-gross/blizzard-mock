@@ -1408,6 +1408,39 @@ def test_seed_answer_404s_on_unknown_question(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+# --- test-control stop route ---------------------------------------------------
+
+
+def test_seed_stop_reports_stopped_with_no_route_and_the_graph_still_readable(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+
+    resp = client.post("/_seed/stop", json={"chunk_id": chunk_id})
+    assert resp.status_code == 200
+    assert resp.json() == {"stopped": True, "chunk_id": chunk_id}
+
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["status"] == "stopped"
+    assert detail["route"] is None
+    assert detail["current_node_id"] == "build"
+    assert detail["work_refs"] == [{"source": "o-r", "ref": "1"}]
+
+
+def test_seed_stop_404s_on_unknown_chunk(client: TestClient) -> None:
+    resp = client.post("/_seed/stop", json={"chunk_id": "unknown"})
+    assert resp.status_code == 404
+
+
+def test_seed_stop_leaves_levers_unchanged(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    before = client.get("/_levers").json()
+
+    client.post("/_seed/stop", json={"chunk_id": chunk_id})
+
+    assert client.get("/_levers").json() == before
+
+
 # --- the session declaration on the envelope (issues #115, #144) -------------
 #
 # `bzh:wire-change-extends-mock`: the mock's `NodeConfig` mirrors the real hub's, so a

@@ -546,6 +546,17 @@ class MockHubService:
         question.answered_at = self._clock.now().isoformat()
         self._state.put_question(question)
 
+    def stop_chunk(self, chunk_id: str) -> None:
+        """Test-control only (``POST /_seed/stop``) — plays the operator's stop verb, which
+        the fleet mirror carries no route for. One write: the status goes terminal and the
+        live route releases in the same step, mirroring the real hub's stop (D2) so
+        ``chunk_detail`` never serves a route alongside a stopped status. The chunk's seeded
+        graph and escalation state are untouched."""
+        chunk = self._require(chunk_id)
+        chunk.status = ChunkStatus.STOPPED
+        chunk.claimed = False
+        self._state.put_chunk(chunk)
+
     # -- registry ----------------------------------------------------------
 
     def register(

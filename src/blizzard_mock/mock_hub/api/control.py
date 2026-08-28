@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.levers import Lever, LeverParams
-from blizzard_mock.mock_hub.api.deps import AnswerControlBody, get_captured, get_service
+from blizzard_mock.mock_hub.api.deps import AnswerControlBody, StopControlBody, get_captured, get_service
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
 from blizzard_mock.mock_hub.domain.models import ChunkSpec
-from blizzard_mock.mock_hub.domain.service import MockHubService, QuestionNotFound
+from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
 levers_router = APIRouter(prefix="/_levers", tags=["control"])
@@ -46,6 +46,18 @@ def seed_answer(body: AnswerControlBody, service: Annotated[MockHubService, Depe
     except QuestionNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     return {"answered": True, "question_id": body.question_id}
+
+
+@seed_router.post("/stop")
+def seed_stop(body: StopControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — plays the operator's stop verb so a scenario can drive a
+    seeded chunk to ``stopped`` without a real operator surface (the fleet mirror
+    carries no board-facing stop route)."""
+    try:
+        service.stop_chunk(body.chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"stopped": True, "chunk_id": body.chunk_id}
 
 
 @levers_router.get("")
