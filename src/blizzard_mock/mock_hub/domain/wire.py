@@ -61,6 +61,14 @@ class GraphArtifact(BaseModel):
     content: str
 
 
+class SystemArtifactView(BaseModel):
+    """One published ``ArtifactScope.SYSTEM`` document — mirrors
+    ``blizzard.wire.system_artifact.SystemArtifactView``."""
+
+    name: str
+    content: str
+
+
 class NodeEnvelope(BaseModel):
     chunk_id: str
     graph_id: str

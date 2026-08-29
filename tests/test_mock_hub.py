@@ -1556,3 +1556,48 @@ def test_seeded_graph_artifacts_ride_the_claim_envelope(client: TestClient) -> N
         {"name": "runbook", "kind": "asset", "content": "how to ship it"},
         {"name": "docket", "kind": "asset", "content": "the work item text"},
     ]
+
+
+# --- system artifacts (ArtifactScope.SYSTEM, global) -------------------------
+
+
+def test_system_artifacts_start_empty(client: TestClient) -> None:
+    resp = client.get("/api/fleet/system-artifacts")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+def test_seeded_system_artifact_is_readable_by_list_and_by_name(client: TestClient) -> None:
+    seeded = client.post("/_seed/system-artifacts", json={"name": "garden/finding-format", "content": "the format"})
+    assert seeded.status_code == 201, seeded.text
+    assert seeded.json() == {"name": "garden/finding-format"}
+
+    listed = client.get("/api/fleet/system-artifacts")
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == [{"name": "garden/finding-format", "content": "the format"}]
+
+    fetched = client.get("/api/fleet/system-artifacts/garden/finding-format")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json() == {"name": "garden/finding-format", "content": "the format"}
+
+
+def test_get_system_artifact_404s_for_an_unpublished_name(client: TestClient) -> None:
+    resp = client.get("/api/fleet/system-artifacts/ghost")
+    assert resp.status_code == 404
+    assert "ghost" in resp.json()["detail"]
+
+
+def test_seeding_the_same_name_twice_replaces_it(client: TestClient) -> None:
+    client.post("/_seed/system-artifacts", json={"name": "docket", "content": "first"})
+    client.post("/_seed/system-artifacts", json={"name": "docket", "content": "second"})
+
+    resp = client.get("/api/fleet/system-artifacts/docket")
+    assert resp.json()["content"] == "second"
+
+
+def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
+    client.post("/_seed/system-artifacts", json={"name": "docket", "content": "text"})
+    assert client.post("/_seed/reset").status_code == 200
+
+    resp = client.get("/api/fleet/system-artifacts")
+    assert resp.json() == []

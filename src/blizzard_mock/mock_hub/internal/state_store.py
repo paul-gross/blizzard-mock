@@ -20,6 +20,7 @@ class InMemoryHubState:
         self._runners: dict[str, RunnerRow] = {}
         self._reported: dict[str, ReportedRunnerFacts] = {}
         self._questions: dict[str, QuestionState] = {}
+        self._system_artifacts: dict[str, str] = {}
 
     def put_chunk(self, chunk: ChunkState) -> None:
         self._chunks[chunk.chunk_id] = chunk
@@ -76,7 +77,17 @@ class InMemoryHubState:
     def list_questions(self) -> list[QuestionState]:
         return list(self._questions.values())
 
+    def put_system_artifact(self, name: str, *, content: str) -> None:
+        self._system_artifacts[name] = content
+
+    def get_system_artifact(self, name: str) -> str | None:
+        return self._system_artifacts.get(name)
+
+    def list_system_artifacts(self) -> list[tuple[str, str]]:
+        return sorted(self._system_artifacts.items())
+
     def clear(self) -> None:
         self._chunks.clear()
         self._runners.clear()
         self._questions.clear()
+        self._system_artifacts.clear()

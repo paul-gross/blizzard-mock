@@ -23,7 +23,13 @@ from blizzard_mock.mock_hub.api.deps import (
     TranscriptSegmentBatchBody,
     get_service,
 )
-from blizzard_mock.mock_hub.domain.service import ChunkNotFound, ClaimConflict, MockHubService, QuestionNotFound
+from blizzard_mock.mock_hub.domain.service import (
+    ChunkNotFound,
+    ClaimConflict,
+    MockHubService,
+    QuestionNotFound,
+    SystemArtifactNotFound,
+)
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub.
@@ -47,6 +53,20 @@ def ready() -> dict[str, bool]:
 @fleet_router.get("/queue/peek")
 def peek_queue(service: Annotated[MockHubService, Depends(get_service)]) -> object:
     return service.peek()
+
+
+@fleet_router.get("/system-artifacts")
+def list_system_artifacts(service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """``ArtifactScope.SYSTEM``'s full published set, global rather than per-chunk."""
+    return service.system_artifacts()
+
+
+@fleet_router.get("/system-artifacts/{name:path}")
+def get_system_artifact(name: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    try:
+        return service.system_artifact(name)
+    except SystemArtifactNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
 @fleet_router.post("/routes", status_code=201)
