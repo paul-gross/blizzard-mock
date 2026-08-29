@@ -160,6 +160,15 @@ class GraphArtifactSpec(BaseModel):
     content: str
 
 
+class SystemArtifactSpec(BaseModel):
+    """One published ``ArtifactScope.SYSTEM`` document (``POST /_seed/system-artifacts``) —
+    global, not tied to any seeded chunk, mirroring the hub's own packaged set. ``name`` may
+    be slash-bearing, unlike a graph-scoped artifact's."""
+
+    name: str
+    content: str
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 

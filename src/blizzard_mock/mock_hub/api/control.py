@@ -16,7 +16,7 @@ from blizzard_mock.levers import Lever, LeverParams
 from blizzard_mock.mock_hub.api.deps import AnswerControlBody, StopControlBody, get_captured, get_service
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
-from blizzard_mock.mock_hub.domain.models import ChunkSpec
+from blizzard_mock.mock_hub.domain.models import ChunkSpec, SystemArtifactSpec
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
@@ -28,6 +28,16 @@ captured_router = APIRouter(prefix="/_captured", tags=["control"])
 def seed_chunk(spec: ChunkSpec, service: Annotated[MockHubService, Depends(get_service)]) -> dict[str, str]:
     chunk = service.seed_chunk(spec)
     return {"chunk_id": chunk.chunk_id, "graph_id": chunk.graph_id}
+
+
+@seed_router.post("/system-artifacts", status_code=201)
+def seed_system_artifact(
+    spec: SystemArtifactSpec, service: Annotated[MockHubService, Depends(get_service)]
+) -> dict[str, str]:
+    """Publish (or replace) one ``ArtifactScope.SYSTEM`` document — global, so unlike
+    ``/_seed/chunk`` this names no chunk to seed it onto."""
+    service.seed_system_artifact(spec)
+    return {"name": spec.name}
 
 
 @seed_router.post("/reset")

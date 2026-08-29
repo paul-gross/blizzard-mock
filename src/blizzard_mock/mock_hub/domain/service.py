@@ -26,6 +26,7 @@ from blizzard_mock.mock_hub.domain.models import (
     Executor,
     NodeSpec,
     QuestionState,
+    SystemArtifactSpec,
 )
 from blizzard_mock.mock_hub.domain.state import IHubState
 from blizzard_mock.mock_hub.domain.wire import (
@@ -49,6 +50,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteView,
     RunnerFactAck,
     RunnerView,
+    SystemArtifactView,
     TranscriptSegmentAck,
     WorkItemEntry,
     WorkItemsView,
@@ -78,6 +80,10 @@ class ChunkNotFound(Exception):
 
 class QuestionNotFound(Exception):
     """No question with that id."""
+
+
+class SystemArtifactNotFound(Exception):
+    """No published system artifact with that name."""
 
 
 class ClaimConflict(Exception):
@@ -143,6 +149,22 @@ class MockHubService:
         self._transcript_chunk_bytes.clear()
         self._transcript_key_state.clear()
         self._transcript_segments.clear()
+
+    # -- system artifacts (ArtifactScope.SYSTEM, global) --------------------
+
+    def seed_system_artifact(self, spec: SystemArtifactSpec) -> None:
+        """Publish (or replace) one document (POST /_seed/system-artifacts) — global, not
+        tied to any seeded chunk, mirroring the hub's own packaged set."""
+        self._state.put_system_artifact(spec.name, content=spec.content)
+
+    def system_artifacts(self) -> list[SystemArtifactView]:
+        return [SystemArtifactView(name=name, content=content) for name, content in self._state.list_system_artifacts()]
+
+    def system_artifact(self, name: str) -> SystemArtifactView:
+        content = self._state.get_system_artifact(name)
+        if content is None:
+            raise SystemArtifactNotFound(f"no system artifact {name!r}")
+        return SystemArtifactView(name=name, content=content)
 
     # -- queue -------------------------------------------------------------
 
