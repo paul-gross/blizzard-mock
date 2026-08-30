@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# --- Enums mirrored from blizzard.hub.domain (value-identical) ---------------
+# --- Enums mirrored from blizzard.foundation (value-identical) ---------------
 
 
 class Executor(StrEnum):
