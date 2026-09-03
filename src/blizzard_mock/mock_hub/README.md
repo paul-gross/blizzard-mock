@@ -128,6 +128,7 @@ dropped), so an accepted fact can never make a later read raise.
 | `replay` | — | The next completion returns the *previous* apply-response replayed — a duplicate delivery, no re-advance |
 | `stale_envelope` | — | `GET /chunks/{id}/envelope` stamps a stale (`latest_epoch-1`) fence, so a completion from it is fenced out (D-007) |
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
+| `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency (blizzard#458) — sticky until cleared |
 
 Every lever is optionally scoped to one `chunk_id` and may self-expire after
 `remaining` affected requests. The control plane and liveness are exempt from the
