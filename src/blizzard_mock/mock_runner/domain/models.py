@@ -35,6 +35,16 @@ class ClaimBody(BaseModel):
     environment_ids: list[str] = Field(default_factory=lambda: ["e1"])
 
 
+class ClaimNextBody(BaseModel):
+    """POST /_drive/claim-next — peek, select, and claim in one call (blizzard#459).
+
+    ``strict`` mirrors the real runner's ``[queue] strict``: off (the default) reaches
+    past a marked head for the first unmarked entry, ``True`` holds at a marked head."""
+
+    environment_ids: list[str] = Field(default_factory=lambda: ["e1"])
+    strict: bool = False
+
+
 class CompleteBody(BaseModel):
     """POST /_drive/complete — complete the held node-step with a judgement choice.
 

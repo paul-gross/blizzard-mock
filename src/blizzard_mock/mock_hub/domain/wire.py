@@ -165,11 +165,16 @@ class ChunkDetail(BaseModel):
     questions: list[QuestionView] = Field(default_factory=list)
 
 
+class BlockedView(BaseModel):
+    prerequisite_chunk_id: str
+
+
 class QueuePeekEntry(BaseModel):
     chunk_id: str
     graph_id: str
     position: int
     work_refs: list[dict[str, str]] = Field(default_factory=list)
+    blocked: BlockedView | None = None
 
 
 class QueuePeekResponse(BaseModel):

@@ -51,6 +51,7 @@ def _sibling(path: Path) -> str:
 #: A mirror model missing from this map fails, so a new one is mapped on purpose.
 _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "ApplyResponse": ("ApplyResponse", frozenset()),
+    "BlockedView": ("BlockedView", frozenset()),
     "ChunkDetail": (
         "ChunkDetail",
         # The runner reads identity, fence, route, escalation, and questions; the rest of
@@ -88,7 +89,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "NodeConfig": ("NodeConfig", frozenset()),
     "NodeEnvelope": ("NodeEnvelope", frozenset()),
     "QuestionView": ("QuestionView", frozenset()),
-    "QueuePeekEntry": ("QueuePeekEntry", frozenset({"blocked"})),
+    "QueuePeekEntry": ("QueuePeekEntry", frozenset()),
     "QueuePeekResponse": ("QueuePeekResponse", frozenset()),
     "RotatePolicyView": ("blizzard__wire__envelope__RotatePolicyView", frozenset()),
     "RouteClaimResponse": ("RouteClaimResponse", frozenset()),

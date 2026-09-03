@@ -112,6 +112,58 @@ def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient,
     assert claim["response"]["prerequisite_chunk_id"] == "ch_prereq"
 
 
+def test_drive_claim_next_reaches_past_a_marked_head_by_default(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#459: ``/_drive/claim-next`` peeks, then reach-ahead (the default) claims
+    the first unmarked entry rather than the marked head."""
+    hub, runner = stack
+    blocked_id = _seed(hub)
+    open_id = _seed(hub)
+    hub.post(
+        "/_levers/dependency_unmet",
+        json={"chunk_id": blocked_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+    )
+
+    claim = runner.post("/_drive/claim-next", json={}).json()
+
+    assert claim["claimed"] is True
+    assert claim["response"]["chunk_id"] == open_id
+
+
+def test_drive_claim_next_strict_holds_at_a_marked_head(stack: tuple[TestClient, TestClient]) -> None:
+    """``strict=true`` yields no claim at a marked head, even with an unmarked entry
+    later in the peeked list — an idle call, not a claim attempt."""
+    hub, runner = stack
+    blocked_id = _seed(hub)
+    _seed(hub)  # an unmarked entry, reachable only under the default
+    hub.post(
+        "/_levers/dependency_unmet",
+        json={"chunk_id": blocked_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+    )
+
+    claim = runner.post("/_drive/claim-next", json={"strict": True}).json()
+
+    assert claim["claimed"] is False
+    assert hub.get(f"/api/fleet/chunks/{blocked_id}").json()["route"] is None
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_drive_claim_next_finds_nothing_when_every_peeked_chunk_is_marked(
+    stack: tuple[TestClient, TestClient], strict: bool
+) -> None:
+    """The exhaustion boundary (blizzard#459): every peeked entry marked claims nothing
+    under either policy, pinned explicitly rather than left to converge by accident."""
+    hub, runner = stack
+    for chunk_id in (_seed(hub), _seed(hub)):
+        hub.post(
+            "/_levers/dependency_unmet",
+            json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+        )
+
+    claim = runner.post("/_drive/claim-next", json={"strict": strict}).json()
+
+    assert claim["claimed"] is False
+
+
 def test_lever_catalog_lists_all_nine(stack: tuple[TestClient, TestClient]) -> None:
     _hub, runner = stack
     assert set(runner.get("/_levers").json()["catalog"]) == {
