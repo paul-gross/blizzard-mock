@@ -31,6 +31,7 @@ from blizzard_mock.mock_hub.domain.models import (
 from blizzard_mock.mock_hub.domain.state import IHubState
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
+    BlockedView,
     ChunkDetail,
     ChunkEscalationView,
     EnvelopeChoice,
@@ -186,7 +187,11 @@ class MockHubService:
     # -- queue -------------------------------------------------------------
 
     def peek(self) -> QueuePeekResponse:
-        """Ready = seeded, unclaimed, not terminal — FIFO by insertion (D-080)."""
+        """Ready = seeded, unclaimed, not terminal — FIFO by insertion (D-080).
+
+        Reads the ``dependency_unmet`` lever the same as :meth:`claim` does, but never
+        consumes it (blizzard#459) — the one lever reaches both surfaces, and the peek's
+        read must not expire what the later claim still needs to see."""
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         entries = [
             QueuePeekEntry(
@@ -194,10 +199,17 @@ class MockHubService:
                 graph_id=c.graph_id,
                 position=i,
                 work_refs=[p.model_dump() for p in c.work_refs],
+                blocked=self._blocked_marking(c.chunk_id),
             )
             for i, c in enumerate(ready)
         ]
         return QueuePeekResponse(entries=entries)
+
+    def _blocked_marking(self, chunk_id: str) -> BlockedView | None:
+        lever = self._levers.find(HubLever.DEPENDENCY_UNMET.value, chunk_id)
+        if lever is None:
+            return None
+        return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
     # -- claim -------------------------------------------------------------
 

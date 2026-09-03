@@ -110,6 +110,31 @@ class MockRunnerService:
         self._report_lease(chunk_id, held_epoch)
         return {"claimed": True, "status": status, "from_node_id": node_id, "epoch": held_epoch, "response": body}
 
+    def claim_next(self, environment_ids: list[str], *, strict: bool = False) -> dict[str, Any]:
+        """Peek, select, and claim in one call (blizzard#459) — the mock's structural
+        sibling of the real runner's ``ReadyQueue`` peek seam. Reach-ahead by default:
+        the first unmarked entry at any depth in the peeked list; ``strict`` holds at a
+        marked head and claims nothing instead."""
+        status, body = self._gw.peek()
+        if status != 200:
+            return {"claimed": False, "status": status, "response": body}
+        entry = self._select_next(body.get("entries", []), strict=strict)
+        if entry is None:
+            return {"claimed": False, "reason": "no unmarked entry in the peeked queue"}
+        return self.claim(entry["chunk_id"], environment_ids)
+
+    @staticmethod
+    def _select_next(entries: list[dict[str, Any]], *, strict: bool) -> dict[str, Any] | None:
+        if not entries:
+            return None
+        if strict:
+            head = entries[0]
+            return None if head.get("blocked") is not None else head
+        for entry in entries:
+            if entry.get("blocked") is None:
+                return entry
+        return None
+
     def complete(
         self,
         chunk_id: str,

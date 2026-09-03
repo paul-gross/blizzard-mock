@@ -34,6 +34,7 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   | `POST /_drive/register` | `POST {hub}/api/fleet/runners` — join the fleet |
   | `POST /_drive/peek` | `GET {hub}/api/fleet/queue/peek` |
   | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) via the dedicated `POST {hub}/api/fleet/chunks/{id}/leases` route by default — arm `lease_via_events` to route the same report through the batched `/events` push instead |
+  | `POST /_drive/claim-next` `{environment_ids?, strict?}` | Peeks, selects, and claims in one call (blizzard#459) — the mock's structural sibling of the real runner's own selection seam. `strict` (default `false`) reaches past a `blocked` head for the first unmarked entry; `true` holds at a `blocked` head and claims nothing |
   | `POST /_drive/complete` `{chunk_id, choice, artifacts?}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next`. `artifacts` (optional, default `[]`) are the submission's `produces:` artifacts (`SubmittedArtifact` dicts — `{name, kind, content, attached}`), letting a service test drive the hub's `produces_mode=enforce` backstop (issue #113) over the wire |
   | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/fleet/chunks/{id}` |
   | `POST /_drive/escalate` `{chunk_id, takeover_command?, wrapped_takeover_command?}` | `POST {hub}/api/fleet/chunks/{id}/escalations` — reports retries-exhausted, fenced by the held lease's own epoch |

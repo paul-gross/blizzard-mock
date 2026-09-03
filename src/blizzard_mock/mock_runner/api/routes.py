@@ -17,6 +17,7 @@ from blizzard_mock.mock_runner.domain.models import (
     AskBody,
     ChunkQueryBody,
     ClaimBody,
+    ClaimNextBody,
     CompleteBody,
     DecideBody,
     DeclareGitCommitBody,
@@ -77,6 +78,13 @@ def drive_peek(service: Annotated[MockRunnerService, Depends(get_service)]) -> d
 @drive_router.post("/claim")
 def drive_claim(body: ClaimBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.claim(body.chunk_id, body.environment_ids)
+
+
+@drive_router.post("/claim-next")
+def drive_claim_next(
+    body: ClaimNextBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.claim_next(body.environment_ids, strict=body.strict)
 
 
 @drive_router.post("/complete")
