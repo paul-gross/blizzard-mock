@@ -59,6 +59,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
             {
                 "artifacts",
                 "awaiting_external_merge",
+                "blocked",
                 "bounces",
                 "cost",
                 "current_node_name",
@@ -87,7 +88,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "NodeConfig": ("NodeConfig", frozenset()),
     "NodeEnvelope": ("NodeEnvelope", frozenset()),
     "QuestionView": ("QuestionView", frozenset()),
-    "QueuePeekEntry": ("QueuePeekEntry", frozenset()),
+    "QueuePeekEntry": ("QueuePeekEntry", frozenset({"blocked"})),
     "QueuePeekResponse": ("QueuePeekResponse", frozenset()),
     "RotatePolicyView": ("blizzard__wire__envelope__RotatePolicyView", frozenset()),
     "RouteClaimResponse": ("RouteClaimResponse", frozenset()),
