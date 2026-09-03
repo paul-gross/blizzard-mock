@@ -26,6 +26,7 @@ from blizzard_mock.mock_hub.api.deps import (
 from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
     ClaimConflict,
+    DependencyUnmet,
     MockHubService,
     NoRunContext,
     QuestionNotFound,
@@ -86,6 +87,15 @@ def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends
                 "chunk_id": body.chunk_id,
                 "held_by_runner_id": exc.held_by_runner_id,
                 "detail": "chunk already claimed",
+            },
+        )
+    except DependencyUnmet as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "chunk_id": body.chunk_id,
+                "prerequisite_chunk_id": exc.prerequisite_chunk_id,
+                "detail": "chunk depends on an unmet prerequisite",
             },
         )
     except ChunkNotFound as exc:

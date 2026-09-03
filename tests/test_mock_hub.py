@@ -166,7 +166,7 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_nine(client: TestClient) -> None:
+def test_lever_catalog_lists_all_ten(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
@@ -178,6 +178,7 @@ def test_lever_catalog_lists_all_nine(client: TestClient) -> None:
         "replay",
         "stale_envelope",
         "chunk_unknown",
+        "dependency_unmet",
     }
 
 
@@ -395,6 +396,42 @@ def test_lever_chunk_unknown_404s_mid_lease_then_self_expires(client: TestClient
     healed = client.get(f"/api/fleet/chunks/{chunk_id}")
     assert healed.status_code == 200
     assert healed.json()["chunk_id"] == chunk_id
+
+
+def test_lever_dependency_unmet_denies_the_claim_naming_the_prerequisite(client: TestClient) -> None:
+    """blizzard#458: a claim on a chunk the lever names as depending on an unmet
+    prerequisite is refused with a 409 shape distinct from ``ClaimConflict`` — no
+    ``held_by_runner_id``, a ``prerequisite_chunk_id`` instead."""
+    chunk_id = _seed(client)
+    client.post(
+        "/_levers/dependency_unmet",
+        json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+    )
+
+    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 409, denied.text
+    body = denied.json()
+    assert body["chunk_id"] == chunk_id
+    assert body["prerequisite_chunk_id"] == "ch_prereq"
+    assert "held_by_runner_id" not in body
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"] is None
+
+
+def test_lever_dependency_unmet_is_sticky_until_cleared(client: TestClient) -> None:
+    """Unlike a one-shot fact, an unmet dependency stands until the operator clears it —
+    the lever stays armed with no ``remaining`` set, so it denies every claim attempt."""
+    chunk_id = _seed(client)
+    client.post(
+        "/_levers/dependency_unmet",
+        json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+    )
+
+    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
+    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
+
+    client.delete("/_levers/dependency_unmet", params={"chunk_id": chunk_id})
+    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
 
 
 # --- new fleet routes (blizzard-mock#4) --------------------------------------

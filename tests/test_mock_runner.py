@@ -94,6 +94,24 @@ def test_driver_claims_and_completes_over_the_wire(stack: tuple[TestClient, Test
     assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
 
 
+def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#458: the hub's ``dependency_unmet`` lever denies the claim with a 409
+    the driver has no special case for — it reports the denial back like any other
+    non-201 claim response rather than raising."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    hub.post(
+        "/_levers/dependency_unmet",
+        json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
+    )
+
+    claim = _claim(runner, chunk_id)
+
+    assert claim["claimed"] is False
+    assert claim["status"] == 409
+    assert claim["response"]["prerequisite_chunk_id"] == "ch_prereq"
+
+
 def test_lever_catalog_lists_all_nine(stack: tuple[TestClient, TestClient]) -> None:
     _hub, runner = stack
     assert set(runner.get("/_levers").json()["catalog"]) == {

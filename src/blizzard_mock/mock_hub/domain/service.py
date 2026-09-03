@@ -99,6 +99,16 @@ class ClaimConflict(Exception):
         self.held_by_runner_id = held_by_runner_id
 
 
+class DependencyUnmet(Exception):
+    """The chunk stands on a prerequisite the ``dependency_unmet`` lever names as not
+    ``done`` — the claim is refused with a 409 distinct from :class:`ClaimConflict`
+    (blizzard#458)."""
+
+    def __init__(self, prerequisite_chunk_id: str) -> None:
+        super().__init__(f"chunk depends on unmet prerequisite {prerequisite_chunk_id}")
+        self.prerequisite_chunk_id = prerequisite_chunk_id
+
+
 class MockHubService:
     """The composition-root-wired service every mock-hub route delegates to."""
 
@@ -197,6 +207,10 @@ class MockHubService:
         chunk = self._require(chunk_id)
         if chunk.claimed:
             raise ClaimConflict(chunk.route_runner_id or "unknown")
+        blocked = self._levers.find(HubLever.DEPENDENCY_UNMET.value, chunk_id)
+        if blocked is not None:
+            self._levers.consume(blocked)
+            raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
         chunk.claimed = True
         chunk.route_runner_id = runner_id
         chunk.route_workspace_id = workspace_id

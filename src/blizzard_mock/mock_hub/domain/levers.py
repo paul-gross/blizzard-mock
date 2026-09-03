@@ -39,6 +39,10 @@ class HubLever(StrEnum):
     #: ``GET /chunks/{id}`` and ``.../envelope`` report a genuine 404 without
     #: deleting the chunk's seeded state (commit ``68238d0``).
     CHUNK_UNKNOWN = "chunk_unknown"
+    #: ``POST /routes`` denies the claim, naming ``payload.prerequisite_chunk_id`` as the
+    #: unmet dependency (blizzard#458) — sticky until cleared, mirroring the real hub's
+    #: standing edge rather than a one-shot fact.
+    DEPENDENCY_UNMET = "dependency_unmet"
 
 
 CATALOG: dict[str, str] = {
@@ -55,4 +59,7 @@ CATALOG: dict[str, str] = {
     HubLever.REPLAY.value: "re-emit the previous completion apply-response (duplicate delivery)",
     HubLever.STALE_ENVELOPE.value: "GET envelope stamps a stale (latest_epoch-1) fence (D-007)",
     HubLever.CHUNK_UNKNOWN.value: "GET chunk/envelope 404s as an unknown chunk — the runner's env-release trigger",
+    HubLever.DEPENDENCY_UNMET.value: (
+        "POST /routes denies the claim citing payload.prerequisite_chunk_id as the unmet dependency (sticky)"
+    ),
 }
