@@ -27,6 +27,7 @@ from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
     ClaimConflict,
     MockHubService,
+    NoRunContext,
     QuestionNotFound,
     SystemArtifactNotFound,
 )
@@ -123,6 +124,18 @@ def get_work_items(chunk_id: str, service: Annotated[MockHubService, Depends(get
     try:
         return service.work_items(chunk_id)
     except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunks/{chunk_id}/garden/findings")
+def get_garden_findings(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """A worker-scoped read of the chunk's own routine's live finding bucket — mirrors
+    the real hub's ``GET /api/fleet/chunks/{id}/garden/findings``."""
+    try:
+        return service.garden_findings(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except NoRunContext as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 

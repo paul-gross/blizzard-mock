@@ -1601,3 +1601,81 @@ def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
 
     resp = client.get("/api/fleet/system-artifacts")
     assert resp.json() == []
+
+
+# --- garden findings (worker-scoped bucket read) ------------------------------
+
+
+def _garden_spec(*, garden_run: dict | None, garden_findings: list[dict] | None = None) -> dict:
+    spec = dict(_SPEC)
+    if garden_run is not None:
+        spec["garden_run"] = garden_run
+    if garden_findings is not None:
+        spec["garden_findings"] = garden_findings
+    return spec
+
+
+def test_garden_findings_reads_the_seeded_live_bucket(client: TestClient) -> None:
+    spec = _garden_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_findings=[
+            {"finding_id": "fin_1", "class": "stale-docstring", "locus": "a.py:1", "summary": "s"},
+        ],
+    )
+    resp = client.post("/_seed/chunk", json=spec)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    findings = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
+    assert findings.status_code == 200, findings.text
+    assert findings.json() == [
+        {
+            "finding_id": "fin_1",
+            "routine_name": "nightly",
+            "scope_slug": "blizzard",
+            "class": "stale-docstring",
+            "locus": "a.py:1",
+            "summary": "s",
+            "introduced": None,
+            "live": True,
+            "state": "live",
+            "note": None,
+            "last_seen_at": None,
+            "observed_count": 0,
+        }
+    ]
+
+
+def test_garden_findings_excludes_a_seeded_non_live_finding(client: TestClient) -> None:
+    spec = _garden_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_findings=[
+            {"finding_id": "fin_1", "class": "c", "locus": "a.py:1", "summary": "s"},
+            {
+                "finding_id": "fin_2",
+                "class": "c",
+                "locus": "a.py:2",
+                "summary": "s",
+                "live": False,
+                "state": "resolved",
+            },
+        ],
+    )
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    findings = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
+    assert [row["finding_id"] for row in findings.json()] == ["fin_1"]
+
+
+def test_garden_findings_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
+    chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_run` at all
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
+    assert resp.status_code == 404
+    assert "no run context" in resp.json()["detail"]
+
+
+def test_garden_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
+    resp = client.get("/api/fleet/chunks/ch_ghost/garden/findings")
+    assert resp.status_code == 404
+    assert "ch_ghost" in resp.json()["detail"]

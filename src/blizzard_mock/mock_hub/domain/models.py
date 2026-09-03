@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # --- Enums mirrored from blizzard.foundation (value-identical) ---------------
 
@@ -169,6 +169,34 @@ class SystemArtifactSpec(BaseModel):
     content: str
 
 
+class GardenRunSpec(BaseModel):
+    """A seeded chunk's garden run identity — mirrors the real hub's ``RunContext``,
+    resolved server-side from the chunk rather than named by the caller. ``None`` on a
+    chunk (the default) mirrors a chunk that is not a routine run at all."""
+
+    routine_name: str
+    scope_slug: str
+
+
+class GardenFindingSpec(BaseModel):
+    """One seeded finding on a chunk's garden run bucket — mirrors the fields the real
+    hub's ``FindingView`` carries. Seeded live by default; the mock's own finding bucket
+    has no exit-fact lever, so a non-live entry is only ever seeded that way directly."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    finding_id: str
+    class_: str = Field(alias="class")
+    locus: str
+    summary: str
+    introduced: str | None = None
+    live: bool = True
+    state: str = "live"
+    note: str | None = None
+    last_seen_at: str | None = None
+    observed_count: int = 0
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
@@ -182,6 +210,9 @@ class ChunkSpec(BaseModel):
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
     graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
+    #: The chunk's own run identity, or ``None`` for a chunk that is not a routine run.
+    garden_run: GardenRunSpec | None = None
+    garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -198,6 +229,8 @@ class ChunkState(BaseModel):
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
     graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
+    garden_run: GardenRunSpec | None = None
+    garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

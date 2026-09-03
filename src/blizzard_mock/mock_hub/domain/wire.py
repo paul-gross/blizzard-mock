@@ -7,7 +7,7 @@ asserted against the committed hub OpenAPI by ``tests/test_wire_parity.py``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from blizzard_mock.mock_hub.domain.models import ApplyOutcome, Executor, JudgedBy, SessionMode
 
@@ -270,3 +270,22 @@ class WorkItemEntry(BaseModel):
 
 class WorkItemsView(BaseModel):
     items: list[WorkItemEntry] = Field(default_factory=list)
+
+
+class FindingView(BaseModel):
+    """One garden finding — mirrors ``blizzard.wire.finding.FindingView``."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    finding_id: str
+    routine_name: str
+    scope_slug: str
+    class_: str = Field(alias="class")
+    locus: str
+    summary: str
+    introduced: str | None = None
+    live: bool
+    state: str
+    note: str | None = None
+    last_seen_at: str | None
+    observed_count: int

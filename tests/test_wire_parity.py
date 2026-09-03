@@ -80,6 +80,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "ChunkEscalationView": ("ChunkEscalationView", frozenset()),
     "ExternalSubscriptionUsageView": ("ExternalSubscriptionUsageView", frozenset()),
     "ExternalSubscriptionUsageWindowView": ("ExternalSubscriptionUsageWindowView", frozenset()),
+    "FindingView": ("FindingView", frozenset()),
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
@@ -145,6 +146,14 @@ def _hub_schemas() -> dict[str, Any]:
     return json.loads(_sibling(_HUB_SPEC))["components"]["schemas"]
 
 
+def _wire_field_names(model: type[BaseModel]) -> set[str]:
+    """A model's own field set, on the wire — a field's alias when it carries one (a
+    Python keyword like `class` mirrored as `class_`), its Python name otherwise. The
+    real schema's `properties` are alias-shaped throughout, so comparing against raw
+    `model_fields` keys would flag every aliased field as both missing and extra."""
+    return {f.alias or name for name, f in model.model_fields.items()}
+
+
 def test_every_mirror_model_is_mapped_to_a_real_schema() -> None:
     assert set(_mirror_models()) == set(_MIRRORED) | _UNSCHEMAED
 
@@ -165,7 +174,7 @@ def test_transcript_body_field_set_agrees_with_the_real_schema(name: str) -> Non
     schemas = _hub_schemas()
     assert schema_name in schemas, f"{schema_name} is gone from the hub spec — the mirror names a schema that left"
     real = set(schemas[schema_name].get("properties", {}))
-    mirrored = set(getattr(deps, name).model_fields)
+    mirrored = _wire_field_names(getattr(deps, name))
     assert mirrored - real == set(), f"{name} carries fields the real schema has not: {sorted(mirrored - real)}"
     assert real - mirrored == omitted, f"{name} omits {sorted(real - mirrored)}, declared {sorted(omitted)}"
 
@@ -176,7 +185,7 @@ def test_mirror_field_set_agrees_with_the_real_schema(name: str) -> None:
     schemas = _hub_schemas()
     assert schema_name in schemas, f"{schema_name} is gone from the hub spec — the mirror names a schema that left"
     real = set(schemas[schema_name].get("properties", {}))
-    mirrored = set(_mirror_models()[name].model_fields)
+    mirrored = _wire_field_names(_mirror_models()[name])
     assert mirrored - real == set(), f"{name} carries fields the real schema has not: {sorted(mirrored - real)}"
     assert real - mirrored == omitted, f"{name} omits {sorted(real - mirrored)}, declared {sorted(omitted)}"
 

@@ -36,6 +36,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     EnvelopeChoice,
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
+    FindingView,
     GraphArtifact,
     HubAdvanceResponse,
     LeaseTranscriptView,
@@ -80,6 +81,10 @@ class ChunkNotFound(Exception):
 
 class QuestionNotFound(Exception):
     """No question with that id."""
+
+
+class NoRunContext(Exception):
+    """The chunk carries no seeded garden run identity — not a routine run."""
 
 
 class SystemArtifactNotFound(Exception):
@@ -137,6 +142,8 @@ class MockHubService:
             nodes=spec.nodes,
             work_refs=spec.work_refs,
             graph_artifacts=spec.graph_artifacts,
+            garden_run=spec.garden_run,
+            garden_findings=spec.garden_findings,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -276,6 +283,38 @@ class MockHubService:
                 for p in chunk.work_refs
             ]
         )
+
+    def garden_findings(self, chunk_id: str) -> list[FindingView]:
+        """A chunk's own routine-and-scope-derived live finding bucket — mirrors
+        ``GET /api/fleet/chunks/{id}/garden/findings``. Raises :class:`NoRunContext` for
+        a chunk seeded with no ``garden_run`` — not a routine run — rather than
+        answering an empty bucket."""
+        chunk = self._require(chunk_id)
+        if chunk.garden_run is None:
+            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        run = chunk.garden_run
+        # `class_`'s alias is the Python keyword `class` — constructed by alias via
+        # `model_validate`, the real hub's own `finding_view` shape.
+        return [
+            FindingView.model_validate(
+                {
+                    "finding_id": f.finding_id,
+                    "routine_name": run.routine_name,
+                    "scope_slug": run.scope_slug,
+                    "class": f.class_,
+                    "locus": f.locus,
+                    "summary": f.summary,
+                    "introduced": f.introduced,
+                    "live": f.live,
+                    "state": f.state,
+                    "note": f.note,
+                    "last_seen_at": f.last_seen_at,
+                    "observed_count": f.observed_count,
+                }
+            )
+            for f in chunk.garden_findings
+            if f.live
+        ]
 
     def envelope(self, chunk_id: str) -> NodeEnvelope:
         """The current node's envelope (idempotent re-read, D-090).
