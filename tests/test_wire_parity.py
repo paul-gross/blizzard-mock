@@ -74,6 +74,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "open_prs",
                 "pause",
                 "pending",
+                # Fence-relevant on the real side — `Fenced.out` reads it — but the mock
+                # models the fence through `latest_epoch`, with no restart concept to fill it.
+                "restarts",
                 "usage",
             }
         ),
@@ -86,7 +89,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
-    "NodeConfig": ("NodeConfig", frozenset()),
+    # `proposes_work_items` authorizes a completion's `proposals` hub-side; no runner path
+    # reads it, so a mirror serving a real runner carries nothing by carrying it.
+    "NodeConfig": ("NodeConfig", frozenset({"proposes_work_items"})),
     "NodeEnvelope": ("NodeEnvelope", frozenset()),
     "QuestionView": ("QuestionView", frozenset()),
     "QueuePeekEntry": ("QueuePeekEntry", frozenset()),
