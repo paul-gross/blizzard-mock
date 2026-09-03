@@ -2,7 +2,7 @@
 
 Drives the hub-mirror surface over a ``TestClient`` (in-process, no network): the happy
 path — seed → peek → claim → fence → complete → a hub node derives ``done`` — plus **each
-of the eight levers**, asserting the named edge state a runner-under-test would then have
+of the ten levers**, asserting the named edge state a runner-under-test would then have
 to survive, and the full ``/events`` fact vocabulary (blizzard-mock#4). No ``blizzard``
 import: the mock stands alone.
 """
