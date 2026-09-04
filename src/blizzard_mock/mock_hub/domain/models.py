@@ -190,6 +190,8 @@ class GardenFindingSpec(BaseModel):
     locus: str
     summary: str
     introduced: str | None = None
+    introduced_at: str | None = None
+    first_observed_at: str | None = None
     live: bool = True
     state: str = "live"
     note: str | None = None
@@ -213,6 +215,8 @@ class GardenAnsweredFindingSpec(BaseModel):
     locus: str
     summary: str
     introduced: str | None = None
+    introduced_at: str | None = None
+    first_observed_at: str | None = None
     live: bool = True
     state: str = "live"
     note: str | None = None

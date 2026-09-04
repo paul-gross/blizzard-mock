@@ -289,6 +289,8 @@ class FindingView(BaseModel):
     locus: str
     summary: str
     introduced: str | None = None
+    introduced_at: str | None = None
+    first_observed_at: str | None = None
     live: bool
     state: str
     note: str | None = None
