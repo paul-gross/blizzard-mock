@@ -199,29 +199,15 @@ class GardenFindingSpec(BaseModel):
     observed_count: int = 0
 
 
-class GardenAnsweredFindingSpec(BaseModel):
+class GardenAnsweredFindingSpec(GardenFindingSpec):
     """One seeded finding within a chunk's own answered-proposal set
-    (``GET /chunks/{id}/findings``, blizzard#397 Phase 1) — carries its own
-    ``routine_name``/``scope_slug`` rather than deriving them from a seeded
+    (``GET /chunks/{id}/findings``, blizzard#397 Phase 1) — :class:`GardenFindingSpec`
+    plus its own ``routine_name``/``scope_slug`` rather than deriving them from a seeded
     :class:`GardenRunSpec`: a minted chunk carries no run context at all (D6), so the two
     reads' seeding levers stay independent."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    finding_id: str
     routine_name: str
     scope_slug: str
-    class_: str = Field(alias="class")
-    locus: str
-    summary: str
-    introduced: str | None = None
-    introduced_at: str | None = None
-    first_observed_at: str | None = None
-    live: bool = True
-    state: str = "live"
-    note: str | None = None
-    last_seen_at: str | None = None
-    observed_count: int = 0
 
 
 class ChunkSpec(BaseModel):

@@ -97,7 +97,11 @@ dropped), so an accepted fact can never make a later read raise.
   (each mirroring the real hub's `FindingView` fields, minus `routine_name`/
   `scope_slug`, which `garden_run` supplies) seed the chunk's own garden bucket —
   omitted, the chunk carries no run context, mirroring a chunk that is not a routine
-  run. `POST /_seed/reset` clears all state.
+  run. `garden_answered_findings` (each mirroring the real hub's `FindingView` fields in
+  full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
+  accepted, minted garden proposal answers — an independent lever from `garden_run`/
+  `garden_findings`, since a minted chunk carries no run context at all; omitted, the
+  chunk answers no such proposal. `POST /_seed/reset` clears all state.
 - `POST /_seed/answer {question_id, answer, answered_by?}` — test-control only, plays
   the operator's answer so a scenario can make the runner's poll return
   `answered=True` without a real operator surface (the fleet mirror carries no

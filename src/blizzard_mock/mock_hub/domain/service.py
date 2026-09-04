@@ -24,6 +24,7 @@ from blizzard_mock.mock_hub.domain.models import (
     ChunkStatus,
     EscalationState,
     Executor,
+    GardenFindingSpec,
     NodeSpec,
     QuestionState,
     SystemArtifactSpec,
@@ -74,6 +75,33 @@ EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 #: a wall clock. Keep the record cap >= the RUNNER's, or this rejects what the real hub stores.
 _TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -> FindingView:
+    """`f` projected to the real hub's own `FindingView` shape, `routine_name`/
+    `scope_slug` supplied by the caller since a `GardenFindingSpec` carries neither
+    itself. The one place `test_wire_parity.py` can't scan (blizzard#397) — keep it the
+    only place either read builds this dict."""
+    # `class_`'s alias is the Python keyword `class` — constructed by alias via
+    # `model_validate`, the real hub's own `finding_view` shape.
+    return FindingView.model_validate(
+        {
+            "finding_id": f.finding_id,
+            "routine_name": routine_name,
+            "scope_slug": scope_slug,
+            "class": f.class_,
+            "locus": f.locus,
+            "summary": f.summary,
+            "introduced": f.introduced,
+            "introduced_at": f.introduced_at,
+            "first_observed_at": f.first_observed_at,
+            "live": f.live,
+            "state": f.state,
+            "note": f.note,
+            "last_seen_at": f.last_seen_at,
+            "observed_count": f.observed_count,
+        }
+    )
 
 
 class ChunkNotFound(Exception):
@@ -330,27 +358,8 @@ class MockHubService:
         if chunk.garden_run is None:
             raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
         run = chunk.garden_run
-        # `class_`'s alias is the Python keyword `class` — constructed by alias via
-        # `model_validate`, the real hub's own `finding_view` shape.
         return [
-            FindingView.model_validate(
-                {
-                    "finding_id": f.finding_id,
-                    "routine_name": run.routine_name,
-                    "scope_slug": run.scope_slug,
-                    "class": f.class_,
-                    "locus": f.locus,
-                    "summary": f.summary,
-                    "introduced": f.introduced,
-                    "introduced_at": f.introduced_at,
-                    "first_observed_at": f.first_observed_at,
-                    "live": f.live,
-                    "state": f.state,
-                    "note": f.note,
-                    "last_seen_at": f.last_seen_at,
-                    "observed_count": f.observed_count,
-                }
-            )
+            _finding_view(f, routine_name=run.routine_name, scope_slug=run.scope_slug)
             for f in chunk.garden_findings
             if f.live
         ]
@@ -364,27 +373,8 @@ class MockHubService:
         chunk = self._require(chunk_id)
         if chunk.garden_answered_findings is None:
             raise NoAnsweredProposal(f"chunk {chunk_id} answers no accepted, minted garden proposal")
-        # `class_`'s alias is the Python keyword `class` — constructed by alias via
-        # `model_validate`, the real hub's own `finding_view` shape.
         return [
-            FindingView.model_validate(
-                {
-                    "finding_id": f.finding_id,
-                    "routine_name": f.routine_name,
-                    "scope_slug": f.scope_slug,
-                    "class": f.class_,
-                    "locus": f.locus,
-                    "summary": f.summary,
-                    "introduced": f.introduced,
-                    "introduced_at": f.introduced_at,
-                    "first_observed_at": f.first_observed_at,
-                    "live": f.live,
-                    "state": f.state,
-                    "note": f.note,
-                    "last_seen_at": f.last_seen_at,
-                    "observed_count": f.observed_count,
-                }
-            )
+            _finding_view(f, routine_name=f.routine_name, scope_slug=f.scope_slug)
             for f in chunk.garden_answered_findings
         ]
 
