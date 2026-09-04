@@ -1716,3 +1716,120 @@ def test_garden_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
     resp = client.get("/api/fleet/chunks/ch_ghost/garden/findings")
     assert resp.status_code == 404
     assert "ch_ghost" in resp.json()["detail"]
+
+
+# --- answered findings (worker-scoped per-chunk read) -------------------------
+
+
+def _answered_spec(*, garden_answered_findings: list[dict] | None) -> dict:
+    spec = dict(_SPEC)
+    if garden_answered_findings is not None:
+        spec["garden_answered_findings"] = garden_answered_findings
+    return spec
+
+
+def test_chunk_findings_reads_the_seeded_answered_set(client: TestClient) -> None:
+    spec = _answered_spec(
+        garden_answered_findings=[
+            {
+                "finding_id": "fin_1",
+                "routine_name": "nightly",
+                "scope_slug": "blizzard",
+                "class": "stale-docstring",
+                "locus": "a.py:1",
+                "summary": "s",
+            },
+        ]
+    )
+    resp = client.post("/_seed/chunk", json=spec)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    findings = client.get(f"/api/fleet/chunks/{chunk_id}/findings")
+    assert findings.status_code == 200, findings.text
+    assert findings.json() == [
+        {
+            "finding_id": "fin_1",
+            "routine_name": "nightly",
+            "scope_slug": "blizzard",
+            "class": "stale-docstring",
+            "locus": "a.py:1",
+            "summary": "s",
+            "introduced": None,
+            "live": True,
+            "state": "live",
+            "note": None,
+            "last_seen_at": None,
+            "observed_count": 0,
+        }
+    ]
+
+
+def test_chunk_findings_404s_on_a_chunk_with_no_answered_set(client: TestClient) -> None:
+    chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_answered_findings` at all
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings")
+    assert resp.status_code == 404
+    assert "no accepted, minted garden proposal" in resp.json()["detail"]
+
+
+def test_chunk_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
+    resp = client.get("/api/fleet/chunks/ch_ghost/findings")
+    assert resp.status_code == 404
+    assert "ch_ghost" in resp.json()["detail"]
+
+
+def test_chunk_finding_reads_one_finding_within_the_answered_set(client: TestClient) -> None:
+    spec = _answered_spec(
+        garden_answered_findings=[
+            {
+                "finding_id": "fin_1",
+                "routine_name": "nightly",
+                "scope_slug": "blizzard",
+                "class": "c",
+                "locus": "a.py:1",
+                "summary": "s",
+            },
+            {
+                "finding_id": "fin_2",
+                "routine_name": "nightly",
+                "scope_slug": "blizzard",
+                "class": "c",
+                "locus": "a.py:2",
+                "summary": "s",
+            },
+        ]
+    )
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_2")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["finding_id"] == "fin_2"
+
+
+def test_chunk_finding_404s_on_an_id_outside_the_answered_set(client: TestClient) -> None:
+    spec = _answered_spec(
+        garden_answered_findings=[
+            {
+                "finding_id": "fin_1",
+                "routine_name": "nightly",
+                "scope_slug": "blizzard",
+                "class": "c",
+                "locus": "a.py:1",
+                "summary": "s",
+            },
+        ]
+    )
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_other")
+    assert resp.status_code == 404
+    assert "not among the findings" in resp.json()["detail"]
+
+
+def test_chunk_finding_404s_on_a_chunk_with_no_answered_set(client: TestClient) -> None:
+    chunk_id = _seed(client)
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_1")
+    assert resp.status_code == 404
+    assert "no accepted, minted garden proposal" in resp.json()["detail"]

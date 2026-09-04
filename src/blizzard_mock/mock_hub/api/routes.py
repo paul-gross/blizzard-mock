@@ -27,7 +27,9 @@ from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
     ClaimConflict,
     DependencyUnmet,
+    FindingNotInAnsweredSet,
     MockHubService,
+    NoAnsweredProposal,
     NoRunContext,
     QuestionNotFound,
     SystemArtifactNotFound,
@@ -146,6 +148,34 @@ def get_garden_findings(chunk_id: str, service: Annotated[MockHubService, Depend
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except NoRunContext as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunks/{chunk_id}/findings")
+def get_chunk_findings(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The findings the chunk's own accepted, minted garden proposal answers — mirrors
+    the real hub's ``GET /api/fleet/chunks/{id}/findings``."""
+    try:
+        return service.answered_findings(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except NoAnsweredProposal as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunks/{chunk_id}/findings/{finding_id}")
+def get_chunk_finding(
+    chunk_id: str, finding_id: str, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """One finding within the chunk's own answered set — mirrors the real hub's
+    ``GET /api/fleet/chunks/{id}/findings/{finding_id}``."""
+    try:
+        return service.answered_finding(chunk_id, finding_id=finding_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except NoAnsweredProposal as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except FindingNotInAnsweredSet as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
