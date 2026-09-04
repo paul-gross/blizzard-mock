@@ -24,6 +24,7 @@ from blizzard_mock.mock_hub.domain.models import (
     ChunkStatus,
     EscalationState,
     Executor,
+    GardenFindingSpec,
     NodeSpec,
     QuestionState,
     SystemArtifactSpec,
@@ -76,6 +77,33 @@ _TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
 
+def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -> FindingView:
+    """`f` projected to the real hub's own `FindingView` shape, `routine_name`/
+    `scope_slug` supplied by the caller since a `GardenFindingSpec` carries neither
+    itself. The one place `test_wire_parity.py` can't scan (blizzard#397) — keep it the
+    only place either read builds this dict."""
+    # `class_`'s alias is the Python keyword `class` — constructed by alias via
+    # `model_validate`, the real hub's own `finding_view` shape.
+    return FindingView.model_validate(
+        {
+            "finding_id": f.finding_id,
+            "routine_name": routine_name,
+            "scope_slug": scope_slug,
+            "class": f.class_,
+            "locus": f.locus,
+            "summary": f.summary,
+            "introduced": f.introduced,
+            "introduced_at": f.introduced_at,
+            "first_observed_at": f.first_observed_at,
+            "live": f.live,
+            "state": f.state,
+            "note": f.note,
+            "last_seen_at": f.last_seen_at,
+            "observed_count": f.observed_count,
+        }
+    )
+
+
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
 
@@ -86,6 +114,16 @@ class QuestionNotFound(Exception):
 
 class NoRunContext(Exception):
     """The chunk carries no seeded garden run identity — not a routine run."""
+
+
+class NoAnsweredProposal(Exception):
+    """The chunk carries no seeded answered-proposal finding set — mirrors the real hub's
+    refusal of a chunk answering no accepted, minted garden proposal (blizzard#397)."""
+
+
+class FindingNotInAnsweredSet(Exception):
+    """A finding id was asked for by :meth:`MockHubService.answered_finding` but is not
+    among the chunk's own seeded answered set (blizzard#397)."""
 
 
 class SystemArtifactNotFound(Exception):
@@ -155,6 +193,7 @@ class MockHubService:
             graph_artifacts=spec.graph_artifacts,
             garden_run=spec.garden_run,
             garden_findings=spec.garden_findings,
+            garden_answered_findings=spec.garden_answered_findings,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -319,28 +358,35 @@ class MockHubService:
         if chunk.garden_run is None:
             raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
         run = chunk.garden_run
-        # `class_`'s alias is the Python keyword `class` — constructed by alias via
-        # `model_validate`, the real hub's own `finding_view` shape.
         return [
-            FindingView.model_validate(
-                {
-                    "finding_id": f.finding_id,
-                    "routine_name": run.routine_name,
-                    "scope_slug": run.scope_slug,
-                    "class": f.class_,
-                    "locus": f.locus,
-                    "summary": f.summary,
-                    "introduced": f.introduced,
-                    "live": f.live,
-                    "state": f.state,
-                    "note": f.note,
-                    "last_seen_at": f.last_seen_at,
-                    "observed_count": f.observed_count,
-                }
-            )
+            _finding_view(f, routine_name=run.routine_name, scope_slug=run.scope_slug)
             for f in chunk.garden_findings
             if f.live
         ]
+
+    def answered_findings(self, chunk_id: str) -> list[FindingView]:
+        """The findings the chunk's own accepted, minted garden proposal answers —
+        mirrors ``GET /api/fleet/chunks/{id}/findings``. Raises
+        :class:`NoAnsweredProposal` for a chunk seeded with no
+        ``garden_answered_findings`` — answering no such proposal — rather than
+        answering an empty bucket."""
+        chunk = self._require(chunk_id)
+        if chunk.garden_answered_findings is None:
+            raise NoAnsweredProposal(f"chunk {chunk_id} answers no accepted, minted garden proposal")
+        return [
+            _finding_view(f, routine_name=f.routine_name, scope_slug=f.scope_slug)
+            for f in chunk.garden_answered_findings
+        ]
+
+    def answered_finding(self, chunk_id: str, *, finding_id: str) -> FindingView:
+        """One finding within the chunk's own answered set — mirrors
+        ``GET /api/fleet/chunks/{id}/findings/{finding_id}``. Raises
+        :class:`NoAnsweredProposal` the same as :meth:`answered_findings`, or
+        :class:`FindingNotInAnsweredSet` for an id outside it."""
+        for view in self.answered_findings(chunk_id):
+            if view.finding_id == finding_id:
+                return view
+        raise FindingNotInAnsweredSet(f"finding {finding_id} is not among the findings chunk {chunk_id} answers")
 
     def envelope(self, chunk_id: str) -> NodeEnvelope:
         """The current node's envelope (idempotent re-read, D-090).

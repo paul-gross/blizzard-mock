@@ -49,6 +49,8 @@ so a test can assert a real runner presented its bearer token.
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
 | `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |
 | `GET /api/fleet/chunks/{id}/garden/findings` | A worker-scoped read of the chunk's own routine's live finding bucket, or **404** for a chunk seeded with no `garden_run` |
+| `GET /api/fleet/chunks/{id}/findings` | The findings the chunk's own accepted, minted garden proposal answers, or **404** for a chunk seeded with no `garden_answered_findings` |
+| `GET /api/fleet/chunks/{id}/findings/{finding_id}` | One finding within the chunk's own answered set, or **404** for an id outside it |
 | `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
 | `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
 | `POST /api/fleet/chunks/{id}/leases` | Direct, non-buffered `lease.minted` report — advances the fence (D-044), 202 `{"chunk_id"}` |
@@ -95,7 +97,11 @@ dropped), so an accepted fact can never make a later read raise.
   (each mirroring the real hub's `FindingView` fields, minus `routine_name`/
   `scope_slug`, which `garden_run` supplies) seed the chunk's own garden bucket —
   omitted, the chunk carries no run context, mirroring a chunk that is not a routine
-  run. `POST /_seed/reset` clears all state.
+  run. `garden_answered_findings` (each mirroring the real hub's `FindingView` fields in
+  full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
+  accepted, minted garden proposal answers — an independent lever from `garden_run`/
+  `garden_findings`, since a minted chunk carries no run context at all; omitted, the
+  chunk answers no such proposal. `POST /_seed/reset` clears all state.
 - `POST /_seed/answer {question_id, answer, answered_by?}` — test-control only, plays
   the operator's answer so a scenario can make the runner's poll return
   `answered=True` without a real operator surface (the fleet mirror carries no
