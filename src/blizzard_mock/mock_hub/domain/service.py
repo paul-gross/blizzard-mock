@@ -565,11 +565,8 @@ class MockHubService:
             reported.locally_paused_reason = None
             return True
         if kind == EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED:
-            # Coerced here, never at the read: an accepted fact must not be able to make a
-            # later `GET /runners/{id}` raise. Defaults mirror the real hub's own ingest.
-            # Upserted per slug (blizzard#436 phase 3) — a sibling slug's stored view is
-            # untouched by this one's write, so one failed/stale subscription can never
-            # blank a healthy sibling's.
+            # Coerced here, never at the read, mirroring the real hub's own ingest defaults.
+            # Upserted per slug: a sibling slug's stored view is untouched by this write.
             slug = str(payload.get("slug") or _LEGACY_ANTHROPIC_SLUG)
             self._state.reported_facts(runner_id).subscription_usage[slug] = self._usage_view(payload, slug=slug)
             return True
@@ -751,10 +748,9 @@ class MockHubService:
     def _usage_view(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageView:
         """One sampled payload as the mirrored view, total over any payload shape.
 
-        ``sampled_at`` and ``windows`` default exactly as the real hub's ingest defaults them;
-        a window that does not validate is dropped rather than failing the whole fact.
-        ``name`` defaults to ``slug`` itself for a payload predating the additive `name`
-        field (blizzard#436 phase 3), mirroring the real hub's own default."""
+        ``sampled_at`` and ``windows`` default exactly as the real hub's ingest defaults them; a window
+        that does not validate is dropped rather than failing the whole fact. ``name`` defaults to
+        ``slug`` itself for a payload with no additive ``name`` field, mirroring the real hub's own default."""
         windows = []
         for entry in payload.get("windows") or []:
             try:
