@@ -25,6 +25,7 @@ QUESTION_ASKED = "question.asked"
 RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 EVENT_RECORDED = "event.recorded"
+EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
 
 def _placeholder_turn(timestamp: str) -> dict[str, Any]:
@@ -391,6 +392,32 @@ class MockRunnerService:
             {
                 "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": EVENT_RECORDED, "payload": payload}],
+            }
+        )
+        return {"drove": True, "status": status, "response": response}
+
+    def report_external_usage(
+        self,
+        *,
+        slug: str,
+        sampled_at: str,
+        windows: list[dict[str, Any]],
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Push one ``external_subscription_usage.sampled`` fact via ``/events``
+        (issue #218), per-slug — the driven counterpart to a real runner's own
+        tick-scheduled sample, so a test can land an arbitrary slug's usage without
+        waiting on a cadence. Runner-scoped, like ``report_event``: no chunk_id/lease_id,
+        no held lease required."""
+        self._apply_delay(None)
+        self._runner_seq += 1
+        payload: dict[str, Any] = {"slug": slug, "sampled_at": sampled_at, "windows": windows}
+        if name is not None:
+            payload["name"] = name
+        status, response = self._gw.push_facts(
+            {
+                "runner_id": self._runner_id,
+                "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED, "payload": payload}],
             }
         )
         return {"drove": True, "status": status, "response": response}

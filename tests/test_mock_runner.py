@@ -459,6 +459,19 @@ def test_drive_resume_clears_the_runners_local_pause_brake(stack: tuple[TestClie
     assert view["locally_paused"] is False
 
 
+def test_drive_report_external_usage_lands_the_named_slugs_sample(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    runner.post("/_drive/register")
+    out = runner.post(
+        "/_drive/report-external-usage",
+        json={"slug": "openai", "name": "OpenAI Plan", "sampled_at": "2026-07-13T00:00:00Z", "windows": []},
+    ).json()
+    assert out["status"] == 200
+    view = hub.get("/api/fleet/runners/runner-mock").json()
+    subscriptions = {s["slug"]: s for s in view["subscriptions"]}
+    assert subscriptions["openai"]["name"] == "OpenAI Plan"
+
+
 def test_lever_delay_slows_a_drive_call(stack: tuple[TestClient, TestClient]) -> None:
     import time
 

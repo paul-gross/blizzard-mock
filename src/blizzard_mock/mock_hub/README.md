@@ -79,13 +79,18 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
 | `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled (issue #125) |
-| `external_subscription_usage.sampled` | Upserts the runner's newest sample — readable via `GET /runners/{id}` (issue #218) |
+| `external_subscription_usage.sampled` | Upserts the runner's newest sample for its `slug` — readable via `GET /runners/{id}` (issue #218) |
 
 The three runner-scoped kinds — both `runner.locally_*` and the usage sample — are held
 per `runner_id` and applied whether or not that runner has registered, so a report the
 outbound buffer replays ahead of its registration is readable once that registration
 lands. The usage payload is coerced at ingest (defaulted `sampled_at`, unusable windows
-dropped), so an accepted fact can never make a later read raise.
+dropped), so an accepted fact can never make a later read raise. Held per `(runner_id,
+slug)`, defaulted to the legacy Anthropic slug when a payload carries none (blizzard#436
+phase 3): one subscription's sample never overwrites a sibling's, and `RunnerView`'s
+legacy `external_subscription_usage` field derives from the legacy slug's row alone,
+alongside the additive `subscriptions` collection carrying every declared slug's own
+view.
 
 ## Control plane
 
