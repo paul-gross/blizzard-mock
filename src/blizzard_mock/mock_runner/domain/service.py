@@ -405,10 +405,10 @@ class MockRunnerService:
         name: str | None = None,
     ) -> dict[str, Any]:
         """Push one ``external_subscription_usage.sampled`` fact via ``/events``
-        (issue #218, per-slug since blizzard#436 phase 3) — the driven counterpart to a
-        real runner's own tick-scheduled sample, so a test can land an arbitrary slug's
-        usage without waiting on a cadence. Runner-scoped, like ``report_event``: no
-        chunk_id/lease_id, no held lease required."""
+        (issue #218), per-slug — the driven counterpart to a real runner's own
+        tick-scheduled sample, so a test can land an arbitrary slug's usage without
+        waiting on a cadence. Runner-scoped, like ``report_event``: no chunk_id/lease_id,
+        no held lease required."""
         self._apply_delay(None)
         self._runner_seq += 1
         payload: dict[str, Any] = {"slug": slug, "sampled_at": sampled_at, "windows": windows}

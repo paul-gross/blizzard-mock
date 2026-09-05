@@ -723,8 +723,7 @@ class MockHubService:
         # Reported facts are merged in at the read, so one that arrived before this
         # registration surfaces the moment the registration lands.
         reported = self._state.reported_facts(runner_id)
-        # The legacy singular field derives from the legacy slug's row alone — never
-        # "whichever slug wrote last" (blizzard#436 phase 3).
+        # The legacy field derives from the legacy slug's row alone.
         legacy = reported.subscription_usage.get(_LEGACY_ANTHROPIC_SLUG)
         return RunnerView(
             runner_id=row.runner_id,
