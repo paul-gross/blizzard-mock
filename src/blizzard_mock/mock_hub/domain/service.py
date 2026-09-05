@@ -72,10 +72,8 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
-#: Mirrors `blizzard.runner.config.LEGACY_ANTHROPIC_SLUG`/`blizzard.hub.domain.registry
-#: .LEGACY_ANTHROPIC_SLUG` — restated, not imported (no `blizzard` dep). The slug a fact
-#: missing one defaults to, and the slug `RunnerView.external_subscription_usage`
-#: (the legacy singular field) derives from.
+#: Mirrors `blizzard.wire.facts.LEGACY_ANTHROPIC_SLUG` — restated, not imported (no
+#: `blizzard` dep). The slug a fact missing one defaults to, and the legacy field derives from.
 _LEGACY_ANTHROPIC_SLUG = "anthropic"
 
 #: The real hub's caps, restated not imported (no ``blizzard`` dep); the daily-rate one needs

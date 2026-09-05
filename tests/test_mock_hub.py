@@ -919,12 +919,10 @@ def test_each_subscription_advances_on_its_own_cadence_independently(client: Tes
     assert subscriptions["openai"]["sampled_at"] == "2026-08-01T12:10:00+00:00"
 
 
-def test_a_never_sampled_subscription_does_not_appear_and_does_not_blank_a_sampled_sibling(
-    client: TestClient,
-) -> None:
-    """A declared subscription that has never produced a sample is simply absent from
-    ``subscriptions`` — never a reason to omit a sibling that has (blizzard#436 phase 3's
-    failed-sample-preservation acceptance bar, read side)."""
+def test_a_subscription_with_no_reported_sample_has_no_entry(client: TestClient) -> None:
+    """``subscriptions`` holds one entry per slug that has actually reported a sample; a
+    declared-but-unreported slug is simply absent, not a blank entry. The stale-sibling
+    claim needs a staleness gate the mock applies none of — proven at the real hub instead."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     client.post(
         "/api/fleet/events",

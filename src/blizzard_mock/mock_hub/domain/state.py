@@ -26,9 +26,8 @@ class ReportedRunnerFacts:
         self.locally_paused = False
         self.locally_paused_by: str | None = None
         self.locally_paused_reason: str | None = None
-        # Every declared subscription's newest `external_subscription_usage.sampled`
-        # sample, keyed by slug (issue #218, per-slug since blizzard#436 phase 3) —
-        # upserted per slug rather than appended; a slug absent here has never reported.
+        # Every declared subscription's newest sample, keyed by slug (issue #218,
+        # blizzard#436) — a slug absent here has never reported.
         self.subscription_usage: dict[str, SubscriptionUsageView] = {}
 
 
