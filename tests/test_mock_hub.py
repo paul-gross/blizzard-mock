@@ -831,6 +831,119 @@ def test_events_external_subscription_usage_sampled_is_accepted(client: TestClie
     assert ack.json()["rejected"] == []
 
 
+def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_collection(client: TestClient) -> None:
+    """A runner declaring more than one subscription (blizzard#436 phase 3) — each slug's
+    sample lands and renders as its own entry, distinct by slug and name, on the additive
+    ``subscriptions`` collection, beside the legacy field's own singular view."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    for seq, slug, name, pct in ((1, "anthropic", "Anthropic", 42.0), (2, "openai", "OpenAI", 17.0)):
+        ack = client.post(
+            "/api/fleet/events",
+            json={
+                "runner_id": "r1",
+                "facts": [
+                    {
+                        "seq": seq,
+                        "kind": "external_subscription_usage.sampled",
+                        "payload": {
+                            "slug": slug,
+                            "name": name,
+                            "sampled_at": "2026-08-01T12:00:00+00:00",
+                            "windows": [
+                                {
+                                    "window": "5h",
+                                    "utilization_pct": pct,
+                                    "resets_at": "2026-08-01T17:00:00+00:00",
+                                    "window_seconds": 18000,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+        assert ack.json()["applied"] == [seq]
+
+    view = client.get("/api/fleet/runners/r1").json()
+    subscriptions = {s["slug"]: s for s in view["subscriptions"]}
+    assert set(subscriptions) == {"anthropic", "openai"}
+    assert subscriptions["anthropic"]["name"] == "Anthropic"
+    assert subscriptions["openai"]["name"] == "OpenAI"
+    assert subscriptions["anthropic"]["windows"][0]["utilization_pct"] == 42.0
+    assert subscriptions["openai"]["windows"][0]["utilization_pct"] == 17.0
+
+    # The legacy field mirrors the legacy slug's own row exactly.
+    assert view["external_subscription_usage"]["windows"] == subscriptions["anthropic"]["windows"]
+
+
+def test_each_subscription_advances_on_its_own_cadence_independently(client: TestClient) -> None:
+    """A later sample for one slug must not touch a sibling slug's stored view (independent
+    cadence, blizzard#436 phase 3) — each upsert is keyed on its own slug."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"slug": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+                },
+                {
+                    "seq": 2,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"slug": "openai", "sampled_at": "2026-08-01T12:05:00+00:00", "windows": []},
+                },
+            ],
+        },
+    )
+
+    # Only `openai` samples again — `anthropic`'s stored `sampled_at` must not move.
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 3,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"slug": "openai", "sampled_at": "2026-08-01T12:10:00+00:00", "windows": []},
+                }
+            ],
+        },
+    )
+
+    subscriptions = {s["slug"]: s for s in client.get("/api/fleet/runners/r1").json()["subscriptions"]}
+    assert subscriptions["anthropic"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
+    assert subscriptions["openai"]["sampled_at"] == "2026-08-01T12:10:00+00:00"
+
+
+def test_a_never_sampled_subscription_does_not_appear_and_does_not_blank_a_sampled_sibling(
+    client: TestClient,
+) -> None:
+    """A declared subscription that has never produced a sample is simply absent from
+    ``subscriptions`` — never a reason to omit a sibling that has (blizzard#436 phase 3's
+    failed-sample-preservation acceptance bar, read side)."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"slug": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+                }
+            ],
+        },
+    )
+
+    view = client.get("/api/fleet/runners/r1").json()
+    assert [s["slug"] for s in view["subscriptions"]] == ["anthropic"]
+
+
 def test_events_known_kind_on_an_unknown_chunk_is_still_applied(client: TestClient) -> None:
     """The batched ``_apply`` carries no chunk-existence check on the real hub (unlike
     the direct ``/leases``/``/escalations`` routes) — a known kind naming a chunk the

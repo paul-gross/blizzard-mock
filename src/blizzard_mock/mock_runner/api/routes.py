@@ -28,6 +28,7 @@ from blizzard_mock.mock_runner.domain.models import (
     PollAnswerBody,
     PushTranscriptBody,
     ReportEventBody,
+    ReportExternalUsageBody,
     ResumeBody,
 )
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
@@ -155,6 +156,15 @@ def drive_report_event(
         lease_id=body.lease_id,
         node_name=body.node_name,
         detail=body.detail,
+    )
+
+
+@drive_router.post("/report-external-usage")
+def drive_report_external_usage(
+    body: ReportExternalUsageBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.report_external_usage(
+        slug=body.slug, sampled_at=body.sampled_at, windows=body.windows, name=body.name
     )
 
 

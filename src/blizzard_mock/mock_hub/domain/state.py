@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Protocol
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
-from blizzard_mock.mock_hub.domain.wire import ExternalSubscriptionUsageView
+from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
 
 
 class ReportedRunnerFacts:
@@ -26,9 +26,10 @@ class ReportedRunnerFacts:
         self.locally_paused = False
         self.locally_paused_by: str | None = None
         self.locally_paused_reason: str | None = None
-        # The newest `external_subscription_usage.sampled` sample (issue #218), upserted
-        # rather than appended; None until one is ingested.
-        self.external_subscription_usage: ExternalSubscriptionUsageView | None = None
+        # Every declared subscription's newest `external_subscription_usage.sampled`
+        # sample, keyed by slug (issue #218, per-slug since blizzard#436 phase 3) —
+        # upserted per slug rather than appended; a slug absent here has never reported.
+        self.subscription_usage: dict[str, SubscriptionUsageView] = {}
 
 
 class RunnerRow:

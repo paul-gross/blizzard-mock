@@ -53,6 +53,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteView,
     RunnerFactAck,
     RunnerView,
+    SubscriptionUsageView,
     SystemArtifactView,
     TranscriptSegmentAck,
     WorkItemEntry,
@@ -70,6 +71,12 @@ RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
+
+#: Mirrors `blizzard.runner.config.LEGACY_ANTHROPIC_SLUG`/`blizzard.hub.domain.registry
+#: .LEGACY_ANTHROPIC_SLUG` — restated, not imported (no `blizzard` dep). The slug a fact
+#: missing one defaults to, and the slug `RunnerView.external_subscription_usage`
+#: (the legacy singular field) derives from.
+_LEGACY_ANTHROPIC_SLUG = "anthropic"
 
 #: The real hub's caps, restated not imported (no ``blizzard`` dep); the daily-rate one needs
 #: a wall clock. Keep the record cap >= the RUNNER's, or this rejects what the real hub stores.
@@ -562,7 +569,11 @@ class MockHubService:
         if kind == EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED:
             # Coerced here, never at the read: an accepted fact must not be able to make a
             # later `GET /runners/{id}` raise. Defaults mirror the real hub's own ingest.
-            self._state.reported_facts(runner_id).external_subscription_usage = self._usage_view(payload)
+            # Upserted per slug (blizzard#436 phase 3) — a sibling slug's stored view is
+            # untouched by this one's write, so one failed/stale subscription can never
+            # blank a healthy sibling's.
+            slug = str(payload.get("slug") or _LEGACY_ANTHROPIC_SLUG)
+            self._state.reported_facts(runner_id).subscription_usage[slug] = self._usage_view(payload, slug=slug)
             return True
         # usage.recorded / event.recorded (issue #125) are accepted as no-ops.
         return kind in (USAGE_RECORDED, EVENT_RECORDED)
@@ -717,6 +728,9 @@ class MockHubService:
         # Reported facts are merged in at the read, so one that arrived before this
         # registration surfaces the moment the registration lands.
         reported = self._state.reported_facts(runner_id)
+        # The legacy singular field derives from the legacy slug's row alone — never
+        # "whichever slug wrote last" (blizzard#436 phase 3).
+        legacy = reported.subscription_usage.get(_LEGACY_ANTHROPIC_SLUG)
         return RunnerView(
             runner_id=row.runner_id,
             workspace_id=row.workspace_id,
@@ -728,14 +742,21 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
-            external_subscription_usage=reported.external_subscription_usage,
+            external_subscription_usage=(
+                ExternalSubscriptionUsageView(sampled_at=legacy.sampled_at, windows=legacy.windows)
+                if legacy is not None
+                else None
+            ),
+            subscriptions=list(reported.subscription_usage.values()),
         )
 
-    def _usage_view(self, payload: dict[str, Any]) -> ExternalSubscriptionUsageView:
+    def _usage_view(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageView:
         """One sampled payload as the mirrored view, total over any payload shape.
 
         ``sampled_at`` and ``windows`` default exactly as the real hub's ingest defaults them;
-        a window that does not validate is dropped rather than failing the whole fact."""
+        a window that does not validate is dropped rather than failing the whole fact.
+        ``name`` defaults to ``slug`` itself for a payload predating the additive `name`
+        field (blizzard#436 phase 3), mirroring the real hub's own default."""
         windows = []
         for entry in payload.get("windows") or []:
             try:
@@ -743,8 +764,12 @@ class MockHubService:
             except ValidationError:
                 continue
         sampled_at = payload.get("sampled_at")
-        return ExternalSubscriptionUsageView(
-            sampled_at=str(sampled_at) if sampled_at else self._clock.now().isoformat(), windows=windows
+        name = payload.get("name")
+        return SubscriptionUsageView(
+            slug=slug,
+            name=str(name) if name else slug,
+            sampled_at=str(sampled_at) if sampled_at else self._clock.now().isoformat(),
+            windows=windows,
         )
 
     def set_paused(self, runner_id: str, paused: bool) -> None:

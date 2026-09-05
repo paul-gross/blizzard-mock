@@ -166,3 +166,15 @@ class ReportEventBody(BaseModel):
     lease_id: str | None = None
     node_name: str | None = None
     detail: dict[str, Any] | None = None
+
+
+class ReportExternalUsageBody(BaseModel):
+    """POST /_drive/report-external-usage — push one
+    ``external_subscription_usage.sampled`` fact naming an arbitrary ``slug`` (issue #218,
+    blizzard#436 phase 3), without waiting on a real runner's sampling cadence. ``name`` is
+    optional — additive on the real wire, omitted defaults to ``slug`` at the hub."""
+
+    slug: str
+    sampled_at: str
+    windows: list[dict[str, Any]] = Field(default_factory=list)
+    name: str | None = None

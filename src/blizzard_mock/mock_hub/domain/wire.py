@@ -193,6 +193,16 @@ class ExternalSubscriptionUsageView(BaseModel):
     windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
 
 
+class SubscriptionUsageView(BaseModel):
+    """One declared subscription's newest sampled usage, carrying its identity
+    (blizzard#436 phase 3) — mirrors ``blizzard.wire.runner.SubscriptionUsageView``."""
+
+    slug: str
+    name: str
+    sampled_at: str
+    windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
+
+
 class RunnerView(BaseModel):
     runner_id: str
     workspace_id: str
@@ -207,8 +217,12 @@ class RunnerView(BaseModel):
     locally_paused_reason: str | None = None
     env_capacity: int | None = None
     # Mirrored from the newest `external_subscription_usage.sampled` fact the
-    # mock ingested (issue #218); null until one arrives.
+    # mock ingested (issue #218); null until one arrives. Derives from the legacy
+    # slug's row alone (blizzard#436 phase 3) — unchanged in name and shape.
     external_subscription_usage: ExternalSubscriptionUsageView | None = None
+    # Every declared subscription's own usage, additive beside the field above
+    # (blizzard#436 phase 3); empty for a runner that has never sampled anything.
+    subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
 
 
 class RunnerFactAck(BaseModel):
