@@ -86,6 +86,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "ExternalSubscriptionUsageView": ("ExternalSubscriptionUsageView", frozenset()),
     "ExternalSubscriptionUsageWindowView": ("ExternalSubscriptionUsageWindowView", frozenset()),
     "FindingView": ("FindingView", frozenset()),
+    # Every proposal this mock serves is open by construction — no closure lever exists
+    # to represent one, so the field is never mirrored.
+    "GardenProposalView": ("GardenProposalView", frozenset({"closure"})),
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),

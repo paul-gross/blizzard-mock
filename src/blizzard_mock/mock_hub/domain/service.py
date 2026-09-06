@@ -25,6 +25,7 @@ from blizzard_mock.mock_hub.domain.models import (
     EscalationState,
     Executor,
     GardenFindingSpec,
+    GardenProposalSpec,
     NodeSpec,
     QuestionState,
     SystemArtifactSpec,
@@ -39,6 +40,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
     FindingView,
+    GardenProposalView,
     GraphArtifact,
     HubAdvanceResponse,
     LeaseTranscriptView,
@@ -105,6 +107,24 @@ def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -
             "note": f.note,
             "last_seen_at": f.last_seen_at,
             "observed_count": f.observed_count,
+        }
+    )
+
+
+def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> GardenProposalView:
+    """`p` projected to the real hub's own `GardenProposalView` shape (minus `closure` —
+    every proposal this mock serves is open), `routine_name` supplied by the caller since
+    a `GardenProposalSpec` carries none itself. `now` backs `created_at` when the spec
+    left it unseeded (mint-time default)."""
+    return GardenProposalView.model_validate(
+        {
+            "proposal_id": p.proposal_id,
+            "routine_name": routine_name,
+            "class": p.class_,
+            "title": p.title,
+            "body": p.body,
+            "findings": list(p.findings),
+            "created_at": p.created_at or now,
         }
     )
 
@@ -199,6 +219,7 @@ class MockHubService:
             garden_run=spec.garden_run,
             garden_findings=spec.garden_findings,
             garden_answered_findings=spec.garden_answered_findings,
+            garden_proposals=spec.garden_proposals,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -368,6 +389,18 @@ class MockHubService:
             for f in chunk.garden_findings
             if f.live
         ]
+
+    def garden_proposals(self, chunk_id: str) -> list[GardenProposalView]:
+        """A chunk's own routine's open garden proposal bucket — mirrors
+        ``GET /api/fleet/chunks/{id}/garden/proposals``. Raises :class:`NoRunContext` for
+        a chunk seeded with no ``garden_run`` — not a routine run — rather than
+        answering an empty bucket. Every seeded proposal is treated as open: this mock
+        carries no closure lever at all."""
+        chunk = self._require(chunk_id)
+        if chunk.garden_run is None:
+            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        now = self._clock.now().isoformat()
+        return [_proposal_view(p, routine_name=chunk.garden_run.routine_name, now=now) for p in chunk.garden_proposals]
 
     def answered_findings(self, chunk_id: str) -> list[FindingView]:
         """The findings the chunk's own accepted, minted garden proposal answers —
