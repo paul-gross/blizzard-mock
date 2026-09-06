@@ -210,6 +210,24 @@ class GardenAnsweredFindingSpec(GardenFindingSpec):
     scope_slug: str
 
 
+class GardenProposalSpec(BaseModel):
+    """One seeded proposal on a chunk's garden run bucket — mirrors the fields the real
+    hub's ``GardenProposalView`` carries, minus ``routine_name`` (supplied at the read
+    from the chunk's own seeded :class:`GardenRunSpec`, exactly like
+    :class:`GardenFindingSpec` derives its ``routine_name``/``scope_slug`` there). Every
+    seeded proposal is treated as open — this mock carries no closure lever at all.
+    ``created_at`` defaults to mint time when omitted."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    proposal_id: str
+    class_: str = Field(alias="class")
+    title: str
+    body: str
+    findings: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
@@ -229,6 +247,9 @@ class ChunkSpec(BaseModel):
     #: The findings the chunk's own accepted, minted garden proposal answers
     #: (blizzard#397 Phase 1) — ``None`` for a chunk answering no such proposal.
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
+    #: The chunk's own routine's open proposal bucket, seeded per chunk exactly like
+    #: ``garden_findings`` — the real ``GardenProposal`` carries no chunk at all.
+    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -248,6 +269,7 @@ class ChunkState(BaseModel):
     garden_run: GardenRunSpec | None = None
     garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
+    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

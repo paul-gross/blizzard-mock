@@ -1831,6 +1831,58 @@ def test_garden_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
     assert "ch_ghost" in resp.json()["detail"]
 
 
+# --- garden proposals (worker-scoped open-bucket read) ------------------------
+
+
+def _proposal_spec(*, garden_run: dict | None, garden_proposals: list[dict] | None = None) -> dict:
+    spec = dict(_SPEC)
+    if garden_run is not None:
+        spec["garden_run"] = garden_run
+    if garden_proposals is not None:
+        spec["garden_proposals"] = garden_proposals
+    return spec
+
+
+def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> None:
+    spec = _proposal_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_proposals=[
+            {"proposal_id": "prop_1", "class": "mechanize", "title": "t", "body": "b", "findings": ["fin_1"]},
+        ],
+    )
+    resp = client.post("/_seed/chunk", json=spec)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
+    assert proposals.status_code == 200, proposals.text
+    assert proposals.json() == [
+        {
+            "proposal_id": "prop_1",
+            "routine_name": "nightly",
+            "class": "mechanize",
+            "title": "t",
+            "body": "b",
+            "findings": ["fin_1"],
+            "created_at": "2026-07-13T00:00:00+00:00",
+        }
+    ]
+
+
+def test_garden_proposals_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
+    chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_run` at all
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
+    assert resp.status_code == 404
+    assert "no run context" in resp.json()["detail"]
+
+
+def test_garden_proposals_404s_on_an_unknown_chunk(client: TestClient) -> None:
+    resp = client.get("/api/fleet/chunks/ch_ghost/garden/proposals")
+    assert resp.status_code == 404
+    assert "ch_ghost" in resp.json()["detail"]
+
+
 # --- answered findings (worker-scoped per-chunk read) -------------------------
 
 

@@ -309,3 +309,19 @@ class FindingView(BaseModel):
     note: str | None = None
     last_seen_at: str | None
     observed_count: int
+
+
+class GardenProposalView(BaseModel):
+    """One open garden proposal — mirrors ``blizzard.wire.garden_proposal.GardenProposalView``,
+    minus ``closure``: every proposal this mock serves is treated as open, so there is
+    nothing to carry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    proposal_id: str
+    routine_name: str
+    class_: str = Field(alias="class")
+    title: str
+    body: str
+    findings: list[str]
+    created_at: str

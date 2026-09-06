@@ -151,6 +151,18 @@ def get_garden_findings(chunk_id: str, service: Annotated[MockHubService, Depend
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
+@fleet_router.get("/chunks/{chunk_id}/garden/proposals")
+def get_garden_proposals(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """A worker-scoped read of the chunk's own routine's open proposal bucket — mirrors
+    the real hub's ``GET /api/fleet/chunks/{id}/garden/proposals``."""
+    try:
+        return service.garden_proposals(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except NoRunContext as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
 @fleet_router.get("/chunks/{chunk_id}/findings")
 def get_chunk_findings(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     """The findings the chunk's own accepted, minted garden proposal answers — mirrors
