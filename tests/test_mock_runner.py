@@ -41,7 +41,7 @@ _SPEC = {
             "judgement_prompt": "j",
             "choices": [{"name": "pass", "description": "p", "to": "deliver"}],
         },
-        "deliver": {"executor": "hub", "mode": "merge-to-main"},
+        "deliver": {"executor": "hub"},
     },
 }
 

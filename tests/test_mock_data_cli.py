@@ -134,7 +134,6 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("judged_by", String, nullable=False),
         Column("retries_max", Integer, nullable=True),
         Column("retries_exhausted", String, nullable=True),
-        Column("mode", String, nullable=True),
         Column("produces", Text, nullable=True),
         Column("checks", Text, nullable=True),
         Column("checks_cwd", String, nullable=True),
