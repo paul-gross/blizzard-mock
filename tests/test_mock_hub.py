@@ -34,7 +34,7 @@ _SPEC = {
             "judgement_prompt": "j",
             "choices": [{"name": "pass", "description": "p", "to": "deliver"}],
         },
-        "deliver": {"executor": "hub", "mode": "merge-to-main"},
+        "deliver": {"executor": "hub"},
     },
     "work_refs": [{"source": "o-r", "ref": "1"}],
 }
@@ -529,9 +529,7 @@ def test_report_escalation_direct_route_carries_the_wrapped_takeover_command(cli
 
 
 def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
-    resp = client.post(
-        "/_seed/chunk", json={"entry": "deliver", "nodes": {"deliver": {"executor": "hub", "mode": "merge-to-main"}}}
-    )
+    resp = client.post("/_seed/chunk", json={"entry": "deliver", "nodes": {"deliver": {"executor": "hub"}}})
     chunk_id = resp.json()["chunk_id"]
     client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"

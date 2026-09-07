@@ -924,7 +924,6 @@ class MockHubService:
                 checks_timeout=node.checks_timeout,
                 produces=node.produces,
                 retries_max=node.retries_max,
-                mode=node.mode,
                 choices=[
                     EnvelopeChoice(name=c.name, description=c.description, requires_checks=c.requires_checks)
                     for c in node.choices

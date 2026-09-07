@@ -161,7 +161,7 @@ _HUB_SPEC: dict[str, Any] = {
             "judgement_prompt": "j",
             "choices": [{"name": "pass", "description": "p", "to": "deliver"}],
         },
-        "deliver": {"executor": "hub", "mode": "merge-to-main"},
+        "deliver": {"executor": "hub"},
     },
     "work_refs": [{"source": "o-r", "ref": "1"}],
 }

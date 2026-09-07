@@ -48,7 +48,6 @@ class NodeConfig(BaseModel):
     checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
     produces: list[str] = Field(default_factory=list)
     retries_max: int | None = None
-    mode: str | None = None
     choices: list[EnvelopeChoice] = Field(default_factory=list)
 
 

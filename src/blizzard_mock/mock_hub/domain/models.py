@@ -106,7 +106,6 @@ class NodeSpec(BaseModel):
     checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
     checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
     retries_max: int | None = None
-    mode: str | None = None  # hub node: merge-to-main | open-pr
 
 
 class EscalationState(BaseModel):
