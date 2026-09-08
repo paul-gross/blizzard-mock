@@ -82,7 +82,7 @@ _COMPOSITION_ERRORS = (
     RunnerFleetCompositionError,
 )
 
-#: Fallback ``event_log.runner_id`` (NOT NULL) when ``create event`` gets
+#: Fallback ``event_log.runner_id`` when ``create event`` gets
 #: neither ``--runner-id`` nor a ``--chunk`` whose lease history names one.
 _DEFAULT_EVENT_RUNNER_ID = "mock-data"
 
@@ -298,10 +298,8 @@ def _resolve_artifact_defaults(
 
 
 def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_id: str | None) -> str:
-    """Resolve ``create event``'s ``--runner-id`` (NOT NULL on the real ``event_log``
-    table) when omitted: the named chunk's newest ``lease_facts`` runner, or
-    :data:`_DEFAULT_EVENT_RUNNER_ID` absent either — never a crash on the NOT NULL
-    column."""
+    """Resolve ``create event``'s ``--runner-id`` when omitted: the named chunk's newest
+    ``lease_facts`` runner, or :data:`_DEFAULT_EVENT_RUNNER_ID` absent either."""
     if runner_id is not None:
         return runner_id
     if chunk_id is not None:
@@ -942,7 +940,7 @@ def create_question(
     "--runner-id",
     "runner_id",
     default=None,
-    help="The reporting runner (NOT NULL on the real table; default: --chunk's newest lease, else 'mock-data').",
+    help="The reporting runner (default: --chunk's newest lease, else 'mock-data').",
 )
 @click.option("--node", "node_name", default=None, help="The node name this event concerns, if any.")
 @click.option("--detail", "detail", default=None, help="Opaque JSON text, round-tripped only — must parse as JSON.")
