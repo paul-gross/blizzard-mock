@@ -352,7 +352,7 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("recorded_at", DateTime, nullable=False),
         Column("severity", String, nullable=False),
         Column("kind", String, nullable=False),
-        Column("runner_id", String, nullable=False),
+        Column("runner_id", String, nullable=True),
         Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=True),
         Column("lease_id", String, nullable=True),
         Column("node_name", String, nullable=True),
@@ -2258,6 +2258,34 @@ def test_create_event_with_chunk_defaults_runner_id_from_the_chunks_newest_lease
             select(_table(meta, "event_log").c.runner_id).where(_table(meta, "event_log").c.chunk_id == chunk_id)
         ).scalar()
     assert runner_id == "r-lease-holder"
+
+
+def test_create_event_with_an_empty_runner_id_lands_a_hub_authored_null_runner_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            "work-item-closed",
+            "--severity",
+            "info",
+            "--message",
+            "closed",
+            "--runner-id",
+            "",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "event_log"))).all()
+    assert len(rows) == 1
+    assert rows[0].runner_id is None
 
 
 def test_create_event_with_chunk_and_no_lease_falls_back_to_the_placeholder(tmp_path: Path) -> None:
