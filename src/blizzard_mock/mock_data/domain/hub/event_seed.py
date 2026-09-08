@@ -30,7 +30,7 @@ def compose_event(
     kind: str,
     severity: str,
     message: str,
-    runner_id: str,
+    runner_id: str | None,
     chunk_id: str | None = None,
     lease_id: str | None = None,
     node_name: str | None = None,
