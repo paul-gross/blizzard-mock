@@ -181,9 +181,9 @@ engine no-ops for them.
   `uuid`/`parentUuid` chain), sidecar-file discovery (`isSidechain` subagent
   conversations, `<session-id>/subagents/agent-<agentId>.jsonl`), and
   thinking-turn redaction, none of which this writer mints. It closes once
-  `epic:transcripts` (`blizzard-product:/plans/transcripts.md`) ships these turns
-  somewhere a mock-fleet chunk can observe, and teaches this writer to mint them
-  alongside.
+  `epic:transcripts` (`blizzard-product:/delivered/transcripts.md`) ships these
+  turns somewhere a mock-fleet chunk can observe, and teaches this writer to mint
+  them alongside.
 - The user turn's text is never the raw exec'd Python — that would misrepresent
   code as "what the user said" — it is a tagged prompt's own prose with its
   `<behavior-script>` blocks elided, else the real preamble prose when an
