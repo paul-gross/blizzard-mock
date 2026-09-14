@@ -164,6 +164,18 @@ class ChunkDetail(BaseModel):
     questions: list[QuestionView] = Field(default_factory=list)
 
 
+class ChunkStatusView(BaseModel):
+    """One chunk's tick-relevant status — mirrors ``blizzard.wire.chunk.ChunkStatusView``,
+    the slim batch projection ``GET /api/fleet/chunk-statuses`` returns. Carries only the
+    fields the mock can derive from ``ChunkState``; ``pause``/``restart_epochs``/``cost``/
+    ``decision`` are omitted entirely, same as :class:`ChunkDetail`'s mirror."""
+
+    chunk_id: str
+    status: str
+    route_runner_id: str | None = None
+    latest_epoch: int | None = None
+
+
 class BlockedView(BaseModel):
     prerequisite_chunk_id: str
 

@@ -36,6 +36,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     BlockedView,
     ChunkDetail,
     ChunkEscalationView,
+    ChunkStatusView,
     EnvelopeChoice,
     ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
@@ -359,6 +360,27 @@ class MockHubService:
             escalation=escalation,
             questions=questions,
         )
+
+    def chunk_statuses(self, chunk_ids: list[str]) -> list[ChunkStatusView]:
+        """The runner tick's slim batch status read — mirrors the real hub's
+        ``GET /api/fleet/chunk-statuses``. De-dupes ``chunk_ids`` preserving order; an id
+        unknown to the store is silently omitted, never a 404 (unlike :meth:`chunk_detail`'s
+        ``chunk_unknown`` lever, which this read has no use for)."""
+        ids = list(dict.fromkeys(chunk_ids))
+        views: list[ChunkStatusView] = []
+        for chunk_id in ids:
+            chunk = self._state.get_chunk(chunk_id)
+            if chunk is None:
+                continue
+            views.append(
+                ChunkStatusView(
+                    chunk_id=chunk.chunk_id,
+                    status=chunk.status.value,
+                    route_runner_id=chunk.route_runner_id if chunk.claimed else None,
+                    latest_epoch=chunk.latest_epoch or None,
+                )
+            )
+        return views
 
     def work_items(self, chunk_id: str) -> WorkItemsView:
         """A chunk's pass-through work items — one canned entry per pointer.

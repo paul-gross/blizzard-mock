@@ -16,6 +16,7 @@ from blizzard_mock.mock_runner.domain.levers import CATALOG, RunnerLever
 from blizzard_mock.mock_runner.domain.models import (
     AskBody,
     ChunkQueryBody,
+    ChunkStatusesQueryBody,
     ClaimBody,
     ClaimNextBody,
     CompleteBody,
@@ -100,6 +101,13 @@ def drive_get_chunk(
     body: ChunkQueryBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
     return service.get_chunk(body.chunk_id)
+
+
+@drive_router.post("/chunk-statuses")
+def drive_chunk_statuses(
+    body: ChunkStatusesQueryBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.chunk_statuses(body.chunk_ids)
 
 
 @drive_router.post("/declare-git-commit")

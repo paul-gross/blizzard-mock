@@ -114,6 +114,29 @@ def test_second_claim_conflicts(client: TestClient) -> None:
     assert conflict.json()["held_by_runner_id"] == "r1"
 
 
+def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: TestClient) -> None:
+    """blizzard#521: the slim batch projection — de-dupes preserving order, silently
+    omits an unknown id, never a 404."""
+    claimed_id = _seed(client)
+    assert client.post("/api/fleet/routes", json={"chunk_id": claimed_id, "runner_id": "r1"}).status_code == 201
+    unclaimed_id = _seed(client)
+
+    resp = client.get(
+        "/api/fleet/chunk-statuses",
+        params=[
+            ("chunk_id", claimed_id),
+            ("chunk_id", "no-such-chunk"),
+            ("chunk_id", unclaimed_id),
+            ("chunk_id", claimed_id),
+        ],
+    )
+    assert resp.status_code == 200
+    statuses = resp.json()
+    assert [s["chunk_id"] for s in statuses] == [claimed_id, unclaimed_id]  # deduped, unknown omitted, order preserved
+    assert statuses[0]["route_runner_id"] == "r1"
+    assert statuses[1]["route_runner_id"] is None
+
+
 def test_rekey_route_token_returns_a_different_deterministic_token_than_the_claim(client: TestClient) -> None:
     chunk_id = _seed(client)
     claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})

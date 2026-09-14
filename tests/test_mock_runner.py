@@ -472,6 +472,21 @@ def test_drive_report_external_usage_lands_the_named_slugs_sample(stack: tuple[T
     assert subscriptions["openai"]["name"] == "OpenAI Plan"
 
 
+def test_driver_reads_a_batch_of_chunk_statuses_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#521: the runner tick's slim batch read — a repeatable ``chunk_id`` query
+    param that omits an unknown id rather than 404ing."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+
+    out = runner.post("/_drive/chunk-statuses", json={"chunk_ids": [chunk_id, "no-such-chunk"]}).json()
+    assert out["status"] == 200
+    statuses = out["response"]["body"]
+    assert [s["chunk_id"] for s in statuses] == [chunk_id]
+    assert statuses[0]["status"] == "running"
+    assert statuses[0]["route_runner_id"] == "runner-mock"
+
+
 def test_lever_delay_slows_a_drive_call(stack: tuple[TestClient, TestClient]) -> None:
     import time
 

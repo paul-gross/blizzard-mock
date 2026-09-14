@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.mock_hub.api.deps import (
@@ -118,6 +118,16 @@ def get_chunk(chunk_id: str, service: Annotated[MockHubService, Depends(get_serv
         return service.chunk_detail(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunk-statuses")
+def get_chunk_statuses(
+    service: Annotated[MockHubService, Depends(get_service)],
+    chunk_id: Annotated[list[str], Query()] = [],  # noqa: B006 — FastAPI's own idiom for repeatable query params
+) -> object:
+    """The runner tick's slim batch status read — repeatable ``chunk_id``; an unknown id
+    is omitted, never a 404."""
+    return service.chunk_statuses(chunk_id)
 
 
 @fleet_router.get("/chunks/{chunk_id}/envelope")
