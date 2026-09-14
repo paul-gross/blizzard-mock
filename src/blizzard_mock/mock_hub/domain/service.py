@@ -364,11 +364,17 @@ class MockHubService:
     def chunk_statuses(self, chunk_ids: list[str]) -> list[ChunkStatusView]:
         """The runner tick's slim batch status read — mirrors the real hub's
         ``GET /api/fleet/chunk-statuses``. De-dupes ``chunk_ids`` preserving order; an id
-        unknown to the store is silently omitted, never a 404 (unlike :meth:`chunk_detail`'s
-        ``chunk_unknown`` lever, which this read has no use for)."""
+        unknown to the store is silently omitted, never a 404. The ``chunk_unknown`` lever
+        (see :meth:`_consult_chunk_unknown`) applies here too, but as an omission rather
+        than its usual raise — this read never 404s, so a scripted id is simply left out,
+        the same way a genuinely unseeded id already is."""
         ids = list(dict.fromkeys(chunk_ids))
         views: list[ChunkStatusView] = []
         for chunk_id in ids:
+            unknown = self._levers.find(HubLever.CHUNK_UNKNOWN.value, chunk_id)
+            if unknown is not None:
+                self._levers.consume(unknown)
+                continue
             chunk = self._state.get_chunk(chunk_id)
             if chunk is None:
                 continue
