@@ -83,6 +83,7 @@ def _runner_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
         Column("pid", Integer, nullable=True),
         Column("process_start_time", String, nullable=True),
         Column("session_id", String, nullable=True),
+        Column("harness_id", String, nullable=True),
         Column("created_at", DateTime, nullable=False),
     )
     lease_context = Table(
@@ -382,6 +383,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("pid", Integer, nullable=True),
         Column("process_start_time", String, nullable=True),
         Column("session_id", String, nullable=True),
+        Column("harness_id", String, nullable=True),
         Column("created_at", DateTime, nullable=False),
     )
     Table(
@@ -427,6 +429,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("generation", Integer, nullable=False),
         Column("lease_id", String, nullable=False),
         Column("session_id", String, nullable=False),
+        Column("harness_id", String, nullable=False),
         Column("cursor", String, nullable=True),
         Column("shipped_bytes", Integer, nullable=False),
         Column("shipped_turns", Integer, nullable=False),
@@ -461,6 +464,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("question", Text, nullable=False),
         Column("options", Text, nullable=False),
         Column("session_id", String, nullable=True),
+        Column("harness_id", String, nullable=True),
         Column("asked_at", DateTime, nullable=False),
     )
     Table(
@@ -489,6 +493,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("chunk_id", String, nullable=False),
         Column("lease_id", String, nullable=True),
         Column("session_id", String, nullable=True),
+        Column("harness_id", String, nullable=True),
         Column("workdir", String, nullable=False),
         Column("fence_epoch", Integer, nullable=True),
         Column("opened_at", DateTime, nullable=False),
@@ -1834,6 +1839,8 @@ def test_create_transcript_segment_lands_a_row_and_prints_its_id(tmp_path: Path)
             "lease_1",
             "--session-id",
             "sess_1",
+            "--harness-id",
+            "codex",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -1843,6 +1850,7 @@ def test_create_transcript_segment_lands_a_row_and_prints_its_id(tmp_path: Path)
         rows = conn.execute(select(_table(meta, "transcript_segments"))).all()
     assert [r.segment_id for r in rows] == [segment_id]
     assert rows[0].finalized_at is None
+    assert rows[0].harness_id == "codex"
 
 
 def test_create_transcript_segment_seed_pins_stamped_at_too(tmp_path: Path) -> None:
@@ -1876,6 +1884,7 @@ def test_create_transcript_segment_seed_pins_stamped_at_too(tmp_path: Path) -> N
     with create_engine(url).begin() as conn:
         rows = conn.execute(select(_table(meta, "transcript_segments"))).all()
     assert len(rows) == 1
+    assert rows[0].harness_id == "claude_code"
     assert rows[0].stamped_at.replace(tzinfo=UTC) == _SEEDED_CLOCK_ANCHOR
     assert rows[0].finalized_at.replace(tzinfo=UTC) == _SEEDED_CLOCK_ANCHOR
 
@@ -2639,10 +2648,13 @@ def test_scenario_fleet_seeds_both_stores(tmp_path: Path) -> None:
     with create_engine(runner_url).begin() as conn:
         lease_rows = conn.execute(select(_table(runner_meta, "leases"))).all()
         pause_rows = conn.execute(select(_table(runner_meta, "local_pause_facts"))).all()
+        transcript_rows = conn.execute(select(_table(runner_meta, "transcript_segments"))).all()
     assert len(lease_rows) == 2
     assert all(row.runner_id == "runner-pin" for row in lease_rows)
     assert len(pause_rows) == 1
     assert pause_rows[0].paused
+    assert len(transcript_rows) == 2
+    assert {row.harness_id for row in transcript_rows} == {"claude_code"}
 
 
 def test_scenario_fleet_requires_a_hub_target(tmp_path: Path) -> None:

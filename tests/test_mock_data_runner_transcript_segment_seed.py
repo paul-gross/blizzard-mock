@@ -23,6 +23,7 @@ def test_compose_transcript_segment_mints_a_prefixed_id() -> None:
         generation=1,
         lease_id="lease_1",
         session_id="sess_1",
+        harness_id="claude_code",
         normalizer_version="mock-1",
         clock=FixedClock(_NOW),
         rng=seeded_rng(1),
@@ -30,6 +31,7 @@ def test_compose_transcript_segment_mints_a_prefixed_id() -> None:
     )
     assert row.table == "transcript_segments"
     assert str(row.values["segment_id"]).startswith("seg_")
+    assert row.values["harness_id"] == "claude_code"
 
 
 def test_compose_transcript_segment_defaults_to_open() -> None:
@@ -40,6 +42,7 @@ def test_compose_transcript_segment_defaults_to_open() -> None:
         generation=1,
         lease_id="lease_1",
         session_id="sess_1",
+        harness_id="claude_code",
         normalizer_version="mock-1",
         clock=FixedClock(_NOW),
         rng=seeded_rng(1),
@@ -59,6 +62,7 @@ def test_compose_transcript_segment_finalized_stamps_the_close() -> None:
         generation=1,
         lease_id="lease_1",
         session_id="sess_1",
+        harness_id="claude_code",
         normalizer_version="mock-1",
         clock=FixedClock(_NOW),
         rng=seeded_rng(1),

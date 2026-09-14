@@ -125,6 +125,7 @@ class QuestionView(BaseModel):
     chunk_id: str
     node_id: str | None = None
     session_id: str | None = None
+    harness_id: str | None = None
     runner_id: str
     epoch: int
     question: str

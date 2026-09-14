@@ -11,6 +11,7 @@ import random
 from dataclasses import dataclass, field
 
 from blizzard_mock.clock import Clock
+from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.chunk_seed import NEEDS_HUMAN, WAITING_ON_HUMAN
@@ -147,6 +148,7 @@ def compose_runner_fleet(
             generation=1,
             lease_id=waiting_lease.lease_id,
             session_id=ids.mint(_SESSION_PREFIX, clock, rng),
+            harness_id=CLAUDE_CODE_HARNESS_ID,
             normalizer_version=_NORMALIZER_VERSION,
             clock=clock,
             rng=rng,
@@ -241,6 +243,7 @@ def compose_runner_fleet(
             generation=1,
             lease_id=needs_human_lease.lease_id,
             session_id=needs_human_session_id,
+            harness_id=CLAUDE_CODE_HARNESS_ID,
             normalizer_version=_NORMALIZER_VERSION,
             clock=clock,
             rng=rng,

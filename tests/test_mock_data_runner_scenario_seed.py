@@ -87,6 +87,8 @@ def test_the_needs_human_chunk_gets_a_closed_escalated_lease_under_an_open_takeo
     ]
     assert len(takeovers) == 1
     assert takeovers[0].values["fence_epoch"] is None
+    assert lease.values["harness_id"] == "claude_code"
+    assert takeovers[0].values["harness_id"] == "claude_code"
 
 
 def test_both_mirrored_chunks_carry_an_env_binding() -> None:
@@ -94,6 +96,13 @@ def test_both_mirrored_chunks_carry_an_env_binding() -> None:
     mirrored_ids = {e.chunk_id for e in census.chunk_entries if e.status in ("waiting_on_human", "needs_human")}
     bound_ids = {row.values["chunk_id"] for row in _rows_for(fleet.rows, "env_bindings")}
     assert bound_ids == mirrored_ids
+
+
+def test_transcript_segments_carry_the_historical_harness_owner() -> None:
+    _census, fleet = _fleet()
+    segments = _rows_for(fleet.rows, "transcript_segments")
+    assert len(segments) == 2
+    assert {row.values["harness_id"] for row in segments} == {"claude_code"}
 
 
 def test_the_runners_local_pause_lands_engaged() -> None:

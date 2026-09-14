@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from blizzard_mock.clock import Clock
+from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_runner.domain.gateway import IHubGateway
 from blizzard_mock.mock_runner.domain.levers import RunnerLever
@@ -283,6 +284,8 @@ class MockRunnerService:
         payload = {
             "question_id": question_id,
             "chunk_id": chunk_id,
+            "session_id": f"mock-session-{chunk_id}",
+            "harness_id": CLAUDE_CODE_HARNESS_ID,
             "runner_id": self._runner_id,
             "epoch": held.epoch,
             "question": question,
@@ -326,6 +329,7 @@ class MockRunnerService:
             "turn_range_start": 0,
             "turn_range_end": len(turn_list) - 1,
             "final": final,
+            "harness_id": CLAUDE_CODE_HARNESS_ID,
             "normalizer_version": "mock/1",
             "harness_version": None,
             "record_truncated": record_truncated,

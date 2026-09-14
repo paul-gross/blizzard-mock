@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_data.domain.facts import FactRow
 
 
@@ -44,6 +45,7 @@ def compose_ask_park(
                 "question": question,
                 "options": json.dumps(list(options)),
                 "session_id": session_id,
+                "harness_id": CLAUDE_CODE_HARNESS_ID if session_id is not None else None,
                 "asked_at": asked_at,
             },
         ),
