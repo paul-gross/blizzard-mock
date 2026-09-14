@@ -42,6 +42,7 @@ def test_compose_takeover_lands_a_null_fence_epoch_when_not_live() -> None:
         rng=seeded_rng(1),
     )
     assert row.values["fence_epoch"] is None
+    assert row.values["harness_id"] == "claude_code"
 
 
 def test_compose_takeover_same_seed_mints_the_same_id() -> None:

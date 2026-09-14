@@ -136,6 +136,7 @@ class TranscriptSegmentRecordBody(MirroredWireBody):
     turn_range_start: int
     turn_range_end: int
     final: bool
+    harness_id: str | None = None
     normalizer_version: str
     harness_version: str | None
     record_truncated: bool = False

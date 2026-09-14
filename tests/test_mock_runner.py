@@ -385,11 +385,14 @@ def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
     assert polled["status"] == 200
     assert polled["response"]["question_id"] == question_id
     assert polled["response"]["question"] == "which db?"
+    assert polled["response"]["session_id"] == f"mock-session-{chunk_id}"
+    assert polled["response"]["harness_id"] == "claude_code"
     assert polled["response"]["answered"] is False
 
     # the question is also visible off the chunk detail (hub-side minted state).
     detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert any(q["question_id"] == question_id for q in detail["questions"])
+    [question] = [q for q in detail["questions"] if q["question_id"] == question_id]
+    assert question["harness_id"] == "claude_code"
 
 
 def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
@@ -410,6 +413,9 @@ def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
     assert pushed["status"] == 200
     assert pushed["response"]["applied"] == [1]
     assert pushed["response"]["capped"] == []
+    service = hub.app.state.service  # type: ignore[attr-defined]
+    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()
+    assert record["harness_id"] == "claude_code"
 
 
 def test_drive_push_transcript_requires_a_held_chunk(stack: tuple[TestClient, TestClient]) -> None:

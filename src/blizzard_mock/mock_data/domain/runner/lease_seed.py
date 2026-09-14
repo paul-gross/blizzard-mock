@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from blizzard_mock.clock import Clock
+from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
 
@@ -51,6 +52,7 @@ def compose_lease(
                 "pid": None,
                 "process_start_time": None,
                 "session_id": session_id,
+                "harness_id": CLAUDE_CODE_HARNESS_ID if session_id is not None else None,
                 "created_at": created_at,
             },
         ),

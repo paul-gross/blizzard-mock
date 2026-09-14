@@ -16,6 +16,7 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from blizzard_mock.clock import Clock, FixedClock, SystemClock
+from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.artifact_seed import KINDS as ARTIFACT_KINDS
 from blizzard_mock.mock_data.domain.hub.artifact_seed import ArtifactCompositionError, compose_artifact
@@ -1022,6 +1023,13 @@ def create_runner_pause(
 @click.option("--node", "node_name", required=True, help="The node id attributed.")
 @click.option("--lease-id", "lease_id", required=True, help="The lease this segment ships under.")
 @click.option("--session-id", "session_id", required=True, help="The harness session this segment ships.")
+@click.option(
+    "--harness-id",
+    "harness_id",
+    default=CLAUDE_CODE_HARNESS_ID,
+    show_default=True,
+    help="The harness that owns --session-id.",
+)
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch.")
 @click.option("--generation", "generation", type=int, default=1, help="This lease's spawn ordinal.")
 @click.option("--cursor", "cursor", default=None, help="Opaque resume position; unset means unread from the start.")
@@ -1043,6 +1051,7 @@ def create_transcript_segment(
     node_name: str,
     lease_id: str,
     session_id: str,
+    harness_id: str,
     epoch: int,
     generation: int,
     cursor: str | None,
@@ -1068,6 +1077,7 @@ def create_transcript_segment(
         generation=generation,
         lease_id=lease_id,
         session_id=session_id,
+        harness_id=harness_id,
         normalizer_version=normalizer_version,
         clock=clock,
         rng=rng,

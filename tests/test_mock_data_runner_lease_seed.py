@@ -137,6 +137,7 @@ def test_compose_lease_accepts_a_supplied_session_id_with_no_pid() -> None:
     )
     lease_row, _context_row = seeded.rows
     assert lease_row.values["session_id"] == "sess_1"
+    assert lease_row.values["harness_id"] == "claude_code"
     assert lease_row.values["pid"] is None
     assert lease_row.values["process_start_time"] is None
 

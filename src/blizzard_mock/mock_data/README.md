@@ -154,9 +154,12 @@ its own entry below owns its flags.
   **no** `reason` column — `--fleet --reason` fails loud naming the missing column
   rather than silently dropping it). Exactly one of `--local`/`--fleet` is
   required.
-- `create transcript-segment --store runner --chunk ID --node ID --lease-id ID --session-id ID [--epoch N] [--generation N] [--cursor TOKEN] [--shipped-bytes N] [--shipped-turns N] [--normalizer-version V] [--harness-version V] [--finalized] [--seed N]` —
+- `create transcript-segment --store runner --chunk ID --node ID --lease-id ID --session-id ID [--harness-id ID] [--epoch N] [--generation N] [--cursor TOKEN] [--shipped-bytes N] [--shipped-turns N] [--normalizer-version V] [--harness-version V] [--finalized] [--seed N]` —
   **implemented, runner-only**. Lands one `transcript_segments` row
-  (`domain/runner/transcript_segment_seed.py`) — no hub counterpart exists.
+  (`domain/runner/transcript_segment_seed.py`) — no hub counterpart exists. Its
+  required harness provenance defaults to the historical/backfilled
+  `claude_code` owner and `--harness-id` selects another owner when the supplied
+  session belongs to one.
   `--finalized` also stamps `finalized_at`; unset, the segment lands open. Prints
   the minted `seg_<ulid>` segment id, alone, on stdout.
 - `scenario board [--chunks N] [--stress] [--seed S] [--url ... | --dir ...]` —
