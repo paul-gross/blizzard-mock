@@ -367,7 +367,10 @@ class MockHubService:
         unknown to the store is silently omitted, never a 404. The ``chunk_unknown`` lever
         (see :meth:`_consult_chunk_unknown`) applies here too, but as an omission rather
         than its usual raise — this read never 404s, so a scripted id is simply left out,
-        the same way a genuinely unseeded id already is."""
+        the same way a genuinely unseeded id already is. The ``conflicting_fact`` lever
+        applies too, exactly as it does to ``chunk_detail``'s ``route.runner_id`` — the
+        runner tick reads routes only through this endpoint now, so it must be able to
+        drive the same detach/abandon path."""
         ids = list(dict.fromkeys(chunk_ids))
         views: list[ChunkStatusView] = []
         for chunk_id in ids:
@@ -378,11 +381,17 @@ class MockHubService:
             chunk = self._state.get_chunk(chunk_id)
             if chunk is None:
                 continue
+            route_runner_id = chunk.route_runner_id if chunk.claimed else None
+            if chunk.claimed:
+                conflict = self._levers.find(HubLever.CONFLICTING_FACT.value, chunk_id)
+                if conflict is not None:
+                    self._levers.consume(conflict)
+                    route_runner_id = str(conflict.payload.get("runner_id", "other-runner"))
             views.append(
                 ChunkStatusView(
                     chunk_id=chunk.chunk_id,
                     status=chunk.status.value,
-                    route_runner_id=chunk.route_runner_id if chunk.claimed else None,
+                    route_runner_id=route_runner_id,
                     latest_epoch=chunk.latest_epoch or None,
                 )
             )

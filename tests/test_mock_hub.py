@@ -137,6 +137,23 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
     assert statuses[1]["route_runner_id"] is None
 
 
+def test_chunk_statuses_conflicting_fact_reports_a_foreign_holder(client: TestClient) -> None:
+    """blizzard#521: the runner tick now reads routes only through this endpoint, so the
+    ``conflicting_fact`` lever must drive its detach/abandon path here too, exactly as it
+    already does through ``GET /chunks/{id}``."""
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    # armed single-shot (remaining=1): the conflicting fact surfaces once, then self-expires.
+    client.post(
+        "/_levers/conflicting_fact",
+        json={"chunk_id": chunk_id, "remaining": 1, "payload": {"runner_id": "ghost-runner"}},
+    )
+    first = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
+    assert first[0]["route_runner_id"] == "ghost-runner"
+    second = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
+    assert second[0]["route_runner_id"] == "r1"
+
+
 def test_rekey_route_token_returns_a_different_deterministic_token_than_the_claim(client: TestClient) -> None:
     chunk_id = _seed(client)
     claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
