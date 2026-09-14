@@ -63,6 +63,12 @@ class ChunkQueryBody(BaseModel):
     chunk_id: str
 
 
+class ChunkStatusesQueryBody(BaseModel):
+    """POST /_drive/chunk-statuses — read a batch of chunk statuses over the wire."""
+
+    chunk_ids: list[str]
+
+
 class GitCommitDeclarationBody(BaseModel):
     """POST /api/leases/{lease_id}/git-commits — the served route's wire body (issue #143,
     Phase 3), mirroring the real runner's ``wire.git_commits.GitCommitDeclarationRequest``.

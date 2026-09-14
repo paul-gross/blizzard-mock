@@ -48,6 +48,9 @@ class HttpxHubGateway:
     def get_chunk(self, chunk_id: str) -> tuple[int, dict[str, Any]]:
         return self._get(f"{_API}/chunks/{chunk_id}")
 
+    def chunk_statuses(self, chunk_ids: list[str]) -> tuple[int, dict[str, Any]]:
+        return self._get(f"{_API}/chunk-statuses", params={"chunk_id": chunk_ids})
+
     def report_lease_direct(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/chunks/{chunk_id}/leases", body)
 
@@ -66,9 +69,9 @@ class HttpxHubGateway:
     def push_transcripts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/transcripts", body)
 
-    def _get(self, path: str) -> tuple[int, dict[str, Any]]:
+    def _get(self, path: str, *, params: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
         try:
-            return _result(self._client.get(path))
+            return _result(self._client.get(path, params=params))
         except httpx.HTTPError as exc:
             return 0, {"error": f"GET {path} failed: {exc}"}
 

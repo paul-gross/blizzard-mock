@@ -204,6 +204,14 @@ class MockRunnerService:
         status, body = self._gw.get_chunk(chunk_id)
         return {"status": status, "response": body}
 
+    def chunk_statuses(self, chunk_ids: list[str]) -> dict[str, Any]:
+        """The runner tick's slim batch status read — not scoped to one chunk, so the
+        delay lever (unlike :meth:`get_chunk`'s) is looked up fleet-wide, mirroring
+        ``peek``'s own ``None``-keyed delay."""
+        self._apply_delay(None)
+        status, body = self._gw.chunk_statuses(chunk_ids)
+        return {"status": status, "response": body}
+
     def held(self, chunk_id: str) -> Held | None:
         return self._held.get(chunk_id)
 

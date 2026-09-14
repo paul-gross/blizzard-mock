@@ -83,6 +83,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     ),
     "EnvelopeChoice": ("EnvelopeChoice", frozenset()),
     "ChunkEscalationView": ("ChunkEscalationView", frozenset()),
+    "ChunkStatusView": ("ChunkStatusView", frozenset({"pause", "restart_epochs", "cost", "decision"})),
     "ExternalSubscriptionUsageView": ("ExternalSubscriptionUsageView", frozenset()),
     "ExternalSubscriptionUsageWindowView": ("ExternalSubscriptionUsageWindowView", frozenset()),
     "FindingView": ("FindingView", frozenset()),
