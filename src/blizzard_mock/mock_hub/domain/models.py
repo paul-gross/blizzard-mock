@@ -238,7 +238,7 @@ class ChunkSpec(BaseModel):
     # tests/test_pin_mock.py.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
-    # The chunk's default harness preference (blizzard#432) — the `default_model` shape.
+    # The chunk's default harness preference — the `default_model` shape.
     default_harnesses: list[str] = Field(default_factory=list)
     entry: str
     nodes: dict[str, NodeSpec]

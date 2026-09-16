@@ -161,7 +161,7 @@ class ChunkDetail(BaseModel):
     # so a real runner's wire model deserializes the mock's replies unchanged.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
-    # The chunk's default harness preference (blizzard#432) — the `default_model` shape.
+    # The chunk's default harness preference — the `default_model` shape.
     default_harnesses: list[str] = Field(default_factory=list)
     route: RouteView | None = None
     escalation: ChunkEscalationView | None = None
