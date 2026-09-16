@@ -28,6 +28,7 @@ from blizzard_mock.mock_runner.domain.models import (
     PauseBody,
     PollAnswerBody,
     PushTranscriptBody,
+    RegisterBody,
     ReportEventBody,
     ReportExternalUsageBody,
     ResumeBody,
@@ -67,9 +68,17 @@ def record_git_commit_declaration(
     )
 
 
+#: Defaulted (unlike every other drive body) so the existing bare `POST /_drive/register`
+#: — no capabilities asserted — still registers exactly as before blizzard#433. A module-
+#: level singleton, not a call in the route's own argument default (`B008`).
+_NO_CAPABILITIES = RegisterBody()
+
+
 @drive_router.post("/register")
-def drive_register(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.register()
+def drive_register(
+    service: Annotated[MockRunnerService, Depends(get_service)], body: RegisterBody = _NO_CAPABILITIES
+) -> dict[str, Any]:
+    return service.register(capabilities=body.capabilities)
 
 
 @drive_router.post("/peek")

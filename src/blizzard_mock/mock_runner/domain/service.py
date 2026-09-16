@@ -81,9 +81,14 @@ class MockRunnerService:
 
     # -- drive verbs -------------------------------------------------------
 
-    def register(self) -> dict[str, Any]:
+    def register(self, *, capabilities: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Register with the hub. ``capabilities`` (blizzard#433) is the raw
+        ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
+        settable directly, with no real harness adapter behind it."""
         self._apply_delay(None)
-        status, body = self._gw.register(self._runner_id, workspace_id=self._workspace_id)
+        status, body = self._gw.register(
+            self._runner_id, workspace_id=self._workspace_id, capabilities=capabilities or []
+        )
         return {"status": status, "response": body}
 
     def peek(self) -> dict[str, Any]:

@@ -123,13 +123,15 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
 _UNSCHEMAED = {"RouteClaimConflict"}
 
 #: Request-BODY mirrors, which live in ``mock_hub.api.deps`` rather than the mirror module
-#: above and so are invisible to ``_mirror_models``. Only the transcript lane's five are
-#: mapped here (blizzard#246): their own docstrings rest the rename defense on being typed
-#: and required, and `ToolCallSegmentBody.input_truncated` is now defaulted, which alone
-#: would let a rename of that field pass validation silently.
+#: above and so are invisible to ``_mirror_models``. The transcript lane's five are mapped
+#: here (blizzard#246): their own docstrings rest the rename defense on being typed and
+#: required, and `ToolCallSegmentBody.input_truncated` is now defaulted, which alone would
+#: let a rename of that field pass validation silently. `RunnerCapabilityBody` (blizzard#433)
+#: joins them as the registration body's one nested shape promoted to a checked mirror.
 #: The two recursive views carry FastAPI's ``-Input``/``-Output`` split; a request body
 #: mirrors the ``-Input`` half by construction.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
+    "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
     "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
     "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),
     "TranscriptSegmentBatchBody": ("TranscriptSegmentBatch", frozenset()),

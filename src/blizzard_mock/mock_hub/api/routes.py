@@ -34,6 +34,7 @@ from blizzard_mock.mock_hub.domain.service import (
     QuestionNotFound,
     SystemArtifactNotFound,
 )
+from blizzard_mock.mock_hub.domain.state import RunnerCapability
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub.
@@ -259,6 +260,10 @@ def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubServ
         url=body.url,
         redirect_uris=tuple(body.redirect_uris),
         env_capacity=body.env_capacity,
+        capabilities=tuple(
+            RunnerCapability(harness_id=c.harness_id, version=c.version, tiers=tuple(c.tiers), default=c.default)
+            for c in body.capabilities
+        ),
     )
     return {"runner_id": body.runner_id, "first_registration": first}
 

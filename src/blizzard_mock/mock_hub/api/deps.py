@@ -3,7 +3,8 @@
 The composition root stashes the wired ``MockHubService`` and lever store on
 ``app.state``; routers reach them through these dependencies
 (``bzh:dependency-injection``). Request bodies name only the fields the mock reads —
-EXCEPT the transcript segment mirror bodies, field-for-field including required-ness."""
+EXCEPT the ``MirroredWireBody`` subclasses (the transcript segment bodies and
+``RunnerCapabilityBody``), field-for-field including required-ness."""
 
 from __future__ import annotations
 
@@ -22,6 +23,26 @@ def get_service(request: Request) -> MockHubService:
 def get_captured(request: Request) -> ICaptureStore:
     captured: ICaptureStore = request.app.state.captured
     return captured
+
+
+class MirroredWireBody(BaseModel):
+    """Marker base for a request body meant to mirror a real wire schema field-for-field
+    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
+    of intended mirrors mechanically (F10), the request-body counterpart to the
+    response-model mirror module's own module-membership scan."""
+
+
+class RunnerCapabilityBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerCapability`` field-for-field (blizzard#433) —
+    the one nested shape inside ``RunnerRegistrationBody`` promoted to a checked mirror,
+    since a silent rename there would otherwise round-trip as a dropped field rather than
+    failing the tier. ``RunnerRegistrationBody`` itself stays the mock's usual
+    subset-shaped, unchecked body — its other fields are intentionally mock-only shaped."""
+
+    harness_id: str
+    version: str | None = None
+    tiers: list[str] = Field(default_factory=list)
+    default: bool = False
 
 
 class RouteClaimBody(BaseModel):
@@ -56,6 +77,11 @@ class RunnerRegistrationBody(BaseModel):
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list)
+    # The runner's capability snapshot (blizzard#433) — every harness/tier it can execute
+    # right now, round-tripped into `MockHubService.register` unconditionally overwritten
+    # on every (re-)registration, mirroring the real hub. `RunnerCapabilityBody` (above) is
+    # the checked mirror for this field's own element shape.
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
 
 
 class RunnerFactBody(BaseModel):
@@ -67,13 +93,6 @@ class RunnerFactBody(BaseModel):
 class RunnerFactBatchBody(BaseModel):
     runner_id: str
     facts: list[RunnerFactBody] = Field(default_factory=list)
-
-
-class MirroredWireBody(BaseModel):
-    """Marker base for a request body meant to mirror a real wire schema field-for-field
-    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
-    of intended mirrors mechanically (F10), the request-body counterpart to the
-    response-model mirror module's own module-membership scan."""
 
 
 class ToolCallSegmentBody(MirroredWireBody):

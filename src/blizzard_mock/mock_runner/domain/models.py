@@ -28,6 +28,17 @@ class Held:
     last_submission: dict[str, Any] = field(default_factory=dict)
 
 
+class RegisterBody(BaseModel):
+    """POST /_drive/register — register (or heartbeat) with the hub.
+
+    ``capabilities`` (blizzard#433) is settable directly over the wire, each entry the raw
+    ``{harness_id, version?, tiers?, default?}`` shape a test wants the hub to see —
+    letting a service test drive "a runner asserting this capability snapshot registers
+    against the hub" without a real harness adapter behind it."""
+
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ClaimBody(BaseModel):
     """POST /_drive/claim — claim a chunk (its environments are cosmetic for the mock)."""
 

@@ -30,7 +30,7 @@ from blizzard_mock.mock_hub.domain.models import (
     QuestionState,
     SystemArtifactSpec,
 )
-from blizzard_mock.mock_hub.domain.state import IHubState
+from blizzard_mock.mock_hub.domain.state import IHubState, RunnerCapability
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     BlockedView,
@@ -779,6 +779,7 @@ class MockHubService:
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
+        capabilities: tuple[RunnerCapability, ...] = (),
     ) -> bool:
         return self._state.upsert_runner(
             runner_id,
@@ -787,6 +788,7 @@ class MockHubService:
             url=url,
             redirect_uris=redirect_uris,
             env_capacity=env_capacity,
+            capabilities=capabilities,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:

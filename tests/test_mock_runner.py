@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
+from blizzard_mock.mock_hub.domain.service import MockHubService
 from blizzard_mock.mock_runner.app import create_app as create_runner_app
 from blizzard_mock.mock_runner.domain.models import Held
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
@@ -92,6 +93,31 @@ def test_driver_claims_and_completes_over_the_wire(stack: tuple[TestClient, Test
     step2 = runner.post("/_drive/complete", json={"chunk_id": chunk_id, "choice": "pass"}).json()
     assert step2["response"]["outcome"] == "hub_node_taken"  # review -> deliver hub node
     assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
+
+
+def test_driver_can_assert_a_capability_snapshot_on_registration(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#433 — the driver can drive a registration asserting an arbitrary capability
+    snapshot, with no real harness adapter behind it, and the hub reads it back stored."""
+    hub, runner = stack
+    reg = runner.post(
+        "/_drive/register",
+        json={
+            "capabilities": [
+                {"harness_id": "claude_code", "version": "1.0.0", "tiers": ["blizzard:frontier"], "default": True}
+            ]
+        },
+    )
+    assert reg.json()["status"] == 201
+
+    service: MockHubService = hub.app.state.service  # type: ignore[attr-defined]
+    row = service._state.get_runner("runner-mock")
+    assert row is not None
+    assert len(row.capabilities) == 1
+    capability = row.capabilities[0]
+    assert capability.harness_id == "claude_code"
+    assert capability.version == "1.0.0"
+    assert capability.tiers == ("blizzard:frontier",)
+    assert capability.default is True
 
 
 def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient, TestClient]) -> None:

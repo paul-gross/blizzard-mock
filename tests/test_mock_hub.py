@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
-from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES
+from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES, MockHubService
 
 _SPEC = {
     "entry": "build",
@@ -201,6 +201,64 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
         },
     )
     assert reg.status_code == 201, reg.text
+
+
+def _registered_capabilities(client: TestClient, runner_id: str) -> tuple:
+    """A registered runner's stored capability snapshot — introspection the wire surface
+    doesn't expose (``RunnerView`` carries no ``capabilities`` field, mirroring the real
+    hub, blizzard#433), so this reaches the composition root's own service directly."""
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    row = service._state.get_runner(runner_id)
+    assert row is not None
+    return row.capabilities
+
+
+def test_registration_accepts_and_stores_capabilities(client: TestClient) -> None:
+    """blizzard#433 — the runner's capability snapshot round-trips into the stored
+    registry row, mirroring the real hub's own registration write."""
+    reg = client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-cap",
+            "workspace_id": "ws",
+            "capabilities": [
+                {"harness_id": "claude_code", "version": "1.2.3", "tiers": ["blizzard:frontier"], "default": True}
+            ],
+        },
+    )
+    assert reg.status_code == 201, reg.text
+
+    capabilities = _registered_capabilities(client, "r-cap")
+    assert len(capabilities) == 1
+    capability = capabilities[0]
+    assert capability.harness_id == "claude_code"
+    assert capability.version == "1.2.3"
+    assert capability.tiers == ("blizzard:frontier",)
+    assert capability.default is True
+
+
+def test_registration_without_capabilities_leaves_it_empty(client: TestClient) -> None:
+    """A request predating blizzard#433 parses unchanged — the empty-default convention
+    every earlier optional registration field already uses."""
+    assert client.post("/api/fleet/runners", json={"runner_id": "r-no-cap", "workspace_id": "ws"}).status_code == 201
+    assert _registered_capabilities(client, "r-no-cap") == ()
+
+
+def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClient) -> None:
+    """Unconditional overwrite (blizzard#433), like ``redirect_uris``: a re-registration
+    dropping a binding leaves no trace of it."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-cap-2",
+            "workspace_id": "ws",
+            "capabilities": [{"harness_id": "claude_code", "tiers": ["blizzard:basic"], "default": True}],
+        },
+    )
+    assert len(_registered_capabilities(client, "r-cap-2")) == 1
+
+    client.post("/api/fleet/runners", json={"runner_id": "r-cap-2", "workspace_id": "ws"})
+    assert _registered_capabilities(client, "r-cap-2") == ()
 
 
 # --- levers -----------------------------------------------------------------

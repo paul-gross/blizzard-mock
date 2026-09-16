@@ -7,11 +7,25 @@ implements; the routers never touch it (``bzh:controller-read-only``).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
+
+
+@dataclass(frozen=True)
+class RunnerCapability:
+    """One harness binding a registered runner reported it can execute (blizzard#433) —
+    the mock's own domain-core mirror of the wire shape, kept import-free of it. ``version``
+    is ``None`` when the binding exposes none; ``default`` marks the runner's own default
+    binding."""
+
+    harness_id: str
+    version: str | None = None
+    tiers: tuple[str, ...] = ()
+    default: bool = False
 
 
 class ReportedRunnerFacts:
@@ -46,6 +60,7 @@ class RunnerRow:
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
+        capabilities: tuple[RunnerCapability, ...] = (),
     ) -> None:
         self.runner_id = runner_id
         self.workspace_id = workspace_id
@@ -56,6 +71,9 @@ class RunnerRow:
         self.url = url
         self.redirect_uris = redirect_uris
         self.env_capacity = env_capacity
+        # The runner's capability snapshot (blizzard#433) — reported on every
+        # (re-)registration, replacing the prior snapshot whole.
+        self.capabilities = capabilities
         self.paused = False
 
 
@@ -75,11 +93,13 @@ class IHubState(Protocol):
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
+        capabilities: tuple[RunnerCapability, ...] = (),
     ) -> bool:
         """Register/heartbeat a runner; return ``True`` on first registration.
 
-        ``url``/``redirect_uris`` (issue #95) and ``env_capacity`` are overwritten
-        unconditionally on every call, like ``workspace_id``."""
+        ``url``/``redirect_uris`` (issue #95), ``env_capacity``, and ``capabilities``
+        (blizzard#433) are overwritten unconditionally on every call, like
+        ``workspace_id``."""
         ...
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...
