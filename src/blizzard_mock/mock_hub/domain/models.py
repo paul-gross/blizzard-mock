@@ -95,6 +95,7 @@ class NodeSpec(BaseModel):
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
     session_effort: str | None = None
+    session_harnesses: list[str] = Field(default_factory=list)
     session_compaction_window: str | None = None
     session_rotate: RotatePolicySpec | None = None
     judged_by: JudgedBy = JudgedBy.WORKER
@@ -237,6 +238,8 @@ class ChunkSpec(BaseModel):
     # tests/test_pin_mock.py.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
+    # The chunk's default harness preference (blizzard#432) — the `default_model` shape.
+    default_harnesses: list[str] = Field(default_factory=list)
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
@@ -262,6 +265,7 @@ class ChunkState(BaseModel):
     graph_id: str
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
+    default_harnesses: list[str] = Field(default_factory=list)
     entry: str
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list)
