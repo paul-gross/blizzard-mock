@@ -213,6 +213,7 @@ class MockHubService:
             graph_id=spec.graph_id,
             default_model=list(spec.default_model),
             default_effort=spec.default_effort,
+            default_harnesses=list(spec.default_harnesses),
             entry=spec.entry,
             nodes=spec.nodes,
             work_refs=spec.work_refs,
@@ -356,6 +357,7 @@ class MockHubService:
             work_refs=[p.model_dump() for p in chunk.work_refs],
             default_model=list(chunk.default_model),
             default_effort=chunk.default_effort,
+            default_harnesses=list(chunk.default_harnesses),
             route=route,
             escalation=escalation,
             questions=questions,
@@ -953,6 +955,7 @@ class MockHubService:
                 session_name=node.session_name,
                 session_model=list(node.session_model),
                 session_effort=node.session_effort,
+                session_harnesses=list(node.session_harnesses),
                 session_compaction_window=node.session_compaction_window,
                 session_rotate=RotatePolicyView(**node.session_rotate.model_dump())
                 if node.session_rotate is not None
