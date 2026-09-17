@@ -9,8 +9,10 @@ fence refusal — no real tokens, no real coding-harness binary.
 from __future__ import annotations
 
 import json
+import select
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -1255,6 +1257,63 @@ def test_opencode_facade_error_turn_emits_an_error_event_and_exits_nonzero(fence
     error_events = [event for event in lines if event["type"] == "error"]
     assert len(error_events) == 1
     assert "crash" in error_events[0]["error"]["data"]["message"]
+
+
+def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo) -> None:
+    """The identity-bearing ``step_start`` record must be readable off the child's own
+    stdout well before the process exits — not just first in a buffered final capture.
+
+    A behavior script that sleeps before finishing gives a real, measurable gap: if the
+    facade only wrote everything at process exit, reading the first line would take as
+    long as the whole run; a real stream makes it available almost immediately.
+    """
+    cwd, env = fenced_repo
+    sleep_seconds = 1.0
+    script = f"import time\ntime.sleep({sleep_seconds})\nverdict('approve', 'slow turn')"
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", "run", script],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    try:
+        started = time.monotonic()
+        readable, _, _ = select.select([proc.stdout], [], [], sleep_seconds)
+        assert readable, "no output arrived before the behavior script's own sleep finished"
+        first_line = proc.stdout.readline()
+        time_to_first_line = time.monotonic() - started
+
+        # The process must still be mid-turn — the sleep hasn't elapsed — proving the
+        # line arrived from a real stream, not a fully-exited process's buffered output.
+        still_running = proc.poll() is None
+        remaining_stdout, stderr = proc.communicate(timeout=sleep_seconds + 5)
+        total_duration = time.monotonic() - started
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+    assert proc.returncode == 0, stderr
+    assert still_running, "the process had already exited by the time the first line was read"
+    assert time_to_first_line < sleep_seconds / 2, (
+        f"identity line took {time_to_first_line:.3f}s to arrive against a {sleep_seconds}s "
+        "turn — too close to the full run to have been streamed early"
+    )
+    assert total_duration >= sleep_seconds
+
+    event = json.loads(first_line)
+    assert event["type"] == "step_start"
+    assert event["sessionID"]
+
+    remaining_lines = [json.loads(line) for line in remaining_stdout.splitlines() if line.strip()]
+    all_types = ["step_start", *(e["type"] for e in remaining_lines)]
+    assert all_types == ["step_start", "text", "step_finish"]
+    assert all(e["sessionID"] == event["sessionID"] for e in remaining_lines)
 
 
 def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo) -> None:

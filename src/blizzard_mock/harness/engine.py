@@ -111,6 +111,12 @@ class IHarnessWire(Protocol):
     """A facade's wire surface — the engine's only outward dependency.
 
     Writes ``render(result)`` to the output stream; never formats anything.
+
+    A wire may also define an optional ``render_identity(session_id) -> str | None``,
+    duck-typed rather than part of this Protocol so every wire without one is
+    unaffected: the engine probes for it with ``getattr`` and, when present and
+    non-empty, flushes its return value to the stream before the behavior script
+    runs, then omits that same content from the later ``render(result)`` call.
     """
 
     def render(self, result: RunResult) -> str:
@@ -532,6 +538,18 @@ def run_prompt(
         tagged=tagged is not None,
         preamble_stripped=bool(preamble),
     )
+    # A wire that can identify the turn before the behavior script even runs (a fresh
+    # mint's session id is self-assigned up front) streams that identity-bearing record
+    # now, not after exec() finishes — the real handshake's first record arrives well
+    # before the turn completes, which is exactly what a caller awaiting identity off
+    # the child's own stdout needs to observe.
+    render_identity = getattr(wire, "render_identity", None)
+    if render_identity is not None:
+        identity_chunk = render_identity(session_id)
+        if identity_chunk:
+            stream.write(identity_chunk)
+            stream.flush()
+
     token = _CURRENT.set(ctx)
     started = time.monotonic()
     try:
