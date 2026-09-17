@@ -435,6 +435,7 @@ def run_prompt(
     model: str | None = None,
     effort: str | None = None,
     compaction_window: str | None = None,
+    permission: str | None = None,
     whole_message: bool = False,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
@@ -499,6 +500,7 @@ def run_prompt(
             model=model,
             effort=effort,
             compaction_window=compaction_window,
+            permission=permission,
         )
     )
 

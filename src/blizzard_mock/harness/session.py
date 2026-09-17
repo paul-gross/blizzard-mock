@@ -24,7 +24,8 @@ class Ask:
 
 @dataclass
 class Invocation:
-    """One turn's observed model/effort/compaction-window flags (issue #144, blizzard#343).
+    """One turn's observed model/effort/compaction-window/permission flags (issue #144,
+    blizzard#343; permission added for OpenCode's ``--auto`` policy flag).
 
     ``None`` means the flag was absent from argv, not unknown.
     """
@@ -33,6 +34,7 @@ class Invocation:
     model: str | None = None
     effort: str | None = None
     compaction_window: str | None = None
+    permission: str | None = None
 
 
 @dataclass

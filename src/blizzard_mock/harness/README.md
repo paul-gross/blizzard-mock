@@ -413,7 +413,7 @@ Each facade registers a `[project.scripts]` binary:
 |--------|--------|---------|
 | `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. |
-| `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
+| `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
