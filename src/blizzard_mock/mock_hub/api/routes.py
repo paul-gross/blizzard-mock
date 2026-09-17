@@ -69,16 +69,11 @@ def peek_matched_queue(
     service: Annotated[MockHubService, Depends(get_service)],
     runner_id: Annotated[str | None, Query()] = None,
 ) -> object:
-    """The matched fleet peek (blizzard#433 Phase 3, D7/D8) — at most one ready entry,
-    the first ``runner_id`` can both work and claim, ``body.policy`` applied to both
-    dimensions. ``runner_id`` is a query parameter, not a body field: the real wire's
-    ``QueuePeekRequest`` (mirrored by ``QueuePeekBody`` field-for-field) never carries a
-    caller identity — it answers for the authenticated principal alone — and the mock
-    carries no bearer-token registry to authenticate one from a header, so it takes the
-    same explicit-identity idiom every other fleet route already uses (``claim``'s and
-    ``register``'s own ``runner_id`` body field), just relocated off the parity-checked
-    body. Naming no registered runner refuses ``401`` in every mode the mock supports —
-    the one route the mock never serves tokenlessly."""
+    """The matched fleet peek — at most one ready entry the named ``runner_id`` can both
+    work and claim, ``body.policy`` applied to both. ``runner_id`` is a query parameter,
+    not a body field, since ``QueuePeekBody`` carries no caller identity
+    (:class:`QueuePeekBody`'s docstring). See :meth:`MockHubService.peek_matched` for
+    matching and auth-failure semantics."""
     try:
         return service.peek_matched(
             runner_id=runner_id,

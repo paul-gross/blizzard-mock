@@ -18,10 +18,8 @@ class IHubGateway(Protocol):
     ) -> tuple[int, dict[str, Any]]: ...
     def peek(self) -> tuple[int, dict[str, Any]]: ...
 
-    #: The matched fleet peek (blizzard#433 Phase 3) — ``POST /queue/peek`` carrying
-    #: ``capabilities``/``policy``, identified by ``runner_id`` (``None`` for a
-    #: tokenless caller); falls back to :meth:`peek`'s legacy ``GET`` on a ``401``
-    #: internally, mirroring the real runner's own ``IHubClient.peek_queue``.
+    #: The matched fleet peek — ``POST /queue/peek``, identified by ``runner_id`` (``None``
+    #: for tokenless); falls back to :meth:`peek`'s legacy ``GET`` on a ``401`` internally.
     def peek_matched(
         self, *, runner_id: str | None, capabilities: list[dict[str, Any]], policy: str
     ) -> tuple[int, dict[str, Any]]: ...

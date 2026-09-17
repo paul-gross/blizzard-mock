@@ -301,18 +301,11 @@ class MockHubService:
     def peek_matched(
         self, *, runner_id: str | None, capabilities: Sequence[RunnerCapability], policy: str
     ) -> QueuePeekResponse:
-        """The matched fleet peek (blizzard#433 Phase 3, D7/D8) — the mock's own mirror
-        of ``blizzard.hub.domain.queue.select_matched_entry`` over the mock's flat
-        ``ChunkState`` graph shape (``mock_hub.domain.matching``). At most one entry,
-        never blocked (the policy is applied to the capability-eligibility and
-        blocked-dependency dimensions together, exactly like the real hub, before an
-        entry is ever selected).
-
-        ``runner_id`` is the mock's own stand-in for the real verb's authenticated
-        principal (D12: the parity-checked request body carries no such field) — naming
-        no registered runner is :class:`UnresolvableRunner`, the mock's ``401`` in every
-        mode it supports, mirroring the real hub's always-raising demand for a
-        resolvable principal on this one route."""
+        """The mock's own mirror of ``blizzard.hub.domain.queue.select_matched_entry``, over its
+        flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
+        blocked, policy applied to both the capability and blocked-dependency dimensions before
+        selection. ``runner_id`` stands in for the real verb's authenticated principal; naming
+        none raises :class:`UnresolvableRunner`, the mock's ``401`` in every mode."""
         if not runner_id or self._state.get_runner(runner_id) is None:
             raise UnresolvableRunner(runner_id or "")
         match_policy = matching.QueueMatchPolicy.of(policy)
@@ -349,9 +342,8 @@ class MockHubService:
         if blocked is not None:
             self._levers.consume(blocked)
             raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
-        # Re-read fresh, never cached from the peek (blizzard#433 D9): a capability change
-        # landing after this runner's peek must not race the claim. A registration
-        # reporting no capabilities at all is never revalidated.
+        # Re-read fresh, never cached from the peek: a capability change landing after this
+        # runner's peek must not race the claim. No capabilities at all is never revalidated.
         registration = self._state.get_runner(runner_id)
         if registration is not None and registration.capabilities:
             node_id = chunk.current_node_id or chunk.entry

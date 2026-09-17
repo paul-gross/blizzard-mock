@@ -1,27 +1,9 @@
-"""A real blizzard runner against this mock hub (blizzard#433's ``blizzard:service-test``
-acceptance line for Phase 1) — proves the capability-snapshot wire round trip end to end
-using genuinely real runner-side code: the real ``blizzard-runner`` binary (which
-assembles its capability snapshot from a real harness registry at composition, then
-sends it through the real ``RunnerRegistrationRequest`` wire model) against this repo's
-own mock hub.
-
-``blizzard-mock`` cannot import ``blizzard`` at all — no dependency is declared, and the
-two repos even keep separate venvs (this is why ``tests/test_wire_parity.py`` reads the
-sibling worktree's committed OpenAPI spec by *path* rather than importing the models it
-describes). So the runner side here is driven as a genuine out-of-process subprocess of
-the sibling worktree's own installed ``blizzard-runner`` binary — exactly the shape
-``src/blizzard_mock/mock_hub/cli.py`` already documents: "a service-tier test that runs
-the real runner out of process points ``BZ_HUB_URL`` at this address." The hub side stays
-in-process — served for real over a bound ``uvicorn`` socket, not a subprocess — so the
-assertion can reach the stored registry row directly: the capability snapshot carries no
-wire-exposed read surface by design (blizzard#433 renders nothing onto ``RunnerView``),
-the same reason blizzard's own component test for this feature
-(``tests/test_runner_registration_federation.py``) reads its hub's registry directly
-rather than over the wire.
-
-Not a skip: an unresolvable sibling checkout refuses a green rather than reporting a round
-trip it never drove, mirroring ``test_wire_parity.py``'s own refusal-not-skip stance.
-"""
+"""A real blizzard runner against this mock hub — proves the capability-snapshot wire
+round trip end to end via a genuine out-of-process ``blizzard-runner`` subprocess from
+the sibling worktree (rationale: ``tests/test_wire_parity.py``'s module docstring). The
+hub stays in-process (a bound ``uvicorn`` socket) so the assertion can read the stored
+registry row directly — the capability snapshot has no wire-exposed read surface, the
+same reason ``tests/test_runner_registration_federation.py`` reads its hub directly."""
 
 from __future__ import annotations
 
@@ -43,8 +25,7 @@ from blizzard_mock.mock_hub.domain.service import MockHubService
 
 #: The same sibling-resolution convention as ``test_wire_parity.py``'s ``_BLIZZARD``.
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
-#: The sibling worktree's own venv, not this one's — ``blizzard-mock`` never installs
-#: ``blizzard``, so the binary can only be found there (or at an explicit override).
+#: The sibling worktree's own venv — ``blizzard-mock`` never installs ``blizzard`` itself.
 _RUNNER_BIN = Path(os.environ.get("BLIZZARD_RUNNER_BIN") or _BLIZZARD / ".venv" / "bin" / "blizzard-runner")
 
 
@@ -78,8 +59,7 @@ def _await_health(port: int, *, timeout: float = 10.0) -> None:
 
 def _disable_external_usage_network_call(runner_dir: Path) -> None:
     """Point the freshly scaffolded config's legacy subscription sampler at a
-    guaranteed-missing credentials file — the real runner's own e2e helper's precedent
-    (``blizzard/tests/e2e/test_acceptance_loop.py``'s ``external_usage_credentials_path``):
+    guaranteed-missing credentials file (the real runner's e2e helper's own precedent) —
     a path that never exists trips the sampler's missing-credentials soft failure before
     any request is built, so this tick depends on no ambient
     ``~/.claude/.credentials.json`` a dev machine happens to carry."""
@@ -114,9 +94,8 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
 
         _disable_external_usage_network_call(runner_dir)
 
-        # One synchronous reconciliation tick (REAP -> PULL -> FILL -> ADVANCE): PULL's
-        # registry sync fires unconditionally, real capability snapshot included, with no
-        # chunk seeded and nothing to claim.
+        # One synchronous tick (REAP->PULL->FILL->ADVANCE): PULL's registry sync fires
+        # unconditionally, real capability snapshot included, with nothing seeded to claim.
         tick = subprocess.run(
             [str(runner_bin), "tick", "--dir", str(runner_dir)], env=env, capture_output=True, text=True, timeout=30
         )

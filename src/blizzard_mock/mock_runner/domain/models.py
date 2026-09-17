@@ -29,24 +29,19 @@ class Held:
 
 
 class RegisterBody(BaseModel):
-    """POST /_drive/register — register (or heartbeat) with the hub.
-
-    ``capabilities`` (blizzard#433) is settable directly over the wire, each entry the raw
-    ``{harness_id, version?, tiers?, default?}`` shape a test wants the hub to see —
-    letting a service test drive "a runner asserting this capability snapshot registers
-    against the hub" without a real harness adapter behind it."""
+    """POST /_drive/register — register (or heartbeat) with the hub. ``capabilities`` is
+    settable directly over the wire, each entry the raw ``{harness_id, version?, tiers?,
+    default?}`` shape, letting a test drive a chosen capability snapshot without a real
+    harness adapter behind it."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PeekMatchedBody(BaseModel):
-    """POST /_drive/peek-matched — the matched fleet peek (blizzard#433 Phase 3):
-    ``POST {hub}/api/fleet/queue/peek`` under this driver's own identity, falling back to
-    the legacy ``GET`` on a ``401`` internally (mirrors the real runner's own
-    ``IHubClient.peek_queue``). ``capabilities`` is the raw ``{harness_id, version?,
-    tiers?, default?}`` snapshot shape, settable directly like ``RegisterBody``'s.
-    ``enrolled=False`` drives the tokenless case: no identity is presented to the hub, so
-    the matched verb refuses and this call is served off the legacy peek instead."""
+    """POST /_drive/peek-matched — the matched fleet peek: ``POST {hub}/api/fleet/queue/peek``
+    under this driver's identity, falling back to the legacy ``GET`` on a ``401``.
+    ``capabilities`` is the same raw snapshot shape as ``RegisterBody``'s. ``enrolled=False``
+    drives the tokenless case: no identity presented, so the matched verb refuses."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
     policy: str = "pass-over"

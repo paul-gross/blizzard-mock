@@ -1,12 +1,9 @@
-"""Capability-matched queue selection (blizzard#433 Phase 3) — the mock's own
-reimplementation of ``blizzard.hub.domain.eligibility.EligibilityCheck`` and
-``blizzard.hub.domain.queue.select_matched_entry``, over the mock's own flat
-``ChunkState``/``NodeSpec`` graph shape rather than the real hub's ``Graph``/``Node``.
+"""Capability-matched queue selection — the mock's own reimplementation of
+``blizzard.hub.domain.eligibility.EligibilityCheck``/``select_matched_entry``, over the
+mock's flat ``ChunkState``/``NodeSpec`` graph shape rather than the real hub's ``Graph``/``Node``.
 
-The mock's seed vocabulary already IS a graph: a :class:`~blizzard_mock.mock_hub.domain.models.NodeSpec`'s
-``choices[].to`` are its outbound edges, so the DFS below walks them directly rather than
-through a separate ``Graph.edges_from`` seam.
-"""
+The mock's seed vocabulary already IS a graph: a ``NodeSpec``'s ``choices[].to`` are its
+outbound edges, walked directly below rather than through a separate edge-lookup seam."""
 
 from __future__ import annotations
 
@@ -35,10 +32,7 @@ def _reachable_runner_node_ids(chunk: ChunkState, start: str) -> list[str]:
     """Every runner-owned node reached from ``start``, DFS over each node's own
     ``choices[].to`` edges, visiting each node id at most once (cycle-safe) — the mock's
     own mirror of ``EligibilityCheck._reachable_runner_nodes``. A hub node is traversed
-    through but contributes nothing itself; a choice pointing at the reserved terminal
-    ends its path there, evaluating nothing past it. A choice naming an unseeded node id
-    is skipped defensively — the mock's seed vocabulary carries no referential-integrity
-    check of its own at seed time."""
+    through but contributes nothing itself."""
     seen: set[str] = set()
     runner_ids: list[str] = []
     stack = [start]

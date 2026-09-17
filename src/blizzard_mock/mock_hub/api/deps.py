@@ -1,10 +1,9 @@
 """Shared FastAPI dependencies and request bodies for the mock-hub routers.
 
-The composition root stashes the wired ``MockHubService`` and lever store on
-``app.state``; routers reach them through these dependencies
-(``bzh:dependency-injection``). Request bodies name only the fields the mock reads —
-EXCEPT the ``MirroredWireBody`` subclasses (the transcript segment bodies and
-``RunnerCapabilityBody``), field-for-field including required-ness."""
+The composition root stashes the wired ``MockHubService`` and lever store on ``app.state``;
+routers reach them through these dependencies (``bzh:dependency-injection``). Request bodies
+name only the fields the mock reads, except ``MirroredWireBody`` subclasses, which mirror
+field-for-field including required-ness."""
 
 from __future__ import annotations
 
@@ -33,11 +32,10 @@ class MirroredWireBody(BaseModel):
 
 
 class RunnerCapabilityBody(MirroredWireBody):
-    """Mirrors ``blizzard.wire.runner.RunnerCapability`` field-for-field (blizzard#433) —
-    the one nested shape inside ``RunnerRegistrationBody`` promoted to a checked mirror,
-    since a silent rename there would otherwise round-trip as a dropped field rather than
-    failing the tier. ``RunnerRegistrationBody`` itself stays the mock's usual
-    subset-shaped, unchecked body — its other fields are intentionally mock-only shaped."""
+    """Mirrors ``blizzard.wire.runner.RunnerCapability`` field-for-field — the one nested
+    shape inside ``RunnerRegistrationBody`` promoted to a checked mirror, since a silent
+    rename there would otherwise round-trip as a dropped field rather than failing the
+    tier. ``RunnerRegistrationBody`` itself stays the mock's usual unchecked body."""
 
     harness_id: str
     version: str | None = None
@@ -46,13 +44,10 @@ class RunnerCapabilityBody(MirroredWireBody):
 
 
 class QueuePeekBody(MirroredWireBody):
-    """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field (blizzard#433
-    Phase 3, D7/D12) — the matched fleet peek's own request body, ``POST
-    /api/fleet/queue/peek``. ``capabilities`` reuses :class:`RunnerCapabilityBody` for
-    its element shape, matching the real request's own nested ``RunnerCapability``.
-    Carries no ``runner_id`` — the real verb answers for the authenticated principal
-    alone; the mock resolves its own equivalent identity out-of-band (a ``runner_id``
-    query parameter), never inside this parity-checked body."""
+    """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field. ``capabilities``
+    reuses :class:`RunnerCapabilityBody` for its element shape. Carries no ``runner_id``
+    — the real verb answers for the authenticated principal alone; the mock resolves
+    identity out-of-band (a ``runner_id`` query parameter), never inside this body."""
 
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
     policy: str = "pass-over"
@@ -90,10 +85,7 @@ class RunnerRegistrationBody(BaseModel):
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list)
-    # The runner's capability snapshot (blizzard#433) — every harness/tier it can execute
-    # right now, round-tripped into `MockHubService.register` unconditionally overwritten
-    # on every (re-)registration, mirroring the real hub. `RunnerCapabilityBody` (above) is
-    # the checked mirror for this field's own element shape.
+    # The runner's capability snapshot — every harness/tier it can execute right now.
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
 
 

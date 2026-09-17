@@ -99,13 +99,10 @@ class MockRunnerService:
     def peek_matched(
         self, *, capabilities: list[dict[str, Any]] | None = None, policy: str = "pass-over", enrolled: bool = True
     ) -> dict[str, Any]:
-        """The matched fleet peek (blizzard#433 Phase 3) — ``POST /queue/peek`` under
-        this driver's own runner id, falling back to the legacy ``GET`` on a ``401``
-        (the gateway's own internal fallback, mirroring the real runner's
-        ``IHubClient.peek_queue``). ``enrolled=False`` drives the tokenless case: no
-        identity is presented, so the mock hub refuses the matched verb and this call is
-        served off the legacy peek instead, exactly as an unenrolled real runner
-        (``hub_token`` unset) is served today."""
+        """The matched fleet peek — ``POST /queue/peek`` under this driver's runner id,
+        falling back to the legacy ``GET`` on a ``401`` (:class:`IHubGateway.peek_matched`'s
+        fallback). ``enrolled=False`` drives the tokenless case, served off the legacy
+        peek exactly as an unenrolled real runner is served today."""
         self._apply_delay(None)
         status, body = self._gw.peek_matched(
             runner_id=self._runner_id if enrolled else None, capabilities=capabilities or [], policy=policy
