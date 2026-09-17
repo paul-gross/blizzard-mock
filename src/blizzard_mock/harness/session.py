@@ -24,8 +24,7 @@ class Ask:
 
 @dataclass
 class Invocation:
-    """One turn's observed model/effort/compaction-window/permission flags (issue #144,
-    blizzard#343; permission added for OpenCode's ``--auto`` policy flag).
+    """One turn's observed model/effort/compaction-window/permission flags (issue #144).
 
     ``None`` means the flag was absent from argv, not unknown.
     """
