@@ -30,11 +30,31 @@ class HttpxHubGateway:
     def __init__(self, client: httpx.Client) -> None:
         self._client = client
 
-    def register(self, runner_id: str, *, workspace_id: str) -> tuple[int, dict[str, Any]]:
-        return self._post(f"{_API}/runners", {"runner_id": runner_id, "workspace_id": workspace_id})
+    def register(
+        self, runner_id: str, *, workspace_id: str, capabilities: list[dict[str, Any]] | None = None
+    ) -> tuple[int, dict[str, Any]]:
+        return self._post(
+            f"{_API}/runners",
+            {"runner_id": runner_id, "workspace_id": workspace_id, "capabilities": capabilities or []},
+        )
 
     def peek(self) -> tuple[int, dict[str, Any]]:
         return self._get(f"{_API}/queue/peek")
+
+    def peek_matched(
+        self, *, runner_id: str | None, capabilities: list[dict[str, Any]], policy: str
+    ) -> tuple[int, dict[str, Any]]:
+        path = f"{_API}/queue/peek"
+        params = {"runner_id": runner_id} if runner_id is not None else None
+        try:
+            resp = self._client.post(path, json={"capabilities": capabilities, "policy": policy}, params=params)
+        except httpx.HTTPError as exc:
+            return 0, {"error": f"POST {path} failed: {exc}"}
+        if resp.status_code == 401:
+            # No identity, or one the hub does not resolve — the legacy verb serves this
+            # caller instead, exactly as the real runner's own client falls back.
+            return self._get(path)
+        return _result(resp)
 
     def claim(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/routes", body)

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import ValidationError
 
 from blizzard_mock.clock import Clock
 from blizzard_mock.levers import ILeverStore
+from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.models import (
     TERMINAL,
@@ -30,7 +32,7 @@ from blizzard_mock.mock_hub.domain.models import (
     QuestionState,
     SystemArtifactSpec,
 )
-from blizzard_mock.mock_hub.domain.state import IHubState
+from blizzard_mock.mock_hub.domain.state import IHubState, RunnerCapability
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     BlockedView,
@@ -164,6 +166,13 @@ class ClaimConflict(Exception):
         self.held_by_runner_id = held_by_runner_id
 
 
+class UnresolvableRunner(Exception):
+    """The matched fleet peek's caller named no ``runner_id``, or one no registration
+    knows (blizzard#433 Phase 3, D7) — mirrors the real hub's ``401`` for an
+    unresolvable principal, raised in every mode the mock supports (the mock carries no
+    ``warn``/``enforce`` toggle at all, so this is the one check unconditionally on)."""
+
+
 class DependencyUnmet(Exception):
     """The chunk stands on a prerequisite the ``dependency_unmet`` lever names as not
     ``done`` — the claim is refused with a 409 distinct from :class:`ClaimConflict`
@@ -172,6 +181,17 @@ class DependencyUnmet(Exception):
     def __init__(self, prerequisite_chunk_id: str) -> None:
         super().__init__(f"chunk depends on unmet prerequisite {prerequisite_chunk_id}")
         self.prerequisite_chunk_id = prerequisite_chunk_id
+
+
+class ClaimIncompatible(Exception):
+    """The claiming runner's *currently stored* capabilities can no longer run every
+    statically reachable runner-owned lineage from the chunk's current node (blizzard#433
+    D9) — refused outright, mirroring :class:`DependencyUnmet`'s shape. A registration
+    reporting no capabilities is never checked (see :meth:`MockHubService.claim`)."""
+
+    def __init__(self, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id}'s capabilities no longer satisfy the chunk")
+        self.runner_id = runner_id
 
 
 class MockHubService:
@@ -278,6 +298,38 @@ class MockHubService:
             return None
         return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
+    def peek_matched(
+        self, *, runner_id: str | None, capabilities: Sequence[RunnerCapability], policy: str
+    ) -> QueuePeekResponse:
+        """The mock's own mirror of ``blizzard.hub.domain.queue.select_matched_entry``, over its
+        flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
+        blocked, policy applied to both the capability and blocked-dependency dimensions before
+        selection. ``runner_id`` stands in for the real verb's authenticated principal; naming
+        none raises :class:`UnresolvableRunner`, the mock's ``401`` in every mode."""
+        if not runner_id or self._state.get_runner(runner_id) is None:
+            raise UnresolvableRunner(runner_id or "")
+        match_policy = matching.QueueMatchPolicy.of(policy)
+        ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
+        for position, chunk in enumerate(ready):
+            unusable = self._blocked_marking(chunk.chunk_id) is not None or matching.capability_ineligible(
+                chunk, chunk.current_node_id or chunk.entry, capabilities
+            )
+            if not unusable:
+                return QueuePeekResponse(
+                    entries=[
+                        QueuePeekEntry(
+                            chunk_id=chunk.chunk_id,
+                            graph_id=chunk.graph_id,
+                            position=position,
+                            work_refs=[p.model_dump() for p in chunk.work_refs],
+                            blocked=None,
+                        )
+                    ]
+                )
+            if match_policy is matching.QueueMatchPolicy.HOLD:
+                return QueuePeekResponse(entries=[])
+        return QueuePeekResponse(entries=[])
+
     # -- claim -------------------------------------------------------------
 
     def claim(
@@ -290,6 +342,13 @@ class MockHubService:
         if blocked is not None:
             self._levers.consume(blocked)
             raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
+        # Re-read fresh, never cached from the peek: a capability change landing after this
+        # runner's peek must not race the claim. No capabilities at all is never revalidated.
+        registration = self._state.get_runner(runner_id)
+        if registration is not None and registration.capabilities:
+            node_id = chunk.current_node_id or chunk.entry
+            if matching.capability_ineligible(chunk, node_id, registration.capabilities):
+                raise ClaimIncompatible(runner_id)
         chunk.claimed = True
         chunk.route_runner_id = runner_id
         chunk.route_workspace_id = workspace_id
@@ -779,6 +838,7 @@ class MockHubService:
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
+        capabilities: tuple[RunnerCapability, ...] = (),
     ) -> bool:
         return self._state.upsert_runner(
             runner_id,
@@ -787,6 +847,7 @@ class MockHubService:
             url=url,
             redirect_uris=redirect_uris,
             env_capacity=env_capacity,
+            capabilities=capabilities,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:

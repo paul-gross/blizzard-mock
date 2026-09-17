@@ -28,6 +28,26 @@ class Held:
     last_submission: dict[str, Any] = field(default_factory=dict)
 
 
+class RegisterBody(BaseModel):
+    """POST /_drive/register — register (or heartbeat) with the hub. ``capabilities`` is
+    settable directly over the wire, each entry the raw ``{harness_id, version?, tiers?,
+    default?}`` shape, letting a test drive a chosen capability snapshot without a real
+    harness adapter behind it."""
+
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PeekMatchedBody(BaseModel):
+    """POST /_drive/peek-matched — the matched fleet peek: ``POST {hub}/api/fleet/queue/peek``
+    under this driver's identity, falling back to the legacy ``GET`` on a ``401``.
+    ``capabilities`` is the same raw snapshot shape as ``RegisterBody``'s. ``enrolled=False``
+    drives the tokenless case: no identity presented, so the matched verb refuses."""
+
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    policy: str = "pass-over"
+    enrolled: bool = True
+
+
 class ClaimBody(BaseModel):
     """POST /_drive/claim — claim a chunk (its environments are cosmetic for the mock)."""
 

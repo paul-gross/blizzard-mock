@@ -1,9 +1,9 @@
 """Shared FastAPI dependencies and request bodies for the mock-hub routers.
 
-The composition root stashes the wired ``MockHubService`` and lever store on
-``app.state``; routers reach them through these dependencies
-(``bzh:dependency-injection``). Request bodies name only the fields the mock reads —
-EXCEPT the transcript segment mirror bodies, field-for-field including required-ness."""
+The composition root stashes the wired ``MockHubService`` and lever store on ``app.state``;
+routers reach them through these dependencies (``bzh:dependency-injection``). Request bodies
+name only the fields the mock reads, except ``MirroredWireBody`` subclasses, which mirror
+field-for-field including required-ness."""
 
 from __future__ import annotations
 
@@ -22,6 +22,35 @@ def get_service(request: Request) -> MockHubService:
 def get_captured(request: Request) -> ICaptureStore:
     captured: ICaptureStore = request.app.state.captured
     return captured
+
+
+class MirroredWireBody(BaseModel):
+    """Marker base for a request body meant to mirror a real wire schema field-for-field
+    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
+    of intended mirrors mechanically (F10), the request-body counterpart to the
+    response-model mirror module's own module-membership scan."""
+
+
+class RunnerCapabilityBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerCapability`` field-for-field — the one nested
+    shape inside ``RunnerRegistrationBody`` promoted to a checked mirror, since a silent
+    rename there would otherwise round-trip as a dropped field rather than failing the
+    tier. ``RunnerRegistrationBody`` itself stays the mock's usual unchecked body."""
+
+    harness_id: str
+    version: str | None = None
+    tiers: list[str] = Field(default_factory=list)
+    default: bool = False
+
+
+class QueuePeekBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field. ``capabilities``
+    reuses :class:`RunnerCapabilityBody` for its element shape. Carries no ``runner_id``
+    — the real verb answers for the authenticated principal alone; the mock resolves
+    identity out-of-band (a ``runner_id`` query parameter), never inside this body."""
+
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
+    policy: str = "pass-over"
 
 
 class RouteClaimBody(BaseModel):
@@ -56,6 +85,8 @@ class RunnerRegistrationBody(BaseModel):
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list)
+    # The runner's capability snapshot — every harness/tier it can execute right now.
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
 
 
 class RunnerFactBody(BaseModel):
@@ -67,13 +98,6 @@ class RunnerFactBody(BaseModel):
 class RunnerFactBatchBody(BaseModel):
     runner_id: str
     facts: list[RunnerFactBody] = Field(default_factory=list)
-
-
-class MirroredWireBody(BaseModel):
-    """Marker base for a request body meant to mirror a real wire schema field-for-field
-    (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
-    of intended mirrors mechanically (F10), the request-body counterpart to the
-    response-model mirror module's own module-membership scan."""
 
 
 class ToolCallSegmentBody(MirroredWireBody):

@@ -81,14 +81,32 @@ class MockRunnerService:
 
     # -- drive verbs -------------------------------------------------------
 
-    def register(self) -> dict[str, Any]:
+    def register(self, *, capabilities: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Register with the hub. ``capabilities`` (blizzard#433) is the raw
+        ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
+        settable directly, with no real harness adapter behind it."""
         self._apply_delay(None)
-        status, body = self._gw.register(self._runner_id, workspace_id=self._workspace_id)
+        status, body = self._gw.register(
+            self._runner_id, workspace_id=self._workspace_id, capabilities=capabilities or []
+        )
         return {"status": status, "response": body}
 
     def peek(self) -> dict[str, Any]:
         self._apply_delay(None)
         status, body = self._gw.peek()
+        return {"status": status, "response": body}
+
+    def peek_matched(
+        self, *, capabilities: list[dict[str, Any]] | None = None, policy: str = "pass-over", enrolled: bool = True
+    ) -> dict[str, Any]:
+        """The matched fleet peek — ``POST /queue/peek`` under this driver's runner id,
+        falling back to the legacy ``GET`` on a ``401`` (:class:`IHubGateway.peek_matched`'s
+        fallback). ``enrolled=False`` drives the tokenless case, served off the legacy
+        peek exactly as an unenrolled real runner is served today."""
+        self._apply_delay(None)
+        status, body = self._gw.peek_matched(
+            runner_id=self._runner_id if enrolled else None, capabilities=capabilities or [], policy=policy
+        )
         return {"status": status, "response": body}
 
     def claim(self, chunk_id: str, environment_ids: list[str]) -> dict[str, Any]:

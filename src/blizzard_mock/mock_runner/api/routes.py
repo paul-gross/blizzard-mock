@@ -26,8 +26,10 @@ from blizzard_mock.mock_runner.domain.models import (
     GitCommitDeclarationBody,
     LeaseQueryBody,
     PauseBody,
+    PeekMatchedBody,
     PollAnswerBody,
     PushTranscriptBody,
+    RegisterBody,
     ReportEventBody,
     ReportExternalUsageBody,
     ResumeBody,
@@ -67,14 +69,27 @@ def record_git_commit_declaration(
     )
 
 
+#: A module-level singleton, not a call in the route's own argument default (`B008`).
+_NO_CAPABILITIES = RegisterBody()
+
+
 @drive_router.post("/register")
-def drive_register(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.register()
+def drive_register(
+    service: Annotated[MockRunnerService, Depends(get_service)], body: RegisterBody = _NO_CAPABILITIES
+) -> dict[str, Any]:
+    return service.register(capabilities=body.capabilities)
 
 
 @drive_router.post("/peek")
 def drive_peek(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.peek()
+
+
+@drive_router.post("/peek-matched")
+def drive_peek_matched(
+    body: PeekMatchedBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.peek_matched(capabilities=body.capabilities, policy=body.policy, enrolled=body.enrolled)
 
 
 @drive_router.post("/claim")

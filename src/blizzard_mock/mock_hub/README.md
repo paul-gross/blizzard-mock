@@ -37,12 +37,18 @@ simulates only runner-originating traffic (no board/operator surface at all), so
 whole hub mirror sits under the fleet prefix. The mock stays warn-tolerant by
 construction — no `require_runner_principal` check, a tokenless call is served exactly
 like an enrolled one — but every received header is still recorded (`GET /_captured`)
-so a test can assert a real runner presented its bearer token.
+so a test can assert a real runner presented its bearer token. `POST
+/api/fleet/queue/peek` (blizzard#433 Phase 3) is the one exception: it demands a
+`runner_id` naming an already-registered runner and refuses `401` without one — the
+mock carries no bearer-token registry to resolve a principal from a header, so it takes
+this identity as a query parameter instead (never inside the parity-checked request
+body), mirroring the real hub's own always-raising demand on this one route.
 
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
+| `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek (blizzard#433 Phase 3) — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
 | `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token (issue #84b) |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
