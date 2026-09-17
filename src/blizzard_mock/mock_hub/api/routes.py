@@ -17,6 +17,7 @@ from blizzard_mock.mock_hub.api.deps import (
     DecisionBody,
     EscalationReportBody,
     LeaseReportBody,
+    QueuePeekBody,
     RouteClaimBody,
     RunnerFactBatchBody,
     RunnerRegistrationBody,
@@ -26,6 +27,7 @@ from blizzard_mock.mock_hub.api.deps import (
 from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
     ClaimConflict,
+    ClaimIncompatible,
     DependencyUnmet,
     FindingNotInAnsweredSet,
     MockHubService,
@@ -33,6 +35,7 @@ from blizzard_mock.mock_hub.domain.service import (
     NoRunContext,
     QuestionNotFound,
     SystemArtifactNotFound,
+    UnresolvableRunner,
 )
 from blizzard_mock.mock_hub.domain.state import RunnerCapability
 
@@ -58,6 +61,35 @@ def ready() -> dict[str, bool]:
 @fleet_router.get("/queue/peek")
 def peek_queue(service: Annotated[MockHubService, Depends(get_service)]) -> object:
     return service.peek()
+
+
+@fleet_router.post("/queue/peek")
+def peek_matched_queue(
+    body: QueuePeekBody,
+    service: Annotated[MockHubService, Depends(get_service)],
+    runner_id: Annotated[str | None, Query()] = None,
+) -> object:
+    """The matched fleet peek (blizzard#433 Phase 3, D7/D8) — at most one ready entry,
+    the first ``runner_id`` can both work and claim, ``body.policy`` applied to both
+    dimensions. ``runner_id`` is a query parameter, not a body field: the real wire's
+    ``QueuePeekRequest`` (mirrored by ``QueuePeekBody`` field-for-field) never carries a
+    caller identity — it answers for the authenticated principal alone — and the mock
+    carries no bearer-token registry to authenticate one from a header, so it takes the
+    same explicit-identity idiom every other fleet route already uses (``claim``'s and
+    ``register``'s own ``runner_id`` body field), just relocated off the parity-checked
+    body. Naming no registered runner refuses ``401`` in every mode the mock supports —
+    the one route the mock never serves tokenlessly."""
+    try:
+        return service.peek_matched(
+            runner_id=runner_id,
+            capabilities=tuple(
+                RunnerCapability(harness_id=c.harness_id, version=c.version, tiers=tuple(c.tiers), default=c.default)
+                for c in body.capabilities
+            ),
+            policy=body.policy,
+        )
+    except UnresolvableRunner:
+        return JSONResponse(status_code=401, content={"detail": "no resolvable runner token"})
 
 
 @fleet_router.get("/system-artifacts")
@@ -99,6 +131,15 @@ def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends
                 "chunk_id": body.chunk_id,
                 "prerequisite_chunk_id": exc.prerequisite_chunk_id,
                 "detail": "chunk depends on an unmet prerequisite",
+            },
+        )
+    except ClaimIncompatible as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "chunk_id": body.chunk_id,
+                "incompatible_runner_id": exc.runner_id,
+                "detail": "runner capabilities no longer satisfy the chunk's reachable lineage",
             },
         )
     except ChunkNotFound as exc:

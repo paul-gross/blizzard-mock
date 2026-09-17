@@ -26,6 +26,7 @@ from blizzard_mock.mock_runner.domain.models import (
     GitCommitDeclarationBody,
     LeaseQueryBody,
     PauseBody,
+    PeekMatchedBody,
     PollAnswerBody,
     PushTranscriptBody,
     RegisterBody,
@@ -84,6 +85,13 @@ def drive_register(
 @drive_router.post("/peek")
 def drive_peek(service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.peek()
+
+
+@drive_router.post("/peek-matched")
+def drive_peek_matched(
+    body: PeekMatchedBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.peek_matched(capabilities=body.capabilities, policy=body.policy, enrolled=body.enrolled)
 
 
 @drive_router.post("/claim")

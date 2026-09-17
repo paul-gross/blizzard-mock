@@ -261,6 +261,215 @@ def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClien
     assert _registered_capabilities(client, "r-cap-2") == ()
 
 
+# --- matched fleet peek (blizzard#433 Phase 3) -------------------------------
+
+
+def _seed_harness_chunk(client: TestClient, harness_id: str) -> str:
+    """A one-node chunk whose entry demands ``harness_id`` alone — ineligible for any
+    capability snapshot that does not advertise it."""
+    resp = client.post(
+        "/_seed/chunk",
+        json={
+            "entry": "build",
+            "nodes": {
+                "build": {
+                    "executor": "runner",
+                    "prompt": "b",
+                    "judgement_prompt": "j",
+                    "session_harnesses": [harness_id],
+                    "choices": [{"name": "pass", "description": "p", "to": "done"}],
+                }
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["chunk_id"]
+
+
+def _register(client: TestClient, runner_id: str = "r1") -> None:
+    assert client.post("/api/fleet/runners", json={"runner_id": runner_id, "workspace_id": "ws"}).status_code == 201
+
+
+_DEFAULT_CAPABILITY = [{"harness_id": "claude_code", "default": True}]
+
+
+def test_matched_peek_pass_over_skips_an_ineligible_head_and_returns_the_first_workable_entry(
+    client: TestClient,
+) -> None:
+    ineligible = _seed_harness_chunk(client, "special_harness")
+    workable = _seed(client)
+    _register(client)
+
+    resp = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY})
+    assert resp.status_code == 200, resp.text
+    entries = resp.json()["entries"]
+    assert [e["chunk_id"] for e in entries] == [workable]
+    assert entries[0]["position"] == 1  # the skipped head keeps its own position
+    assert entries[0]["blocked"] is None
+
+    # neither chunk moved — the order itself is never reshaped.
+    assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [ineligible, workable]
+
+
+def test_matched_peek_hold_yields_nothing_when_the_head_is_unusable(client: TestClient) -> None:
+    _seed_harness_chunk(client, "special_harness")
+    _seed(client)
+    _register(client)
+
+    resp = client.post(
+        "/api/fleet/queue/peek",
+        params={"runner_id": "r1"},
+        json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entries"] == []
+
+
+def test_matched_peek_hold_returns_a_usable_head_normally(client: TestClient) -> None:
+    workable = _seed(client)
+    _register(client)
+
+    resp = client.post(
+        "/api/fleet/queue/peek",
+        params={"runner_id": "r1"},
+        json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
+    )
+    assert resp.status_code == 200, resp.text
+    entries = resp.json()["entries"]
+    assert [e["chunk_id"] for e in entries] == [workable]
+    assert entries[0]["position"] == 0
+
+
+def test_matched_peek_no_capabilities_asserted_applies_no_capability_filter(client: TestClient) -> None:
+    """An empty ``capabilities`` list applies no capability filter — the head entry is
+    returned unfiltered, even though it names a harness the (empty) snapshot cannot
+    satisfy."""
+    head = _seed_harness_chunk(client, "special_harness")
+    _register(client)
+
+    resp = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={})
+    assert resp.status_code == 200, resp.text
+    assert [e["chunk_id"] for e in resp.json()["entries"]] == [head]
+
+
+def test_matched_peek_an_unrecognized_policy_value_round_trips_as_pass_over(client: TestClient) -> None:
+    _seed_harness_chunk(client, "special_harness")  # the head, skipped rather than absent
+    workable = _seed(client)
+    _register(client)
+
+    resp = client.post(
+        "/api/fleet/queue/peek",
+        params={"runner_id": "r1"},
+        json={"capabilities": _DEFAULT_CAPABILITY, "policy": "not-a-real-policy"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [e["chunk_id"] for e in resp.json()["entries"]] == [workable]
+
+
+def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capability_one(client: TestClient) -> None:
+    blocked = _seed(client)
+    workable = _seed(client)
+    _register(client)
+    client.post("/_levers/dependency_unmet", json={"chunk_id": blocked, "payload": {"prerequisite_chunk_id": "ch_x"}})
+
+    pass_over = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={})
+    assert [e["chunk_id"] for e in pass_over.json()["entries"]] == [workable]
+
+    hold = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
+    assert hold.json()["entries"] == []
+
+    # the peek's own read never consumes the lever (mirrors GET /queue/peek, blizzard#459).
+    still_blocked = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
+    assert still_blocked.json()["entries"] == []
+
+
+def test_matched_peek_refuses_401_without_a_runner_id(client: TestClient) -> None:
+    _seed(client)
+    resp = client.post("/api/fleet/queue/peek", json={})
+    assert resp.status_code == 401, resp.text
+
+
+def test_matched_peek_refuses_401_for_an_unregistered_runner_id(client: TestClient) -> None:
+    _seed(client)
+    resp = client.post("/api/fleet/queue/peek", params={"runner_id": "ghost"}, json={})
+    assert resp.status_code == 401, resp.text
+
+
+def test_matched_peek_leaves_the_legacy_verb_unfiltered(client: TestClient) -> None:
+    """The legacy ``GET`` keeps returning the full, unfiltered order regardless of the
+    matched verb's own filtering — no shared state between the two beyond the queue
+    itself."""
+    ineligible = _seed_harness_chunk(client, "special_harness")
+    workable = _seed(client)
+    _register(client)
+    client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY})
+
+    legacy = client.get("/api/fleet/queue/peek").json()["entries"]
+    assert [e["chunk_id"] for e in legacy] == [ineligible, workable]
+
+
+# --- claim revalidation (blizzard#433 Phase 4) -------------------------------
+
+
+def _register_with_capabilities(client: TestClient, capabilities: list[dict], *, runner_id: str = "r1") -> None:
+    resp = client.post(
+        "/api/fleet/runners", json={"runner_id": runner_id, "workspace_id": "ws", "capabilities": capabilities}
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_claim_denied_when_stored_capabilities_no_longer_satisfy_the_chunk(client: TestClient) -> None:
+    """blizzard#433 D9: a claim is refused with a 409 distinct from ``ClaimConflict`` and
+    ``DependencyUnmet`` when the runner's *stored* registration cannot run the chunk's
+    reachable lineage — the route is never minted."""
+    chunk_id = _seed_harness_chunk(client, "special_harness")
+    _register_with_capabilities(client, _DEFAULT_CAPABILITY)  # advertises "claude_code", not "special_harness"
+
+    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 409, denied.text
+    body = denied.json()
+    assert body["chunk_id"] == chunk_id
+    assert body["incompatible_runner_id"] == "r1"
+    assert "held_by_runner_id" not in body
+    assert "prerequisite_chunk_id" not in body
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"] is None
+
+
+def test_claim_allowed_when_stored_capabilities_satisfy_the_chunk(client: TestClient) -> None:
+    chunk_id = _seed(client)  # no declared harness preference — a default capability satisfies it
+    _register_with_capabilities(client, _DEFAULT_CAPABILITY)
+
+    claimed = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert claimed.status_code == 201, claimed.text
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "r1"
+
+
+def test_claim_with_no_registered_capabilities_is_never_revalidated(client: TestClient) -> None:
+    """A registration reporting no capabilities at all skips the check entirely — the
+    previous-minor / never-re-registered case never meets a denial it has no branch for."""
+    chunk_id = _seed_harness_chunk(client, "special_harness")
+    _register(client)  # no capabilities field at all
+
+    claimed = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert claimed.status_code == 201, claimed.text
+
+
+def test_claim_denied_once_capabilities_regress_between_registration_and_claim(client: TestClient) -> None:
+    """The peek-then-claim skew window: the claim re-reads the stored registration fresh
+    rather than trusting a once-true snapshot."""
+    chunk_id = _seed_harness_chunk(client, "special_harness")
+    _register_with_capabilities(client, [{"harness_id": "special_harness", "default": True}])
+
+    _register_with_capabilities(client, _DEFAULT_CAPABILITY)  # capability change lands before the claim
+    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 409, denied.text
+    assert denied.json()["incompatible_runner_id"] == "r1"
+
+
 # --- levers -----------------------------------------------------------------
 
 

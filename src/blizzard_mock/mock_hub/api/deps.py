@@ -45,6 +45,19 @@ class RunnerCapabilityBody(MirroredWireBody):
     default: bool = False
 
 
+class QueuePeekBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field (blizzard#433
+    Phase 3, D7/D12) — the matched fleet peek's own request body, ``POST
+    /api/fleet/queue/peek``. ``capabilities`` reuses :class:`RunnerCapabilityBody` for
+    its element shape, matching the real request's own nested ``RunnerCapability``.
+    Carries no ``runner_id`` — the real verb answers for the authenticated principal
+    alone; the mock resolves its own equivalent identity out-of-band (a ``runner_id``
+    query parameter), never inside this parity-checked body."""
+
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
+    policy: str = "pass-over"
+
+
 class RouteClaimBody(BaseModel):
     chunk_id: str
     runner_id: str

@@ -39,6 +39,20 @@ class RegisterBody(BaseModel):
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class PeekMatchedBody(BaseModel):
+    """POST /_drive/peek-matched — the matched fleet peek (blizzard#433 Phase 3):
+    ``POST {hub}/api/fleet/queue/peek`` under this driver's own identity, falling back to
+    the legacy ``GET`` on a ``401`` internally (mirrors the real runner's own
+    ``IHubClient.peek_queue``). ``capabilities`` is the raw ``{harness_id, version?,
+    tiers?, default?}`` snapshot shape, settable directly like ``RegisterBody``'s.
+    ``enrolled=False`` drives the tokenless case: no identity is presented to the hub, so
+    the matched verb refuses and this call is served off the legacy peek instead."""
+
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    policy: str = "pass-over"
+    enrolled: bool = True
+
+
 class ClaimBody(BaseModel):
     """POST /_drive/claim — claim a chunk (its environments are cosmetic for the mock)."""
 

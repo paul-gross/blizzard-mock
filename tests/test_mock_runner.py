@@ -120,6 +120,85 @@ def test_driver_can_assert_a_capability_snapshot_on_registration(stack: tuple[Te
     assert capability.default is True
 
 
+def _seed_harness_chunk(hub: TestClient, harness_id: str) -> str:
+    resp = hub.post(
+        "/_seed/chunk",
+        json={
+            "entry": "build",
+            "nodes": {
+                "build": {
+                    "executor": "runner",
+                    "prompt": "b",
+                    "judgement_prompt": "j",
+                    "session_harnesses": [harness_id],
+                    "choices": [{"name": "pass", "description": "p", "to": "done"}],
+                }
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["chunk_id"]
+
+
+_DEFAULT_CAPABILITY = [{"harness_id": "claude_code", "default": True}]
+
+
+def test_drive_peek_matched_returns_the_capability_matched_entry(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#433 Phase 3 — the driver's own capabilities/policy are sent on the
+    matched verb, and the first workable entry (skipping an ineligible head) comes back."""
+    hub, runner = stack
+    _seed_harness_chunk(hub, "special_harness")
+    workable = _seed(hub)
+    assert runner.post("/_drive/register").json()["status"] == 201
+
+    resp = runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY})
+    body = resp.json()
+    assert body["status"] == 200, body
+    assert [e["chunk_id"] for e in body["response"]["entries"]] == [workable]
+
+
+def test_drive_peek_matched_hold_yields_nothing_at_an_unusable_head(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    _seed_harness_chunk(hub, "special_harness")
+    _seed(hub)
+    assert runner.post("/_drive/register").json()["status"] == 201
+
+    resp = runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"})
+    body = resp.json()
+    assert body["status"] == 200, body
+    assert body["response"]["entries"] == []
+
+
+def test_drive_peek_matched_falls_back_to_the_legacy_peek_when_tokenless(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """``enrolled=False`` presents no identity at all — the matched verb's 401 is served
+    off the legacy, unfiltered peek instead, internally, mirroring the real runner's own
+    ``IHubClient.peek_queue``."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    assert runner.post("/_drive/register").json()["status"] == 201
+
+    resp = runner.post("/_drive/peek-matched", json={"enrolled": False})
+    body = resp.json()
+    assert body["status"] == 200, body
+    assert [e["chunk_id"] for e in body["response"]["entries"]] == [chunk_id]
+
+
+def test_drive_peek_matched_falls_back_to_the_legacy_peek_for_an_unregistered_runner(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """A driver that never registered presents an identity the hub has never heard of —
+    the same 401-then-legacy-fallback path as the tokenless case above."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+
+    resp = runner.post("/_drive/peek-matched", json={})
+    body = resp.json()
+    assert body["status"] == 200, body
+    assert [e["chunk_id"] for e in body["response"]["entries"]] == [chunk_id]
+
+
 def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient, TestClient]) -> None:
     """blizzard#458: the hub's ``dependency_unmet`` lever denies the claim with a 409
     the driver has no special case for — it reports the denial back like any other
@@ -136,6 +215,21 @@ def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient,
     assert claim["claimed"] is False
     assert claim["status"] == 409
     assert claim["response"]["prerequisite_chunk_id"] == "ch_prereq"
+
+
+def test_driver_absorbs_a_claim_incompatible_denial(stack: tuple[TestClient, TestClient]) -> None:
+    """blizzard#433 D9: a claim the hub denies for capability incompatibility is reported
+    back like any other non-201 claim response — the driver has no special case for this
+    denial either."""
+    hub, runner = stack
+    chunk_id = _seed_harness_chunk(hub, "special_harness")
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
+
+    claim = _claim(runner, chunk_id)
+
+    assert claim["claimed"] is False
+    assert claim["status"] == 409
+    assert claim["response"]["incompatible_runner_id"] == "runner-mock"
 
 
 def test_drive_claim_next_reaches_past_a_marked_head_by_default(stack: tuple[TestClient, TestClient]) -> None:

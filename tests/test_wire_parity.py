@@ -131,6 +131,7 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 #: The two recursive views carry FastAPI's ``-Input``/``-Output`` split; a request body
 #: mirrors the ``-Input`` half by construction.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
+    "QueuePeekBody": ("QueuePeekRequest", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
     "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
     "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),
