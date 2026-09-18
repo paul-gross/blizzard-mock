@@ -1357,15 +1357,54 @@ def test_opencode_facade_takeover_shape_does_not_crash(fenced_repo) -> None:
     assert "sess-takeover" in proc.stdout
 
 
-def test_opencode_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
-    """Only claude_code constructs a transcript writer; codex/opencode are a no-op."""
+def test_opencode_facade_mints_an_export_document_with_matched_tool_turns(fenced_repo, tmp_path: Path) -> None:
+    """A real spawn + tool_call + verdict, driven through the actual ``mock-opencode``
+    binary, mints an OpenCode-shaped export document: a user text part, a completed
+    tool part, and a closing assistant text + step-finish pair — and ``export``
+    reads back exactly what ``run`` wrote."""
     cwd, env = fenced_repo
     transcripts_dir = tmp_path / "transcripts"
     env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
 
-    proc = _run_opencode(cwd, env, "run", "verdict('x')")
-    assert proc.returncode == 0
-    assert not transcripts_dir.exists()
+    script = "tool_call('bash', {'cmd': 'ls'})\nverdict('approve', 'looks good')"
+    proc = _run_opencode(cwd, env, "run", script)
+    assert proc.returncode == 0, proc.stderr
+
+    lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+    session_id = lines[0]["sessionID"]
+    assert session_id
+
+    doc_path = transcripts_dir / "mock-opencode" / f"{session_id}.json"
+    assert doc_path.is_file()
+    doc = json.loads(doc_path.read_text())
+    assert doc["info"]["id"] == session_id
+
+    roles = [m["info"]["role"] for m in doc["messages"]]
+    assert roles[0] == "user"
+    assert "assistant" in roles
+
+    tool_parts = [p for m in doc["messages"] for p in m["parts"] if p.get("type") == "tool"]
+    assert len(tool_parts) == 1
+    assert tool_parts[0]["state"]["status"] == "completed"
+    assert tool_parts[0]["tool"] == "bash"
+
+    finish_parts = [p for m in doc["messages"] for p in m["parts"] if p.get("type") == "step-finish"]
+    assert len(finish_parts) == 1
+
+    export_proc = _run_opencode(cwd, env, "export", session_id)
+    assert export_proc.returncode == 0, export_proc.stderr
+    assert json.loads(export_proc.stdout) == doc
+
+
+def test_opencode_export_of_a_missing_session_fails_loudly(fenced_repo, tmp_path: Path) -> None:
+    cwd, env = fenced_repo
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(tmp_path / "transcripts")}
+
+    proc = _run_opencode(cwd, env, "export", "sess-never-written")
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert "sess-never-written" in proc.stderr
 
 
 def test_opencode_facade_fence_refusal_exit_code(tmp_path: Path) -> None:

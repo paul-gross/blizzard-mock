@@ -8,6 +8,7 @@ into the shared engine are identical across all three and live here.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 
 from blizzard_mock.harness.engine import FenceError, IHarnessWire, IHookRunner, ITranscriptWriter, run_prompt
 
@@ -40,6 +41,7 @@ def dispatch(
     session_id: str | None,
     is_resume: bool,
     transcript: ITranscriptWriter | None = None,
+    transcript_factory: Callable[[str], ITranscriptWriter] | None = None,
     hooks: IHookRunner | None = None,
     model: str | None = None,
     effort: str | None = None,
@@ -48,8 +50,8 @@ def dispatch(
 ) -> int:
     """Run ``script`` through the engine, mapping a fence refusal to an error exit.
 
-    ``transcript``, ``hooks``, and the observed session flags ride straight through
-    to :func:`~blizzard_mock.harness.engine.run_prompt`.
+    ``transcript``, ``transcript_factory``, ``hooks``, and the observed session flags
+    ride straight through to :func:`~blizzard_mock.harness.engine.run_prompt`.
     """
     try:
         return run_prompt(
@@ -58,6 +60,7 @@ def dispatch(
             session_id=session_id,
             is_resume=is_resume,
             transcript=transcript,
+            transcript_factory=transcript_factory,
             hooks=hooks,
             model=model,
             effort=effort,

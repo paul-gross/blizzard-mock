@@ -9,12 +9,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from blizzard_mock.harness.engine import RunResult
+from blizzard_mock.harness.engine import ITranscriptWriter, RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
+from blizzard_mock.harness.facades._opencode_transcript import (
+    OpenCodeTranscriptWriter,
+    document_path,
+    transcripts_root,
+)
 from blizzard_mock.harness.facades._text import render_ask_text
 from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
@@ -186,6 +193,28 @@ def _emit_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_export(argv: list[str]) -> int:
+    """``mock-opencode export <session-id>`` — reads what
+    :class:`OpenCodeTranscriptWriter` persisted (not ``opencode_surface``'s separate
+    zipapp-only export), printing one JSON document to stdout on success. A missing or
+    unreadable session fails loudly on stderr with a nonzero exit."""
+    if len(argv) != 1:
+        print("usage: mock-opencode export <session-id>", file=sys.stderr)
+        return 2
+    session_id = argv[0]
+    env: Mapping[str, str] = os.environ
+    cwd = acquired_worktree(env, Path.cwd())
+    root = transcripts_root(env, fence_dir=fence_base_dir(cwd))
+    path = document_path(root, session_id)
+    try:
+        raw = path.read_text()
+    except OSError as exc:
+        print(f"mock-opencode export: no such session {session_id!r} under {root}: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.write(raw)
+    return 0
+
+
 def _run_emit(argv: list[str]) -> int:
     """``mock-opencode emit`` — validate the lever set, then write the zipapp.
 
@@ -243,14 +272,26 @@ def _takeover_banner(session_id: str) -> str:
     return f"mock-opencode: interactive takeover of session {session_id} (not automated)\n"
 
 
+def _build_transcript_factory(*, cwd: Path, env: Mapping[str, str]) -> Callable[[str], ITranscriptWriter]:
+    """A per-run factory OpenCode's self-minted session id can be handed to once it is
+    known (``run_prompt``'s ``transcript_factory``) — unlike Claude Code, whose facade
+    always sees the id up front (``claude_code.py``'s ``_build_transcript_writer``),
+    OpenCode mints its own inside the engine, well before any facade code sees it."""
+    root = transcripts_root(env, fence_dir=fence_base_dir(cwd))
+    return lambda session_id: OpenCodeTranscriptWriter(session_id=session_id, root=root, cwd=cwd)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-opencode`` binary.
 
-    ``emit`` is intercepted here, before any of ``run``'s own argparse/dispatch
-    runs — ``run``'s path below is untouched from before ``emit`` existed."""
+    ``emit``/``export`` are intercepted here, before any of ``run``'s own
+    argparse/dispatch runs — ``run``'s path below is untouched from before either
+    existed."""
     args_list = sys.argv[1:] if argv is None else list(argv)
     if args_list and args_list[0] == "emit":
         raise SystemExit(_run_emit(args_list[1:]))
+    if args_list and args_list[0] == "export":
+        raise SystemExit(_run_export(args_list[1:]))
     if args_list and args_list[0] in ("-h", "--help"):
         print(_USAGE + _EMIT_MENTION)
         raise SystemExit(0)
@@ -273,11 +314,14 @@ def main(argv: list[str] | None = None) -> None:
 
     is_resume = args.session is not None
     wire = OpenCodeRunWire()
+    env: Mapping[str, str] = os.environ
+    cwd = acquired_worktree(env, Path.cwd())
     code = _common.dispatch(
         wire=wire,
         script=script,
         session_id=args.session,
         is_resume=is_resume,
+        transcript_factory=_build_transcript_factory(cwd=cwd, env=env),
         # Recorded onto the session state (issue #144, blizzard#343), never acted on —
         # the mock is model-agnostic and never enforces a permission policy.
         model=args.model,
