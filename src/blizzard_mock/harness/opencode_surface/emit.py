@@ -48,7 +48,12 @@ def emit(
             else:
                 shutil.copy2(source, destination)
         (staging / "_baked.py").write_text(_render_baked(levers, version, auth_read_marker, version_touch_path))
-        zipapp.create_archive(scratch, target=out, interpreter="/usr/bin/env python3", main="opencode_surface.cli:main")
+        # Not zipapp's own `main=` convenience: its generated `__main__.py` just calls
+        # `{module}.{fn}()` with no `sys.exit()`, so `cli.main()`'s return value — every
+        # non-exception exit code `PERMISSION_NONZERO`/`FRESH_NONZERO` rely on — would be
+        # silently discarded and the process would always exit 0.
+        (scratch / "__main__.py").write_text("import sys\n\nimport opencode_surface.cli\n\nsys.exit(opencode_surface.cli.main())\n")
+        zipapp.create_archive(scratch, target=out, interpreter="/usr/bin/env python3")
     out.chmod(0o755)
 
 
