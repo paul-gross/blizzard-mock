@@ -130,6 +130,13 @@ and how a settings document's hook commands are executed* — see "Hook executio
   implementation (below), and `facades/_hooks.py` the claude_code-only
   `IHookRunner` one ("Hook execution" below); `codex.py`/`opencode.py` never
   construct either.
+- `opencode_surface/` — a wholly separate concept, sharing no code with the
+  engine above: `mock-opencode emit` bakes a standalone CLI-surface fake
+  binary out of this package. It nests under `harness/` rather than sitting at
+  the top level because `harness/` is where every coding-harness-facing
+  surface lives regardless of implementation strategy — an exec-engine facade
+  here, a baked out-of-process CLI artifact there — not because it shares the
+  engine's approach. See "OpenCode CLI-surface mode" below.
 
 ## Conversation transcripts
 
@@ -289,7 +296,72 @@ it is the only facade the runner passes `--settings`, so `codex.py` and
   The payload's `hook_event_name` discriminates, so another event drops in later
   without a payload redesign.
 
+## OpenCode CLI-surface mode
+
+`mock-opencode` carries a second, wholly separate mode alongside `run` above:
+`emit` writes a standalone, self-contained fake OpenCode CLI binary — a
+**CLI-surface artifact** — that a real diagnostic in `blizzard`
+(`blizzard.runner.harness.internal.opencode_probe` and friends) spawns as a
+genuine out-of-process subprocess and drives through OpenCode's real CLI
+surface (`--version`, `run`, `export`, `serve`, `attach`,
+`debug config --pure`) and local HTTP control API (session `GET`, `/global/event`
+SSE, `POST /session`, `POST /summarize`). It shares nothing with the exec
+engine above — no `RunResult`, no `IHarnessWire`, no fence — because it never
+executes a caller-supplied prompt; it answers a fixed CLI shape instead.
+
+- **The contract:** `mock-opencode emit --out <path> [--lever NAME]...
+  [--version <ver>] [--auth-read-marker <path>] [--version-touch-path <path>]`.
+  `--lever` may repeat; the whole set is validated before anything touches the
+  filesystem — an unknown name fails naming every bad token in one error and
+  writes no file (never create-then-delete). `--version` defaults to the
+  pinned `1.18.25`. `--auth-read-marker`/`--version-touch-path` are evidence-
+  capture file paths, not misbehaviours, so they stay separate from `--lever`.
+  On success the artifact is written to `--out`, executable, and nothing
+  unusual prints; exit is `0`.
+- **The package:** `opencode_surface/` (a sibling of `engine.py`/`session.py`/
+  `helpers.py`/`facades/`, not an extension of any of them) — `levers.py`
+  (the closed `Lever` vocabulary + `CATALOG`, the one prose home for what each
+  of the 26 misbehaviours does — see it rather than a restatement here),
+  `domain/` (pure decision logic: given a lever set + session state + request
+  shape, what JSON/exit-code/text to produce — no file I/O, no sockets, no
+  argparse), `internal/` (the I/O adapters: state-file read/write, the
+  `http.server`-based `serve`, the `attach` HTTP client + stdin loop,
+  subprocess), `cli.py` (the artifact's entry point, composing domain +
+  internal once), and `emit.py` (runs in blizzard-mock's own venv at emit
+  time only — never part of the artifact — and bakes the validated lever set
+  into a generated `_baked.py` module before zipping the rest via stdlib
+  `zipapp`).
+- **Stdlib-only, no venv import, ever.** Everything under `domain/`,
+  `internal/`, `cli.py`, `levers.py`, and the generated `_baked.py` imports
+  nothing beyond the Python standard library — no `fastapi`, `pydantic`,
+  `click`, `structlog`, nothing this repo depends on. The artifact runs under
+  the bare **system** `python3`, with no venv and no `blizzard_mock` import
+  reachable at runtime: a Landlock policy elsewhere grants an executable's
+  own parent directory access, never the venv's site-packages, so an artifact
+  that tried to `import blizzard_mock` would fail on a real sandboxed run.
+- **Immutable once emitted.** The lever set baked into `_baked.py` is a plain
+  module-level constant, fixed at emit time — there is no `/_levers` control
+  plane and no store, unlike `mock_hub`'s/the IdP's lever modules (armed over
+  HTTP against a long-lived service). Arming a different misbehaviour means
+  emitting a different artifact.
+- **Cross-invocation session state, XDG-rooted.** The diagnostic spawns the
+  artifact once per surface call (version, run, export, serve, attach,
+  debug), each its own process — so anything that must be observed across
+  calls (`PROCESS_CONTROL`, `TRANSCRIPT_CURSOR`-shaped probes) persists to
+  `$XDG_STATE_HOME/fake-opencode-state.json` (`internal.paths.state_path`,
+  `internal.state_store`).
+- **Never installed, never on `PATH`.** The artifact is only ever written to
+  a caller-named path at emit time — `mock-opencode` itself can never become
+  one. See "The fence" below for what that means for this mode specifically.
+
 ## The fence
+
+Scoped to the exec-based modes (`run_prompt`/`assert_fenced`) — `run`, on all
+three facades. The OpenCode CLI-surface mode ("OpenCode CLI-surface mode"
+above) never executes caller-supplied code, so it imports none of this and
+runs with no `BLIZZARD_MOCK_HARNESS_FENCE` env var and no fence marker file;
+what gates it instead is that an emitted artifact is only ever written to a
+caller-named path, never installed, never on `PATH`.
 
 Arbitrary code execution is the feature, so the engine refuses to run unless
 **both** factors mark the environment as test scaffolding — it can never pass as
@@ -341,7 +413,7 @@ Each facade registers a `[project.scripts]` binary:
 |--------|--------|---------|
 | `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. |
-| `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. |
+| `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--attach] "<script>"`; message text + JSON trailer. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
@@ -350,3 +422,7 @@ string literal, and an empty module body failing loudly — and the Claude Code
 JSON envelope + fence-refusal exit) and `tests/test_harness_hooks.py` (the hook
 seam: the lifecycle fire points, the exits that fire nothing, and real
 `--settings` hook execution against stub shell commands).
+`tests/test_opencode_cli_surface.py` covers the CLI-surface mode instead: the
+lever roster, `emit`'s validate-before-write contract, the emitted artifact
+running unfenced under a bare system `python3` with no `blizzard_mock` import
+reachable, and `run`'s output staying byte-identical to before `emit` existed.
