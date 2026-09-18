@@ -1,18 +1,9 @@
 """Mock OpenCode facade (``mock-opencode``).
 
-Two wholly separate modes live behind this one binary:
-
-- ``run`` — differs from other facades only in OpenCode's wire shape: a
-  server-assigned session, message printed as text, with a machine-readable
-  trailer appended so the adapter can recover the session id. Shares the
-  exec engine (``blizzard_mock.harness.engine``) with ``claude_code.py`` and
-  ``codex.py``.
-- ``emit`` — bakes a validated lever set into a standalone zipapp CLI-surface
-  artifact (``blizzard_mock.harness.opencode_surface``); see
-  ``harness/README.md``'s "OpenCode CLI-surface mode" section. Wholly
-  separate from the exec engine: it shares no code with ``run`` beyond this
-  module's argv dispatch.
-"""
+Two modes: ``run`` shares the exec engine with the other facades, differing
+only in OpenCode's wire shape. ``emit`` bakes a lever set into a standalone
+CLI-surface zipapp (``opencode_surface``) — see ``harness/README.md``'s
+"OpenCode CLI-surface mode" section."""
 
 from __future__ import annotations
 
@@ -27,10 +18,7 @@ from blizzard_mock.harness.facades._text import render_ask_text
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
 from blizzard_mock.harness.opencode_surface import levers as surface_levers
 
-#: Unchanged byte-for-byte from before ``emit`` existed — every ``run``-path
-#: caller of this constant (bare invocation, a bad subcommand) must keep
-#: printing exactly this, so ``emit`` gets its own separate usage text below
-#: instead of extending this one.
+#: Unchanged byte-for-byte from before ``emit`` existed — ``emit`` gets its own usage text below.
 _USAGE = """\
 mock-opencode — mock OpenCode coding-harness facade
 

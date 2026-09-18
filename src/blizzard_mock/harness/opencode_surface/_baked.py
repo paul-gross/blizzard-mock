@@ -1,14 +1,9 @@
 """The fixed configuration one emitted artifact was baked with.
 
-This copy — the one living in blizzard-mock's own source tree — holds
-``emit``'s own defaults (no levers armed, the pinned version, no evidence
-paths), so the package stays importable, lintable, and type-checkable during
-development. ``emit.py`` never imports this file; instead, at emit time, it
-writes a fresh copy of this exact module — with these four constants replaced
-by the caller's validated, fixed lever set and path options — into the
-staged copy of the package before zipping it, so the emitted artifact carries
-its own immutable configuration.
-"""
+This in-tree copy holds ``emit``'s own defaults, so the package stays
+importable and type-checkable during development — ``emit.py`` never imports
+it, instead writing a fresh copy with these four constants replaced by the
+caller's validated set into the staged package before zipping it."""
 
 from __future__ import annotations
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import os
 
-#: Cross-invocation session state, one file per artifact working directory —
-#: the same ``fake-opencode-state.json`` convention the ground-truth fake uses.
+#: The same ``fake-opencode-state.json`` convention the ground-truth fake uses.
 STATE_FILENAME = "fake-opencode-state.json"
 
 

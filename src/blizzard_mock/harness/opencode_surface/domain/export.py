@@ -5,8 +5,7 @@ from __future__ import annotations
 from ..levers import Lever
 from .state import is_running
 
-#: Hardcoded to the ground-truth fake's own literal — deliberately independent of
-#: whatever ``--version`` this artifact was emitted with.
+#: Independent of whatever ``--version`` this artifact was emitted with.
 _INFO_VERSION = "1.18.25"
 
 

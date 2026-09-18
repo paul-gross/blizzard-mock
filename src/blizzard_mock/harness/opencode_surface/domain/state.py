@@ -1,11 +1,8 @@
 """Pure transitions over the cross-invocation session-state document.
 
-The state document is a small, loosely-shaped JSON dict (``{"phase": ...,
-"compaction_generation": ..., "takeover_prompt": ...}``, each key optional);
-``internal.state_store`` reads/writes it under ``$XDG_STATE_HOME``. A missing
-file reads as ``{}`` — every function here treats that identically to a file
-that never mentioned the field it looks at.
-"""
+A small, loosely-shaped JSON dict (``phase``, ``compaction_generation``,
+``takeover_prompt``, each key optional); ``internal.state_store`` reads/writes
+it under ``$XDG_STATE_HOME``. A missing file reads as ``{}``."""
 
 from __future__ import annotations
 

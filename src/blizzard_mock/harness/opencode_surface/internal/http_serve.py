@@ -1,11 +1,9 @@
 """``serve``'s ``http.server`` socket plumbing.
 
 Every route's body/status/headers is decided by ``domain.serve``; this module
-only owns the socket, the request parsing, and the two pieces of
-request-scoped mutable state a real OpenCode server would also need
-(the takeover-arrived event, and the state-file read/write around
-``POST .../summarize``).
-"""
+only owns the socket, the request parsing, and two pieces of request-scoped
+mutable state (the takeover-arrived event, the ``POST .../summarize`` state
+read/write)."""
 
 from __future__ import annotations
 

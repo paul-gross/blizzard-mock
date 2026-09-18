@@ -1,10 +1,8 @@
 """``debug config --pure`` and the "...configuration turn" probe.
 
-File resolution (``OPENCODE_CONFIG``, project ``opencode.json``, the XDG
-config file) is I/O and lives in ``internal.configuration``; this module only
-decides, given an already-resolved config document, whether the probed
-command is denied and what to render.
-"""
+Config file resolution is I/O and lives in ``internal.configuration``; this
+module only decides, given an already-resolved config document, whether the
+probed command is denied and what to render."""
 
 from __future__ import annotations
 
@@ -13,8 +11,7 @@ import json
 from ..levers import Lever
 
 SESSION_ID = "ses_config"
-#: The exact denial prose — used both by the CONFIGURATION_PROSE_ONLY shortcut
-#: and as the ``tool_use`` error text on an ordinary denial.
+#: The exact denial prose, prose-only or as the ``tool_use`` error text.
 PROSE_DENIAL = "The configured permission rule prevented this specific tool call."
 
 

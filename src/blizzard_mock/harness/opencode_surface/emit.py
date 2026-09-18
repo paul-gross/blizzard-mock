@@ -1,11 +1,8 @@
 """Bake a validated lever set into a standalone zipapp fake-OpenCode binary.
 
-Runs inside blizzard-mock's own venv at ``mock-opencode emit`` time — never
-inside the emitted artifact, which is why this is the one module in the
-package allowed to import non-stdlib-adjacent stdlib tooling
-(``zipapp``/``shutil``/``tempfile``) freely: it never gets copied into the
-zip it builds.
-"""
+Runs inside blizzard-mock's own venv at ``mock-opencode emit`` time, never
+inside the emitted artifact — the one module allowed to import
+``zipapp``/``shutil``/``tempfile`` freely, since it never gets zipped in."""
 
 from __future__ import annotations
 
@@ -18,8 +15,7 @@ from .levers import Lever
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
-#: Everything zip-safe and stdlib-only — copied verbatim into the staged
-#: artifact. ``emit.py`` itself is deliberately excluded.
+#: Everything zip-safe and stdlib-only; ``emit.py`` itself is excluded.
 _SOURCE_MEMBERS = ("__init__.py", "levers.py", "cli.py", "domain", "internal")
 
 
@@ -48,11 +44,11 @@ def emit(
             else:
                 shutil.copy2(source, destination)
         (staging / "_baked.py").write_text(_render_baked(levers, version, auth_read_marker, version_touch_path))
-        # Not zipapp's own `main=` convenience: its generated `__main__.py` just calls
-        # `{module}.{fn}()` with no `sys.exit()`, so `cli.main()`'s return value — every
-        # non-exception exit code `PERMISSION_NONZERO`/`FRESH_NONZERO` rely on — would be
-        # silently discarded and the process would always exit 0.
-        (scratch / "__main__.py").write_text("import sys\n\nimport opencode_surface.cli\n\nsys.exit(opencode_surface.cli.main())\n")
+        # Not zipapp's own `main=`: its generated shim drops `cli.main()`'s return value,
+        # silently discarding every nonzero exit code a lever like PERMISSION_NONZERO relies on.
+        (scratch / "__main__.py").write_text(
+            "import sys\n\nimport opencode_surface.cli\n\nsys.exit(opencode_surface.cli.main())\n"
+        )
         zipapp.create_archive(scratch, target=out, interpreter="/usr/bin/env python3")
     out.chmod(0o755)
 

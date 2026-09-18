@@ -1,15 +1,9 @@
-"""The emitted artifact's entry point — dispatches every OpenCode-shaped surface
-call to the domain decisions + internal adapters above.
+"""The emitted artifact's entry point, composing the domain decisions + internal adapters.
 
-Argv matching mirrors the ground-truth fake (``blizzard/tests/support_opencode_binary.py``)
-exactly: most of it is positional/substring matching against the real
-OpenCode CLI's own shapes, not a conventional flag grammar, so this file
-reads it the same way rather than forcing it through ``argparse``.
-
-Unfenced by construction — no import of ``blizzard_mock.harness.engine``'s
-fence at all. See ``harness/README.md``'s "OpenCode CLI-surface mode" section
-for what stands in for a gate here instead.
-"""
+Argv matching mirrors the real OpenCode CLI's own shapes — mostly
+positional/substring, not a conventional flag grammar — so this file reads
+argv the same way rather than forcing it through ``argparse``. Unfenced by
+construction: no import of ``blizzard_mock.harness.engine``'s fence at all."""
 
 from __future__ import annotations
 
