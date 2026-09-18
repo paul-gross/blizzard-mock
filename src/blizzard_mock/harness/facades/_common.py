@@ -44,6 +44,7 @@ def dispatch(
     model: str | None = None,
     effort: str | None = None,
     compaction_window: str | None = None,
+    permission: str | None = None,
 ) -> int:
     """Run ``script`` through the engine, mapping a fence refusal to an error exit.
 
@@ -61,6 +62,7 @@ def dispatch(
             model=model,
             effort=effort,
             compaction_window=compaction_window,
+            permission=permission,
         )
     except FenceError as exc:
         print(str(exc), file=sys.stderr)

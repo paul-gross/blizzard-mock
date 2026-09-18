@@ -4,9 +4,9 @@ Wholly separate from the exec-engine mode (`test_harness_smoke.py`'s
 "prompt is the program"): these tests prove the *artifact's own contract* —
 `emit`'s validate-before-write behavior, the lever roster changing observable
 output, the artifact running unfenced under a bare system `python3` with no
-`blizzard_mock` import reachable, and `run`'s output staying byte-identical to
-before `emit` existed. Not a re-tiering of `blizzard`'s 51 diagnostic tests
-(a later phase, in a different repo).
+`blizzard_mock` import reachable, and `run`'s own dispatch path staying
+unperturbed by `emit`'s presence in the same module. Not a re-tiering of
+`blizzard`'s 51 diagnostic tests (a later phase, in a different repo).
 """
 
 from __future__ import annotations
@@ -296,14 +296,20 @@ def test_process_control_no_live_state_lever_suppresses_the_live_state_write(tmp
 
 
 # --------------------------------------------------------------------------- #
-# `run`'s output is byte-identical to before `emit` existed
+# `run`'s own wire shape is unperturbed by `emit`'s presence in the same module
 # --------------------------------------------------------------------------- #
+#
+# `run` moved off the `<Choice>` + JSON-trailer wire onto the JSONL `step_start`/
+# `text`/`step_finish` event stream in a separate, unrelated change (the OpenCode
+# adapter's own real-protocol work — see `test_harness_smoke.py` for that shape's
+# full coverage, including identity streaming and resume). These two tests never
+# pinned that wire shape itself; they only ever proved `emit`'s own addition to
+# this file doesn't reach into `run`'s dispatch path, which still holds.
 
 
-def test_run_mode_output_is_byte_identical_to_before_emit_existed(fenced_repo: tuple[Path, dict[str, str]]) -> None:
-    """A pinned regression on `OpenCodeWire`'s exact rendered text: message text,
-    a newline, the JSON trailer, a trailing newline — nothing `emit` could have
-    perturbed, since ``run``'s code path is untouched by this module's addition."""
+def test_run_mode_output_is_unperturbed_by_emit(fenced_repo: tuple[Path, dict[str, str]]) -> None:
+    """`run` still dispatches through the exec engine end to end — `emit` living in
+    the same module changes none of `run`'s own JSONL event structure."""
     cwd, env = fenced_repo
     proc = subprocess.run(
         [
@@ -321,11 +327,11 @@ def test_run_mode_output_is_byte_identical_to_before_emit_existed(fenced_repo: t
         text=True,
     )
 
-    trailer = json.dumps({"session": "sess-opencode-1", "error": False, "turns": 1})
-    expected = f"<Choice>approve</Choice>\nnote\n{trailer}\n"
-
     assert proc.returncode == 0
-    assert proc.stdout == expected
+    lines = [json.loads(line) for line in proc.stdout.splitlines()]
+    assert [event["type"] for event in lines] == ["step_start", "text", "step_finish"]
+    assert all(event["sessionID"] == "sess-opencode-1" for event in lines)
+    assert lines[1]["part"]["text"] == "<Choice>approve</Choice>\nnote"
 
 
 def test_run_mode_bare_invocation_usage_is_unchanged(capsys: pytest.CaptureFixture[str]) -> None:
@@ -337,10 +343,13 @@ def test_run_mode_bare_invocation_usage_is_unchanged(capsys: pytest.CaptureFixtu
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "mock-opencode" in out
-    assert "emit" not in out  # run's own usage text was never touched
+    assert "Also: mock-opencode emit" not in out  # the emit mention is -h/--help-only
 
 
-def test_run_mode_rejects_attach_without_session_unchanged() -> None:
+def test_run_mode_no_longer_accepts_the_old_attach_flag() -> None:
+    """``--attach`` was retired with the JSONL rewrite (a bare ``--session`` now
+    implies resume) — an invocation using it is an ordinary unrecognized-argument
+    error, not the old flag's own ``--attach requires --session`` validation."""
     from blizzard_mock.harness.facades import opencode
 
     with pytest.raises(SystemExit) as exc:

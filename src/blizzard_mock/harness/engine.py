@@ -108,13 +108,18 @@ class RunResult:
 
 
 class IHarnessWire(Protocol):
-    """A facade's wire surface — the engine's only outward dependency.
-
-    Writes ``render(result)`` to the output stream; never formats anything.
-    """
+    """A facade's wire surface — the engine's only outward dependency. Writes
+    ``render(result)`` to the output stream; never formats anything."""
 
     def render(self, result: RunResult) -> str:
         """Return the exact bytes-as-text this harness would print for ``result``."""
+        ...
+
+    def render_identity(self, session_id: str) -> str | None:
+        """The identity-bearing chunk to flush before the behavior script runs, or
+        ``None`` for a wire with no such preamble — most don't; a real handshake's own
+        early first record (e.g. OpenCode's) is what this stands in for. Omitted from
+        the later ``render``, which never repeats it."""
         ...
 
 
@@ -435,6 +440,7 @@ def run_prompt(
     model: str | None = None,
     effort: str | None = None,
     compaction_window: str | None = None,
+    permission: str | None = None,
     whole_message: bool = False,
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
@@ -499,6 +505,7 @@ def run_prompt(
             model=model,
             effort=effort,
             compaction_window=compaction_window,
+            permission=permission,
         )
     )
 
@@ -530,6 +537,13 @@ def run_prompt(
         tagged=tagged is not None,
         preamble_stripped=bool(preamble),
     )
+    # Streams the identity-bearing record before exec(), matching a real handshake's
+    # early first record on a caller's stdout.
+    identity_chunk = wire.render_identity(session_id)
+    if identity_chunk:
+        stream.write(identity_chunk)
+        stream.flush()
+
     token = _CURRENT.set(ctx)
     started = time.monotonic()
     try:

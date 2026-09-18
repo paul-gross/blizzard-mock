@@ -109,12 +109,21 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     assert len(runners) == 1, f"expected exactly one registered runner, got {runners!r}"
     row = runners[0]
 
-    assert len(row.capabilities) == 1, f"expected exactly one capability, got {row.capabilities!r}"
-    capability = row.capabilities[0]
-    # `known_harnesses` binds exactly one harness by default (blizzard#433's own stated
-    # exclusion: "no second adapter is bound"), so this single entry is also the default.
-    assert capability.harness_id == CLAUDE_CODE_HARNESS_ID
-    assert capability.default is True
-    assert capability.version is None or isinstance(capability.version, str)
+    # `known_harnesses` now binds two adapters (blizzard#436's OpenCode binding joined
+    # Claude Code's), so the snapshot carries one capability per bound harness.
+    assert len(row.capabilities) == 2, f"expected exactly two capabilities, got {row.capabilities!r}"
+    by_harness = {c.harness_id: c for c in row.capabilities}
+    assert set(by_harness) == {CLAUDE_CODE_HARNESS_ID, "opencode"}
+
+    claude_code = by_harness[CLAUDE_CODE_HARNESS_ID]
+    assert claude_code.default is True
+    assert claude_code.version is None or isinstance(claude_code.version, str)
     # The adapter's built-in tier ids, enumerated with no operator `[models.aliases]` at all.
-    assert set(capability.tiers) == {"blizzard:frontier", "blizzard:advanced", "blizzard:basic"}
+    assert set(claude_code.tiers) == {"blizzard:frontier", "blizzard:advanced", "blizzard:basic"}
+
+    opencode = by_harness["opencode"]
+    assert opencode.default is False
+    assert opencode.version is None or isinstance(opencode.version, str)
+    # OpenCode ships no built-in tier table (D6): with no operator `[opencode.models.aliases]`
+    # configured, it resolves nothing yet, still registering with an empty tier set.
+    assert opencode.tiers == ()

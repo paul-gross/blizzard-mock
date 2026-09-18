@@ -45,6 +45,9 @@ def test_session_end_fires_after_the_wire_render_and_before_run_prompt_returns(f
     order: list[str] = []
 
     class _OrderingWire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: RunResult) -> str:
             order.append("render")
             return ""

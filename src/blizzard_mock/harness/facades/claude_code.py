@@ -49,6 +49,11 @@ class ClaudeCodeWire:
     def __init__(self, output_format: str = "text") -> None:
         self._format = output_format
 
+    def render_identity(self, session_id: str) -> str | None:
+        """Claude Code's real handshake carries no separate identity preamble — its
+        session id arrives only on ``render``'s own final record."""
+        return None
+
     def render(self, result: RunResult) -> str:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         if self._format != "json":

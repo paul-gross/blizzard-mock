@@ -3,9 +3,12 @@
 The mock hub's response models and its runner-fact vocabulary mirror a wire surface this
 repo cannot import. Both are compared here against the committed hub OpenAPI and the
 committed fact-kind constants, so a real-side wire change that outruns the mirror fails a
-mock-side gate (issue #277).
+mock-side gate (issue #277). ``mock-opencode``'s facade wire is checked the same way, but
+against code rather than a schema document: its actual stdout is fed through blizzard's own
+production ``opencode_shapes.parse_run_jsonl`` (D10), since a facade whose event stream the
+real parser rejects is a mock nothing downstream can trust.
 
-The sibling worktree is a hard requirement for the two tests that read it, not a skip: an
+The sibling worktree is a hard requirement for every test here that reads it, not a skip: an
 unresolvable ``blizzard`` refuses a green rather than reporting parity it never checked.
 ``$BLIZZARD_SOURCE`` overrides the default sibling path, as ``--context-root`` and
 ``$BLIZZARD_MOCK_WINTER_SOURCE`` do for the neighbouring cross-repo tools.
@@ -13,11 +16,14 @@ unresolvable ``blizzard`` refuses a green rather than reporting parity it never 
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import json
 import os
 import re
-from collections.abc import Callable
+import subprocess
+import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -35,6 +41,7 @@ from blizzard_mock.mock_runner.domain import service as runner_service
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
 _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "wire" / "facts.py"
+_OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "internal" / "opencode_shapes.py"
 
 
 def _sibling(path: Path) -> str:
@@ -45,6 +52,92 @@ def _sibling(path: Path) -> str:
         f"not green; set $BLIZZARD_SOURCE if it lives elsewhere"
     )
     return path.read_text()
+
+
+def _load_opencode_shapes() -> ModuleType:
+    """Import blizzard's real ``opencode_shapes`` parser straight off the sibling worktree.
+
+    This repo cannot depend on ``blizzard`` as a package, so the module is loaded from its
+    source file directly — it is dependency-free (stdlib only), so this is not a partial or
+    stubbed import, it is the exact parser production code runs."""
+    path = _OPENCODE_SHAPES_SOURCE
+    assert path.is_file(), (
+        f"no sibling blizzard worktree at {_BLIZZARD} (expected {path}) — parity is unverifiable, "
+        f"not green; set $BLIZZARD_SOURCE if it lives elsewhere"
+    )
+    spec = importlib.util.spec_from_file_location("_opencode_shapes_wire_parity", path)
+    assert spec is not None and spec.loader is not None, f"could not load a module spec from {path}"
+    module = importlib.util.module_from_spec(spec)
+    # Registered before exec: the module's own `@dataclass`-decorated classes resolve their
+    # (all-string, `from __future__ import annotations`) field annotations by looking their
+    # module back up in `sys.modules` — unregistered, that lookup finds nothing and every
+    # dataclass in the file fails to define at class-creation time.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    """One real ``mock-opencode`` invocation, run exactly as the runner adapter would spawn
+    it — the module entry point, not a hand-rendered stand-in for its output."""
+    return subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", *args],
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """D10: a fresh mint's actual stdout must parse cleanly through blizzard's own
+    production parser, and its root session id must be server-assigned — the caller
+    supplied no ``--session`` at all, exactly as the real fresh-session handshake
+    requires (execution spec, "Fresh-session handshake")."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(cwd, env, "run", "verdict('approve', 'looks good')")
+    assert proc.returncode == 0, proc.stderr
+
+    events = shapes.parse_run_jsonl(proc.stdout)
+
+    assert events
+    assert events[0].session_id  # server-assigned; never a caller-supplied hint
+
+
+def test_mock_opencode_resume_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """A resume never re-mints: it keeps the session id the caller learned off the fresh
+    mint's own first record, and its stdout still parses cleanly through the real parser."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    first = _run_mock_opencode(cwd, env, "run", "ask('proceed?', ['yes', 'no'])")
+    assert first.returncode == 0, first.stderr
+    session_id = shapes.parse_run_jsonl(first.stdout)[0].session_id
+
+    second = _run_mock_opencode(
+        cwd, env, "run", "--session", session_id, "--variant", "high", "--auto", "verdict('pass', 'resumed')"
+    )
+    assert second.returncode == 0, second.stderr
+
+    events = shapes.parse_run_jsonl(second.stdout)
+
+    assert events
+    assert events[0].session_id == session_id
+
+
+def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """A crashed turn's stdout still parses cleanly, carrying an explicit session error the
+    real adapter's ``_session_error`` reads back — never a step-finish, since the turn never
+    produced a usable completed step."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(cwd, env, "run", "crash()")
+    assert proc.returncode == 1
+
+    events = shapes.parse_run_jsonl(proc.stdout)
+
+    assert any(event.type == "error" for event in events)
+    assert not any(event.type == "step_finish" for event in events)
 
 
 #: Mirror model -> the hub schema it mirrors, plus the real fields it deliberately omits.

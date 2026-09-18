@@ -1,20 +1,22 @@
 """Mock OpenCode facade (``mock-opencode``).
 
-Two modes: ``run`` shares the exec engine with the other facades, differing
-only in OpenCode's wire shape. ``emit`` bakes a lever set into a standalone
-CLI-surface zipapp (``opencode_surface``) — see ``harness/README.md``'s
-"OpenCode CLI-surface mode" section."""
+Two modes: ``run`` shares the exec engine with every facade, differing only in wire shape —
+a JSONL event stream, server-minted root ``sessionID``, a bare ``--session`` as a no-op
+takeover; ``emit`` bakes a lever set into a standalone CLI-surface zipapp
+(``opencode_surface`` — see ``harness/README.md``'s "OpenCode CLI-surface mode")."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._text import render_ask_text
+from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
 from blizzard_mock.harness.opencode_surface import levers as surface_levers
 
@@ -23,11 +25,14 @@ _USAGE = """\
 mock-opencode — mock OpenCode coding-harness facade
 
 Usage:
-  mock-opencode run [--session <id>] "<script>"
-  mock-opencode run --attach --session <id> "<resume-script>"
+  mock-opencode run [--model <name>] [--variant <v>] [--auto] "<script>"
+  mock-opencode run --session <id> [--variant <v>] [--auto] "<resume-script>"
+  mock-opencode --session <id> [--model <name>] [--variant <v>]   (interactive takeover)
 
 The prompt is the program (Python, exec()'d in the acquired worktree). Fenced —
-refuses to run unless test scaffolding marks the environment.
+refuses to run unless test scaffolding marks the environment. A fresh ``run`` mints
+its own session id, never the caller's — the caller learns it off the first emitted
+event, exactly as the real fresh-session handshake requires.
 """
 
 #: Appended to ``_USAGE`` only for an explicit ``-h``/``--help``, never for the pinned bare-invocation fallback above.
@@ -47,22 +52,127 @@ _EMIT_DESCRIPTION = (
     "blizzard_mock.harness.opencode_surface.levers.CATALOG for the lever roster."
 )
 
+#: The step-finish "reason" a completed turn reports; any nonempty string is faithful.
+_STEP_REASON = "stop"
 
-class OpenCodeWire:
-    """Render a :class:`RunResult` the OpenCode way: message text + a JSON trailer."""
+#: The provider/process error name a crashed behavior script is reported under.
+_ERROR_NAME = "ProviderError"
+
+
+def _new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:16]}"
+
+
+def _step_start_event(session_id: str, message_id: str) -> dict[str, object]:
+    return {
+        "type": "step_start",
+        "sessionID": session_id,
+        "part": {
+            "id": _new_id("prt"),
+            "sessionID": session_id,
+            "messageID": message_id,
+            "type": "step-start",
+        },
+    }
+
+
+def _text_event(session_id: str, message_id: str, text: str) -> dict[str, object]:
+    return {
+        "type": "text",
+        "sessionID": session_id,
+        "part": {
+            "id": _new_id("prt"),
+            "sessionID": session_id,
+            "messageID": message_id,
+            "type": "text",
+            "text": text,
+        },
+    }
+
+
+def _step_finish_event(session_id: str, message_id: str, text: str) -> dict[str, object]:
+    """A completed model step: deterministic usage/cost synthesized off ``text``'s
+    length, the same illustrative approach ``_usage.py`` already gives Claude Code —
+    a test injecting a desired shape does so the same way every other mock does:
+    through the text the behavior script itself produced (``verdict``'s assessment,
+    an ``ask`` question), not a second knob."""
+    usage = synthesize_usage_tokens(text)
+    return {
+        "type": "step_finish",
+        "sessionID": session_id,
+        "part": {
+            "id": _new_id("prt"),
+            "sessionID": session_id,
+            "messageID": message_id,
+            "type": "step-finish",
+            "reason": _STEP_REASON,
+            "tokens": {
+                "input": usage["input_tokens"],
+                "output": usage["output_tokens"],
+                "reasoning": 0,
+                "cache": {
+                    "read": usage["cache_read_input_tokens"],
+                    "write": usage["cache_creation_input_tokens"],
+                },
+            },
+            "cost": synthesize_cost_usd(usage),
+        },
+    }
+
+
+def _error_event(session_id: str, message: str) -> dict[str, object]:
+    """A session error is a distinct event, never a step-finish — matching the real
+    adapter's ``_session_error``, which reads it off exactly this shape, and its
+    ``has_usable_output``, which a crashed turn with no step-finish correctly fails."""
+    return {
+        "type": "error",
+        "sessionID": session_id,
+        "error": {
+            "name": _ERROR_NAME,
+            "data": {"message": message},
+        },
+    }
+
+
+class OpenCodeRunWire:
+    """Render a :class:`RunResult` as OpenCode's JSONL stream; every record carries
+    the root ``sessionID`` from its first line. ``render_identity`` streams that
+    first ``step_start`` record as soon as a fresh mint self-assigns it, matching
+    the real handshake's early identity rather than waiting for process exit."""
+
+    def __init__(self) -> None:
+        self._streamed_message_id: str | None = None
+
+    def render_identity(self, session_id: str) -> str:
+        """Mint and return the identity-bearing ``step_start`` line, remembering its
+        message id so the later :meth:`render` call doesn't emit it a second time."""
+        self._streamed_message_id = _new_id("msg")
+        return json.dumps(_step_start_event(session_id, self._streamed_message_id)) + "\n"
 
     def render(self, result: RunResult) -> str:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
-        trailer = json.dumps({"session": result.session_id, "error": result.is_error, "turns": result.num_turns})
-        return f"{text}\n{trailer}\n"
+        session_id = result.session_id
+        message_id = self._streamed_message_id or _new_id("msg")
+        events: list[dict[str, object]] = []
+        if self._streamed_message_id is None:
+            events.append(_step_start_event(session_id, message_id))
+        if result.is_error:
+            events.append(_error_event(session_id, text or "the worker ended without a verdict"))
+        else:
+            events.append(_text_event(session_id, message_id, text))
+            events.append(_step_finish_event(session_id, message_id, text))
+        return "".join(json.dumps(event) + "\n" for event in events)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mock-opencode", add_help=True)
-    parser.add_argument("subcommand", nargs="?", default=None, help="'run'")
+    parser.add_argument("subcommand", nargs="?", default=None, help="'run', or absent for a takeover")
     parser.add_argument("prompt", nargs="?", default=None)
     parser.add_argument("--session", default=None)
-    parser.add_argument("--attach", action="store_true", help="deliver a follow-up into an existing session")
+    parser.add_argument("--model", default=None, help="mint-only; recorded onto the session, not acted on")
+    parser.add_argument("--variant", default=None, help="reasoning effort; recorded onto the session, not acted on")
+    parser.add_argument("--auto", action="store_true", help="unattended permission policy; recorded, not enforced")
+    parser.add_argument("--format", default=None, help="accepted; the mock always emits its JSON event stream")
     return parser
 
 
@@ -98,12 +208,46 @@ def _run_emit(argv: list[str]) -> int:
     return 0
 
 
+#: Flags that take a value, vs. bare boolean ones — pulled out before argparse sees them.
+_VALUE_FLAGS = ("--session", "--model", "--variant", "--format")
+_BOOL_FLAGS = ("--auto", "-h", "--help")
+
+
+def _positionals_first(argv: list[str]) -> list[str]:
+    """Reorder ``argv`` so ``subcommand`` and ``prompt`` are always adjacent — real flags
+    between them (matching the real ``opencode`` CLI's shape) resolve wrong pre-3.13
+    (gh-103372): argparse matches two ``nargs='?'`` positionals per contiguous run, so on
+    3.12 the first run alone satisfies both and ``prompt`` is reported unrecognized."""
+    options: list[str] = []
+    positionals: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in _VALUE_FLAGS:
+            options.append(token)
+            if i + 1 < len(argv):
+                options.append(argv[i + 1])
+                i += 1
+        elif token in _BOOL_FLAGS:
+            options.append(token)
+        else:
+            positionals.append(token)
+        i += 1
+    return positionals + options
+
+
+def _takeover_banner(session_id: str) -> str:
+    """What a human would see pasted into their terminal — never parsed by anything;
+    the real command's own composition (``resume_command``) is what blizzard's tests
+    exercise, this just proves invoking the equivalent shape does not crash."""
+    return f"mock-opencode: interactive takeover of session {session_id} (not automated)\n"
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-opencode`` binary.
 
     ``emit`` is intercepted here, before any of ``run``'s own argparse/dispatch
-    runs — ``run``'s path below is untouched from before ``emit`` existed.
-    """
+    runs — ``run``'s path below is untouched from before ``emit`` existed."""
     args_list = sys.argv[1:] if argv is None else list(argv)
     if args_list and args_list[0] == "emit":
         raise SystemExit(_run_emit(args_list[1:]))
@@ -111,21 +255,35 @@ def main(argv: list[str] | None = None) -> None:
         print(_USAGE + _EMIT_MENTION)
         raise SystemExit(0)
 
-    args = _parser().parse_args(args_list)
+    args = _parser().parse_args(_positionals_first(args_list))
     if args.subcommand not in ("run", None):
         print(_USAGE, file=sys.stderr)
         raise SystemExit(2)
+
+    if args.subcommand is None and args.session and args.prompt is None:
+        # The interactive TUI shape (``opencode --session <id> [--model][--variant]``,
+        # no ``run``, no prompt): a human paste target, not an automated turn.
+        sys.stdout.write(_takeover_banner(args.session))
+        raise SystemExit(0)
 
     script = _common.read_script(args.prompt)
     if script is None:
         print(_USAGE)
         raise SystemExit(0)
-    if args.attach and not args.session:
-        print("mock-opencode: --attach requires --session", file=sys.stderr)
-        raise SystemExit(2)
 
-    wire = OpenCodeWire()
-    code = _common.dispatch(wire=wire, script=script, session_id=args.session, is_resume=args.attach)
+    is_resume = args.session is not None
+    wire = OpenCodeRunWire()
+    code = _common.dispatch(
+        wire=wire,
+        script=script,
+        session_id=args.session,
+        is_resume=is_resume,
+        # Recorded onto the session state (issue #144, blizzard#343), never acted on —
+        # the mock is model-agnostic and never enforces a permission policy.
+        model=args.model,
+        effort=args.variant,
+        permission="auto" if args.auto else None,
+    )
     raise SystemExit(code)
 
 

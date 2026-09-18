@@ -9,8 +9,10 @@ fence refusal — no real tokens, no real coding-harness binary.
 from __future__ import annotations
 
 import json
+import select
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +34,9 @@ def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int,
     captured: list[engine.RunResult] = []
 
     class _CapturingWire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: engine.RunResult) -> str:
             captured.append(result)
             return ""
@@ -838,6 +843,9 @@ def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_
     captured: list[engine.RunResult] = []
 
     class _Wire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: engine.RunResult) -> str:
             captured.append(result)
             return ""
@@ -1161,8 +1169,8 @@ def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(fen
     state = _session_state(cwd, "sess-1")
 
     assert state["invocations"] == [
-        {"kind": "spawn", "model": "sonnet", "effort": "high", "compaction_window": None},
-        {"kind": "resume", "model": None, "effort": "high", "compaction_window": None},
+        {"kind": "spawn", "model": "sonnet", "effort": "high", "compaction_window": None, "permission": None},
+        {"kind": "resume", "model": None, "effort": "high", "compaction_window": None, "permission": None},
     ]
 
 
@@ -1171,7 +1179,7 @@ def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -
     _run_claude(cwd, env, "sess-2", "verdict('pass')")
 
     assert _session_state(cwd, "sess-2")["invocations"] == [
-        {"kind": "spawn", "model": None, "effort": None, "compaction_window": None}
+        {"kind": "spawn", "model": None, "effort": None, "compaction_window": None, "permission": None}
     ]
 
 
@@ -1185,6 +1193,196 @@ def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_re
     state = _session_state(cwd, "sess-3")
 
     assert state["invocations"] == [
-        {"kind": "spawn", "model": None, "effort": None, "compaction_window": "150000"},
-        {"kind": "resume", "model": None, "effort": None, "compaction_window": "150000"},
+        {"kind": "spawn", "model": None, "effort": None, "compaction_window": "150000", "permission": None},
+        {"kind": "resume", "model": None, "effort": None, "compaction_window": "150000", "permission": None},
     ]
+
+
+# --------------------------------------------------------------------------- #
+# The OpenCode facade wire: a server-assigned session, JSONL events, and the
+# model/variant/permission flags recorded onto the shared invocation record.
+# --------------------------------------------------------------------------- #
+
+
+def _run_opencode(cwd: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_opencode_facade_mints_a_server_assigned_session_id(fenced_repo) -> None:
+    """No ``--session`` at all on a fresh mint: the id in the first event is one the
+    caller never supplied, exactly as OpenCode's own fresh-session handshake works."""
+    cwd, env = fenced_repo
+    proc = _run_opencode(cwd, env, "run", "verdict('approve')")
+    assert proc.returncode == 0, proc.stderr
+
+    lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+    assert lines[0]["type"] == "step_start"
+    session_id = lines[0]["sessionID"]
+    assert session_id
+    assert all(event["sessionID"] == session_id for event in lines)
+
+
+def test_opencode_facade_emits_text_and_step_finish_events(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    proc = _run_opencode(cwd, env, "run", "verdict('approve', 'looks good')")
+    assert proc.returncode == 0, proc.stderr
+
+    lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+    types = [event["type"] for event in lines]
+    assert types == ["step_start", "text", "step_finish"]
+    assert "<Choice>approve</Choice>" in lines[1]["part"]["text"]
+    finish = lines[2]["part"]
+    assert finish["cost"] > 0
+    assert finish["tokens"]["input"] > 0
+    assert finish["tokens"]["output"] > 0
+
+
+def test_opencode_facade_resume_keeps_the_same_session_id(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    first = _run_opencode(cwd, env, "run", "ask('proceed?', ['yes', 'no'])")
+    assert first.returncode == 0, first.stderr
+    session_id = json.loads(first.stdout.splitlines()[0])["sessionID"]
+
+    second = _run_opencode(cwd, env, "run", "--session", session_id, "verdict('pass', 'resumed')")
+    assert second.returncode == 0, second.stderr
+    assert json.loads(second.stdout.splitlines()[0])["sessionID"] == session_id
+
+
+def test_opencode_facade_error_turn_emits_an_error_event_and_exits_nonzero(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    proc = _run_opencode(cwd, env, "run", "crash()")
+    assert proc.returncode == 1
+
+    lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+    error_events = [event for event in lines if event["type"] == "error"]
+    assert len(error_events) == 1
+    assert "crash" in error_events[0]["error"]["data"]["message"]
+
+
+def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo) -> None:
+    """The identity-bearing ``step_start`` record must be readable off the child's own
+    stdout well before the process exits — not just first in a buffered final capture.
+
+    A behavior script that sleeps before finishing gives a real, measurable gap: if the
+    facade only wrote everything at process exit, reading the first line would take as
+    long as the whole run; a real stream makes it available almost immediately.
+    """
+    cwd, env = fenced_repo
+    sleep_seconds = 1.0
+    script = f"import time\ntime.sleep({sleep_seconds})\nverdict('approve', 'slow turn')"
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", "run", script],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    try:
+        started = time.monotonic()
+        readable, _, _ = select.select([proc.stdout], [], [], sleep_seconds)
+        assert readable, "no output arrived before the behavior script's own sleep finished"
+        first_line = proc.stdout.readline()
+        time_to_first_line = time.monotonic() - started
+
+        # The process must still be mid-turn — the sleep hasn't elapsed — proving the
+        # line arrived from a real stream, not a fully-exited process's buffered output.
+        still_running = proc.poll() is None
+        remaining_stdout, stderr = proc.communicate(timeout=sleep_seconds + 5)
+        total_duration = time.monotonic() - started
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+    assert proc.returncode == 0, stderr
+    assert still_running, "the process had already exited by the time the first line was read"
+    assert time_to_first_line < sleep_seconds / 2, (
+        f"identity line took {time_to_first_line:.3f}s to arrive against a {sleep_seconds}s "
+        "turn — too close to the full run to have been streamed early"
+    )
+    assert total_duration >= sleep_seconds
+
+    event = json.loads(first_line)
+    assert event["type"] == "step_start"
+    assert event["sessionID"]
+
+    remaining_lines = [json.loads(line) for line in remaining_stdout.splitlines() if line.strip()]
+    all_types = ["step_start", *(e["type"] for e in remaining_lines)]
+    assert all_types == ["step_start", "text", "step_finish"]
+    assert all(e["sessionID"] == event["sessionID"] for e in remaining_lines)
+
+
+def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo) -> None:
+    """The model/variant/permission flags an OpenCode turn was launched with land on the
+    same shared ``Invocation`` record every other facade uses (issue #144, blizzard#343)."""
+    cwd, env = fenced_repo
+    proc = _run_opencode(
+        cwd, env, "run", "--model", "anthropic/claude-opus-4", "--variant", "max", "--auto", "verdict('pass')"
+    )
+    assert proc.returncode == 0, proc.stderr
+    session_id = json.loads(proc.stdout.splitlines()[0])["sessionID"]
+
+    resume = _run_opencode(cwd, env, "run", "--session", session_id, "--variant", "max", "--auto", "verdict('pass')")
+    assert resume.returncode == 0, resume.stderr
+
+    state = _session_state(cwd, session_id)
+    assert state["invocations"] == [
+        {
+            "kind": "spawn",
+            "model": "anthropic/claude-opus-4",
+            "effort": "max",
+            "compaction_window": None,
+            "permission": "auto",
+        },
+        {"kind": "resume", "model": None, "effort": "max", "compaction_window": None, "permission": "auto"},
+    ]
+
+
+def test_opencode_facade_takeover_shape_does_not_crash(fenced_repo) -> None:
+    """The interactive TUI shape (``opencode --session <id>``, no ``run``, no script) must
+    be answered sanely rather than crashing — there is no automated turn to drive here."""
+    cwd, env = fenced_repo
+    proc = _run_opencode(cwd, env, "--session", "sess-takeover", "--model", "anthropic/claude-opus-4")
+    assert proc.returncode == 0, proc.stderr
+    assert "sess-takeover" in proc.stdout
+
+
+def test_opencode_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
+    """Only claude_code constructs a transcript writer; codex/opencode are a no-op."""
+    cwd, env = fenced_repo
+    transcripts_dir = tmp_path / "transcripts"
+    env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
+
+    proc = _run_opencode(cwd, env, "run", "verdict('x')")
+    assert proc.returncode == 0
+    assert not transcripts_dir.exists()
+
+
+def test_opencode_facade_fence_refusal_exit_code(tmp_path: Path) -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", "run", "verdict('x')"],
+        cwd=tmp_path,
+        env={"PATH": __import__("os").environ.get("PATH", "")},  # unfenced
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 2  # refused, distinct from a script error (1)
+    assert "refused to run" in proc.stderr
+
+
+def test_opencode_facade_bare_invocation_prints_usage() -> None:
+    from blizzard_mock.harness.facades import opencode
+
+    with pytest.raises(SystemExit) as exc:
+        opencode.main([])
+    assert exc.value.code == 0
