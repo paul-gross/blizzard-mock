@@ -34,6 +34,9 @@ def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int,
     captured: list[engine.RunResult] = []
 
     class _CapturingWire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: engine.RunResult) -> str:
             captured.append(result)
             return ""
@@ -840,6 +843,9 @@ def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_
     captured: list[engine.RunResult] = []
 
     class _Wire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: engine.RunResult) -> str:
             captured.append(result)
             return ""

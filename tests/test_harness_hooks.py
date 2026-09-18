@@ -60,6 +60,9 @@ def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int,
     captured: list[engine.RunResult] = []
 
     class _CapturingWire:
+        def render_identity(self, session_id: str) -> str | None:
+            return None
+
         def render(self, result: engine.RunResult) -> str:
             captured.append(result)
             return ""

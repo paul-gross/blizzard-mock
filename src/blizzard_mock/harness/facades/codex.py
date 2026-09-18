@@ -34,6 +34,11 @@ class CodexJsonlWire:
     def __init__(self, json_mode: bool = True) -> None:
         self._json = json_mode
 
+    def render_identity(self, session_id: str) -> str | None:
+        """Codex's real handshake carries no separate identity preamble — its thread
+        id arrives only on ``render``'s own ``thread.started`` event."""
+        return None
+
     def render(self, result: RunResult) -> str:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         if not self._json:

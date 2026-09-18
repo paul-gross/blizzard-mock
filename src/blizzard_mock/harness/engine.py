@@ -109,12 +109,17 @@ class RunResult:
 
 class IHarnessWire(Protocol):
     """A facade's wire surface — the engine's only outward dependency. Writes
-    ``render(result)`` to the output stream; never formats anything. May also define
-    an optional, duck-typed ``render_identity(session_id) -> str | None``, flushed
-    before the behavior script runs and omitted from the later ``render``."""
+    ``render(result)`` to the output stream; never formats anything."""
 
     def render(self, result: RunResult) -> str:
         """Return the exact bytes-as-text this harness would print for ``result``."""
+        ...
+
+    def render_identity(self, session_id: str) -> str | None:
+        """The identity-bearing chunk to flush before the behavior script runs, or
+        ``None`` for a wire with no such preamble — most don't; a real handshake's own
+        early first record (e.g. OpenCode's) is what this stands in for. Omitted from
+        the later ``render``, which never repeats it."""
         ...
 
 
@@ -534,12 +539,10 @@ def run_prompt(
     )
     # Streams the identity-bearing record before exec(), matching a real handshake's
     # early first record on a caller's stdout.
-    render_identity = getattr(wire, "render_identity", None)
-    if render_identity is not None:
-        identity_chunk = render_identity(session_id)
-        if identity_chunk:
-            stream.write(identity_chunk)
-            stream.flush()
+    identity_chunk = wire.render_identity(session_id)
+    if identity_chunk:
+        stream.write(identity_chunk)
+        stream.flush()
 
     token = _CURRENT.set(ctx)
     started = time.monotonic()

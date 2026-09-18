@@ -22,6 +22,10 @@ def render_ask_text(result: RunResult) -> str:
 class PlainTextWire:
     """Render just the result text (or the tagged ask), one trailing newline."""
 
+    def render_identity(self, session_id: str) -> str | None:
+        """No identity preamble — this wire has no vendor handshake to stand in for."""
+        return None
+
     def render(self, result: RunResult) -> str:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         return f"{text}\n"
