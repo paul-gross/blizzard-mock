@@ -68,7 +68,13 @@ class OpenCodeTranscriptWriter:
         self._cwd = cwd
         self._dir = root / PROJECT_DIR_NAME
         self._path = document_path(root, session_id)
-        self._doc: dict[str, Any] = _new_document(session_id, cwd, title="mock-opencode session")
+        # A resume is a fresh process re-opening the same session id — load whatever this
+        # session already wrote, else every resume would silently wipe its own history.
+        self._doc: dict[str, Any] = (
+            json.loads(self._path.read_text())
+            if self._path.is_file()
+            else _new_document(session_id, cwd, title="mock-opencode session")
+        )
         # The in-progress assistant message a run of ``record_tool_call`` calls is
         # accumulating into, closed by the next ``record_user`` or ``record_result``.
         self._open_assistant: dict[str, Any] | None = None
