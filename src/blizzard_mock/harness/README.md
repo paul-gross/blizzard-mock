@@ -132,7 +132,11 @@ and how a settings document's hook commands are executed* — see "Hook executio
   construct either.
 - `opencode_surface/` — a wholly separate concept, sharing no code with the
   engine above: `mock-opencode emit` bakes a standalone CLI-surface fake
-  binary out of this package. See "OpenCode CLI-surface mode" below.
+  binary out of this package. It nests under `harness/` rather than sitting at
+  the top level because `harness/` is where every coding-harness-facing
+  surface lives regardless of implementation strategy — an exec-engine facade
+  here, a baked out-of-process CLI artifact there — not because it shares the
+  engine's approach. See "OpenCode CLI-surface mode" below.
 
 ## Conversation transcripts
 
@@ -345,8 +349,7 @@ executes a caller-supplied prompt; it answers a fixed CLI shape instead.
   debug), each its own process — so anything that must be observed across
   calls (`PROCESS_CONTROL`, `TRANSCRIPT_CURSOR`-shaped probes) persists to
   `$XDG_STATE_HOME/fake-opencode-state.json` (`internal.paths.state_path`,
-  `internal.state_store`), the same convention the ground-truth fake
-  (`blizzard/tests/support_opencode_binary.py`) uses.
+  `internal.state_store`).
 - **Never installed, never on `PATH`.** The artifact is only ever written to
   a caller-named path at emit time — `mock-opencode` itself can never become
   one. See "The fence" below for what that means for this mode specifically.

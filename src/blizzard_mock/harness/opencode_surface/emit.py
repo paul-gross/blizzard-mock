@@ -15,8 +15,21 @@ from .levers import Lever
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
-#: Everything zip-safe and stdlib-only; ``emit.py`` itself is excluded.
-_SOURCE_MEMBERS = ("__init__.py", "levers.py", "cli.py", "domain", "internal")
+#: Never copied into the artifact: this module, and ``_baked.py`` (regenerated fresh below).
+_EXCLUDED_MEMBERS = {"emit.py", "_baked.py", "__pycache__"}
+
+
+def _discover_source_members() -> tuple[str, ...]:
+    """Every top-level package member the artifact ships — everything under
+    ``opencode_surface/`` except the excluded ones, discovered rather than
+    hand-listed so a module added later can't silently go missing from the zipapp."""
+    return tuple(
+        sorted(
+            entry.name
+            for entry in _PACKAGE_ROOT.iterdir()
+            if entry.name not in _EXCLUDED_MEMBERS and (entry.is_dir() or entry.suffix == ".py")
+        )
+    )
 
 
 def emit(
@@ -36,7 +49,7 @@ def emit(
         scratch = Path(scratch_name)
         staging = scratch / "opencode_surface"
         staging.mkdir()
-        for name in _SOURCE_MEMBERS:
+        for name in _discover_source_members():
             source = _PACKAGE_ROOT / name
             destination = staging / name
             if source.is_dir():

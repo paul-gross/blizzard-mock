@@ -52,15 +52,15 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "attach":
         return attach_client.run(args, levers, paths.state_path())
 
-    last = args[-1] if args else ""
-    if "process-control turn" in last:
+    probe = run.classify_probe(args)
+    if probe == "process_control":
         return _cmd_process_control(levers)
-    if "permission" in last:
+    if probe == "permission":
         return _cmd_permission(levers)
-    if "configuration turn" in last:
+    if probe == "configuration":
         return _cmd_configuration(levers)
-    if "security proof" in last:
-        return _cmd_security(last, levers)
+    if probe == "security":
+        return _cmd_security(args[-1], levers)
 
     return _cmd_run(args, levers)
 
@@ -85,8 +85,8 @@ def _cmd_debug_agent_tool(levers: frozenset[Lever]) -> int:
 
 
 def _cmd_debug_config_pure(levers: frozenset[Lever]) -> int:
-    content = os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")
-    print(json.dumps(configuration.debug_config_pure(levers, content)))
+    config = config_io.resolve_config(os.environ, os.getcwd())
+    print(json.dumps(configuration.debug_config_pure(levers, config)))
     return 0
 
 

@@ -11,6 +11,7 @@ before `emit` existed. Not a re-tiering of `blizzard`'s 51 diagnostic tests
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from blizzard_mock.harness.opencode_surface import _baked
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
 from blizzard_mock.harness.opencode_surface import levers as surface_levers
 
@@ -131,6 +133,24 @@ def test_emit_version_override_is_baked_in(tmp_path: Path) -> None:
     proc = subprocess.run([str(out), "--version"], env=_BARE_SYSTEM_ENV, cwd=tmp_path, capture_output=True, text=True)
 
     assert proc.stdout == "opencode 9.9.9\n"
+
+
+def test_baked_module_fields_match_emits_generated_template() -> None:
+    """The checked-in `_baked.py` (kept for import/type-checking during development) and
+    `emit._render_baked`'s generated replacement must declare the same fields — a
+    hand-added field to one with nothing tying it to the other would silently drift."""
+
+    def module_level_names(source: str) -> set[str]:
+        return {
+            node.target.id
+            for node in ast.parse(source).body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+
+    checked_in_fields = module_level_names(Path(_baked.__file__).read_text())
+    generated_fields = module_level_names(surface_emit._render_baked(frozenset(), "1.0.0", None, None))
+
+    assert checked_in_fields == generated_fields
 
 
 # --------------------------------------------------------------------------- #

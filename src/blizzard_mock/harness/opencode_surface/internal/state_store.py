@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 
 def read_state(path: str) -> dict:
@@ -15,6 +17,10 @@ def read_state(path: str) -> dict:
 
 
 def write_state(path: str, state: dict) -> None:
-    """Persist ``state``, replacing whatever was there before."""
-    with open(path, "w") as fh:
+    """Persist ``state``, atomically: a temp file in the same directory, renamed over the
+    target — the diagnostic's 0.1s poll only guards a missing file, never a partial one."""
+    directory = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=os.path.basename(path) + ".")
+    with os.fdopen(fd, "w") as fh:
         json.dump(state, fh)
+    os.replace(tmp_path, path)

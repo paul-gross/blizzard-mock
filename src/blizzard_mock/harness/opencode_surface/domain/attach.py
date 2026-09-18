@@ -23,3 +23,9 @@ def stream_response_ok(levers: frozenset[Lever], upstream_header: str | None, bo
         return False
     exempt = Lever.TAKEOVER_IMMEDIATE_EOF in levers or Lever.TAKEOVER_STREAM_FAILURE in levers
     return body == b": upstream\n\n" or exempt
+
+
+def should_skip_takeover_prompt(levers: frozenset[Lever]) -> bool:
+    """Whether ``attach`` should exit immediately after validating, before ever reading the
+    operator's takeover line from stdin (``TAKEOVER_EXIT_EARLY``)."""
+    return Lever.TAKEOVER_EXIT_EARLY in levers

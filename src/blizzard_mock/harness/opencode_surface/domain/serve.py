@@ -6,6 +6,8 @@ each route's body/status/headers should be.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ..levers import Lever
 
 
@@ -23,20 +25,37 @@ def session_body(sid: str, cwd: str, levers: frozenset[Lever]) -> dict:
     }
 
 
-def event_response(levers: frozenset[Lever]) -> tuple[int, str, bytes, bool]:
-    """``GET /event`` / ``GET /global/event``'s ``(status, content_type, body, send_content_length)``."""
-    if Lever.TAKEOVER_STREAM_FAILURE in levers:
-        body, status, content_type = b"upstream failure", 503, "text/event-stream"
-    else:
-        non_sse = Lever.TAKEOVER_NON_SSE in levers
-        body = b"{}" if non_sse else b": upstream\n\n"
-        status = 200
-        content_type = "application/json" if non_sse else "text/event-stream"
+@dataclass(frozen=True)
+class EventResponse:
+    """``GET /event`` / ``GET /global/event``'s response, named so the one caller
+    (``internal.http_serve``) doesn't have to remember tuple positions."""
 
+    status: int
+    content_type: str
+    body: bytes
+    send_content_length: bool
+
+
+def event_response(levers: frozenset[Lever]) -> EventResponse:
+    """``GET /event`` / ``GET /global/event``'s response, by lever priority
+    (``TAKEOVER_IMMEDIATE_EOF`` overrides everything else, including a 503)."""
     if Lever.TAKEOVER_IMMEDIATE_EOF in levers:
-        body, status, content_type = b"", 200, "text/event-stream"
-    elif Lever.TAKEOVER_IDLE_SSE in levers:
+        status, content_type, body = 200, "text/event-stream", b""
+    elif Lever.TAKEOVER_STREAM_FAILURE in levers:
+        status, content_type, body = 503, "text/event-stream", b"upstream failure"
+    elif Lever.TAKEOVER_NON_SSE in levers:
+        status, content_type, body = 200, "application/json", b"{}"
+    else:
+        status, content_type, body = 200, "text/event-stream", b": upstream\n\n"
+
+    if Lever.TAKEOVER_IDLE_SSE in levers:
         body = b""
 
     send_content_length = Lever.TAKEOVER_IDLE_SSE not in levers
-    return status, content_type, body, send_content_length
+    return EventResponse(status, content_type, body, send_content_length)
+
+
+def should_apply_summarize(levers: frozenset[Lever]) -> bool:
+    """Whether ``POST .../summarize`` should actually advance session state
+    (``COMPACTION_NO_CHANGE`` suppresses it)."""
+    return Lever.COMPACTION_NO_CHANGE not in levers

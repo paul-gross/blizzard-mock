@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 from ..domain import attach as attach_domain
@@ -24,9 +25,15 @@ def run(args: list[str], levers: frozenset[Lever], state_path: str) -> int:
     ) as response:
         response.read()
 
-    with urllib.request.urlopen(
-        urllib.request.Request(f"{attach_url}/global/event", headers=headers), timeout=10
-    ) as response:
+    # TAKEOVER_STREAM_FAILURE's 503 makes urlopen raise HTTPError, itself a valid response object.
+    try:
+        event_response = urllib.request.urlopen(
+            urllib.request.Request(f"{attach_url}/global/event", headers=headers), timeout=10
+        )
+    except urllib.error.HTTPError as err:
+        event_response = err
+
+    with event_response as response:
         upstream = response.headers.get("X-Upstream-Stream")
         if Lever.TAKEOVER_IDLE_SSE in levers:
             ok = attach_domain.idle_response_ok(upstream, response.headers.get("Content-Type"))
@@ -35,7 +42,7 @@ def run(args: list[str], levers: frozenset[Lever], state_path: str) -> int:
         if not ok:
             return 8
 
-    if Lever.TAKEOVER_EXIT_EARLY in levers:
+    if attach_domain.should_skip_takeover_prompt(levers):
         return 0
     if Lever.TAKEOVER_IDLE_SSE in levers:
         threading.Thread(target=_record_takeover_input, args=(state_path,), daemon=True).start()

@@ -2,8 +2,7 @@
 
 A sibling of ``mock_hub``'s/the IdP's lever modules, not a reuse: those are
 armed over HTTP against a long-lived service, while this one is stdlib-only
-and baked into ``_baked.py`` as an immutable constant at ``emit`` time.
-``CATALOG`` is the one prose home for what each member does."""
+and baked into ``_baked.py`` as an immutable constant at ``emit`` time."""
 
 from __future__ import annotations
 
@@ -12,34 +11,62 @@ from enum import StrEnum
 
 
 class Lever(StrEnum):
-    """One member per fake-OpenCode misbehaviour — see :data:`CATALOG` for prose."""
+    """One member per fake-OpenCode misbehaviour — see :data:`CATALOG` for prose.
 
-    #: See :data:`CATALOG` — the one prose home for every member below.
+    Values are uppercase, unlike the sibling ``HubLever`` (lowercase): they are the
+    ``--lever NAME`` strings ``blizzard``'s own tests hardcode as a public CLI contract."""
+
+    #: Tool call errors unrelated, never denied.
     PERMISSION_REQUEST_ONLY = "PERMISSION_REQUEST_ONLY"
+    #: Prose-only denial, no ``tool_use`` error part.
     PERMISSION_PROSE_ONLY = "PERMISSION_PROSE_ONLY"
+    #: The denial event is doubled.
     PERMISSION_DUPLICATE = "PERMISSION_DUPLICATE"
+    #: The denial is a bare OS ``permission denied`` string, not the usual prose.
     PERMISSION_OS_ERROR = "PERMISSION_OS_ERROR"
+    #: The permission turn exits 9 instead of 0.
     PERMISSION_NONZERO = "PERMISSION_NONZERO"
+    #: ``debug config --pure`` reports a competing model; other turns skip the permission check.
     IGNORE_CONFIG = "IGNORE_CONFIG"
+    #: ``debug config --pure``'s effective config drops the ``shell`` key.
     DROP_CONFIG_SHELL = "DROP_CONFIG_SHELL"
+    #: ``debug config --pure``'s effective config drops the ``compaction`` key.
     DROP_CONFIG_COMPACTION = "DROP_CONFIG_COMPACTION"
+    #: The default run turn answers a provider ``APIError`` (429 usage-limit), then hangs.
     PROVIDER_REFUSAL = "PROVIDER_REFUSAL"
+    #: The configuration turn's denial is plain prose, no ``tool_use`` error part.
     CONFIGURATION_PROSE_ONLY = "CONFIGURATION_PROSE_ONLY"
+    #: The configuration turn's denial is a bare OS ``permission denied`` string.
     CONFIGURATION_OS_ERROR = "CONFIGURATION_OS_ERROR"
+    #: ``export`` always reports the tool call completed, even while it is still live.
     STATIC_REPLAY = "STATIC_REPLAY"
+    #: A fresh (non-resumed) default run turn exits 7.
     FRESH_NONZERO = "FRESH_NONZERO"
+    #: The process-control turn never writes live state.
     PROCESS_CONTROL_NO_LIVE_STATE = "PROCESS_CONTROL_NO_LIVE_STATE"
+    #: ``session``/``export`` report the wrong directory.
     TAKEOVER_WRONG_DIRECTORY = "TAKEOVER_WRONG_DIRECTORY"
+    #: The served/exported/default session id is ``ses_wrong``.
     TAKEOVER_WRONG_SESSION = "TAKEOVER_WRONG_SESSION"
+    #: The event stream serves JSON instead of an SSE comment.
     TAKEOVER_NON_SSE = "TAKEOVER_NON_SSE"
+    #: ``attach`` exits 0 before ever reading the takeover prompt from stdin.
     TAKEOVER_EXIT_EARLY = "TAKEOVER_EXIT_EARLY"
+    #: The event stream (and ``attach``) go idle forever, with no body/Content-Length.
     TAKEOVER_IDLE_SSE = "TAKEOVER_IDLE_SSE"
+    #: The event stream closes immediately with an empty body.
     TAKEOVER_IMMEDIATE_EOF = "TAKEOVER_IMMEDIATE_EOF"
+    #: The event stream answers 503 with a plain-text failure body.
     TAKEOVER_STREAM_FAILURE = "TAKEOVER_STREAM_FAILURE"
+    #: The event stream blocks until a ``POST /session`` is observed.
     TAKEOVER_EVENT_GATED = "TAKEOVER_EVENT_GATED"
+    #: The security-proof turn actually runs the embedded shell command.
     SECURITY_COMMAND_EXECUTES = "SECURITY_COMMAND_EXECUTES"
+    #: ``--version`` overwrites the on-disk ``auth.json``.
     MUTATE_AUTH = "MUTATE_AUTH"
+    #: ``--version`` records ``auth.json``'s present/missing/unreadable status to a marker.
     READ_AUTH = "READ_AUTH"
+    #: ``POST .../summarize`` leaves session state unchanged.
     COMPACTION_NO_CHANGE = "COMPACTION_NO_CHANGE"
 
 

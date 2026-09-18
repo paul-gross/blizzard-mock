@@ -7,6 +7,24 @@ from ..levers import Lever
 #: The session id every default turn answers with, absent ``--session``/the wrong-session lever.
 DEFAULT_SESSION_ID = "ses_fake"
 
+#: Substring-matched against the last arg; "permission" is last since it's the shortest marker and could match others.
+_PROBE_MARKERS = (
+    ("process-control turn", "process_control"),
+    ("configuration turn", "configuration"),
+    ("security proof", "security"),
+    ("permission", "permission"),
+)
+
+
+def classify_probe(args: list[str]) -> str | None:
+    """Which shaped probe this fresh/resume turn's script names as its last arg, else
+    ``None`` for the plain default run turn (the fallback when no probe matched)."""
+    last = args[-1] if args else ""
+    for marker, probe in _PROBE_MARKERS:
+        if marker in last:
+            return probe
+    return None
+
 
 def resolve_session_id(args: list[str], levers: frozenset[Lever]) -> str:
     """The session id this turn answers with."""

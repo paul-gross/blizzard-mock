@@ -6,8 +6,6 @@ probed command is denied and what to render."""
 
 from __future__ import annotations
 
-import json
-
 from ..levers import Lever
 
 SESSION_ID = "ses_config"
@@ -15,14 +13,12 @@ SESSION_ID = "ses_config"
 PROSE_DENIAL = "The configured permission rule prevented this specific tool call."
 
 
-def debug_config_pure(levers: frozenset[Lever], config_content: str) -> dict:
-    """The effective-config document ``debug config --pure`` echoes back."""
+def debug_config_pure(levers: frozenset[Lever], config: dict) -> dict:
+    """The effective-config document ``debug config --pure`` echoes back, given the same
+    resolved config the "...configuration turn" probe uses (``internal.configuration.resolve_config``)."""
     if Lever.IGNORE_CONFIG in levers:
         return {"model": "competing/ignored-model"}
-    try:
-        effective = json.loads(config_content or "{}")
-    except json.JSONDecodeError:
-        effective = {}
+    effective = dict(config)
     if Lever.DROP_CONFIG_SHELL in levers:
         effective.pop("shell", None)
     if Lever.DROP_CONFIG_COMPACTION in levers:

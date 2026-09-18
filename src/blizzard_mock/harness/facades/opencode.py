@@ -30,6 +30,13 @@ The prompt is the program (Python, exec()'d in the acquired worktree). Fenced �
 refuses to run unless test scaffolding marks the environment.
 """
 
+#: Appended to ``_USAGE`` only for an explicit ``-h``/``--help``, never for the pinned bare-invocation fallback above.
+_EMIT_MENTION = (
+    "\nAlso: mock-opencode emit --out <path> [--lever NAME]... — writes a standalone "
+    "CLI-surface fake-OpenCode zipapp. See harness/README.md's 'OpenCode CLI-surface mode' "
+    "section.\n"
+)
+
 #: ``emit --help``'s description — wholly separate from ``run``'s ``_USAGE`` above.
 _EMIT_DESCRIPTION = (
     "Write a standalone CLI-surface fake-OpenCode zipapp. Wholly separate from "
@@ -100,6 +107,9 @@ def main(argv: list[str] | None = None) -> None:
     args_list = sys.argv[1:] if argv is None else list(argv)
     if args_list and args_list[0] == "emit":
         raise SystemExit(_run_emit(args_list[1:]))
+    if args_list and args_list[0] in ("-h", "--help"):
+        print(_USAGE + _EMIT_MENTION)
+        raise SystemExit(0)
 
     args = _parser().parse_args(args_list)
     if args.subcommand not in ("run", None):

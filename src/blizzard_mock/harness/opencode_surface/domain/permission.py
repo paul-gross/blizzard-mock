@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..levers import Lever
 
 SESSION_ID = "ses_permission"
+#: The one owning copy of the exact-denial sentence; ``domain.security`` imports it rather than restating it.
 DENIAL = "The user has specified a rule which prevents you from using this specific tool call."
 
 
@@ -68,9 +69,11 @@ def build_permission_events(levers: frozenset[Lever]) -> list[dict]:
         duplicate = {**event, "part": {**event["part"], "id": "prt_permission_duplicate"}}
         events.append(duplicate)
     if Lever.PERMISSION_OS_ERROR in levers:
-        last = events[-1]
-        last_state = {**last["part"]["state"], "error": "permission denied"}
-        events[-1] = {**last, "part": {**last["part"], "state": last_state}}
+        # Shared across every denial event above, not just the last — matching the
+        # retired ground-truth fake's behavior when both levers are armed together.
+        events = [
+            {**e, "part": {**e["part"], "state": {**e["part"]["state"], "error": "permission denied"}}} for e in events
+        ]
     return events
 
 

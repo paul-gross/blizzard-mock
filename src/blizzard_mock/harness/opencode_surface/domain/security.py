@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from ..levers import Lever
+from .permission import DENIAL
 
 SESSION_ID = "ses_security"
-DENIAL = "The user has specified a rule which prevents you from using this specific tool call."
 
 
 def build_event(levers: frozenset[Lever], command: str) -> tuple[dict, bool]:

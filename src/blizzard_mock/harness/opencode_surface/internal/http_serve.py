@@ -42,15 +42,15 @@ def serve_forever(levers: frozenset[Lever], state_path: str) -> int:
         def _handle_event(self) -> None:
             if Lever.TAKEOVER_EVENT_GATED in levers:
                 event_arrived.wait(30)
-            status, content_type, body, send_length = serve_domain.event_response(levers)
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
+            response = serve_domain.event_response(levers)
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
             self.send_header("X-Upstream-Stream", "preserved")
-            if send_length:
-                self.send_header("Content-Length", str(len(body)))
+            if response.send_content_length:
+                self.send_header("Content-Length", str(len(response.body)))
             self.end_headers()
-            if body:
-                self.wfile.write(body)
+            if response.body:
+                self.wfile.write(response.body)
                 self.wfile.flush()
             if Lever.TAKEOVER_IDLE_SSE in levers:
                 time.sleep(30)
@@ -60,7 +60,7 @@ def serve_forever(levers: frozenset[Lever], state_path: str) -> int:
             self.rfile.read(length)
             if self.path == "/session":
                 event_arrived.set()
-            if self.path.endswith("/summarize") and Lever.COMPACTION_NO_CHANGE not in levers:
+            if self.path.endswith("/summarize") and serve_domain.should_apply_summarize(levers):
                 current = state_store.read_state(state_path)
                 state_store.write_state(state_path, state_domain.summarized_state(current))
             self.send_response(200)

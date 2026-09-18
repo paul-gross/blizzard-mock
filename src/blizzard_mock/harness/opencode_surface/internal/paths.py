@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 
-#: The same ``fake-opencode-state.json`` convention the ground-truth fake uses.
 STATE_FILENAME = "fake-opencode-state.json"
 
 
