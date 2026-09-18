@@ -1,19 +1,9 @@
 """Mock OpenCode facade (``mock-opencode``).
 
-Two modes: ``run`` shares the exec engine with every other facade, differing only in
-OpenCode's wire shape; ``emit`` bakes a lever set into a standalone CLI-surface zipapp
-(``opencode_surface``) — see ``harness/README.md``'s "OpenCode CLI-surface mode" section.
-
-``run``'s wire shape: ``opencode run --format json`` emits a JSONL event stream keyed on a
-SERVER-assigned root ``sessionID`` — the caller never supplies one on a fresh mint,
-mirroring Codex's self-assigned session idiom rather than Claude Code's caller-supplied
-one. A resume passes ``--session`` and never re-mints. This is the non-interactive surface
-the real execution spec's "Worker process" section describes (``opencode run --format json
-[--session <id> | --model <name>] [--variant <v>] [--auto] "<prompt>"``); an interactive
-takeover (``opencode --session <id> …``, no ``run`` subcommand) is recognized and answered
-sanely without driving the exec engine at all — there is no automated script to run, only a
-human at a terminal.
-"""
+Two modes: ``run`` shares the exec engine with every facade, differing only in wire shape —
+a JSONL event stream, server-minted root ``sessionID``, a bare ``--session`` as a no-op
+takeover; ``emit`` bakes a lever set into a standalone CLI-surface zipapp
+(``opencode_surface`` — see ``harness/README.md``'s "OpenCode CLI-surface mode")."""
 
 from __future__ import annotations
 
@@ -218,23 +208,16 @@ def _run_emit(argv: list[str]) -> int:
     return 0
 
 
-#: Flags that take a value, vs. bare boolean ones — needed to pull flags (and their
-#: values) out of argv before the two positionals ever reach argparse.
+#: Flags that take a value, vs. bare boolean ones — pulled out before argparse sees them.
 _VALUE_FLAGS = ("--session", "--model", "--variant", "--format")
 _BOOL_FLAGS = ("--auto", "-h", "--help")
 
 
 def _positionals_first(argv: list[str]) -> list[str]:
-    """Reorder ``argv`` so ``subcommand`` and ``prompt`` are always adjacent.
-
-    ``run --format json --auto "<prompt>"`` puts real flags between the two
-    positionals (matching the real ``opencode`` CLI's own shape). Python's argparse
-    resolves two ``nargs='?'`` positionals separated like that by matching each
-    contiguous run of positional tokens independently (fixed in 3.13, gh-103372) —
-    on 3.12 the first run alone satisfies both optional positionals, so ``prompt``
-    never sees the multi-line prompt token in the second run and it is reported as
-    an unrecognized argument instead. Pulling every known flag out up front keeps
-    the two positionals in one contiguous run on every supported Python version."""
+    """Reorder ``argv`` so ``subcommand`` and ``prompt`` are always adjacent — real flags
+    between them (matching the real ``opencode`` CLI's shape) resolve wrong pre-3.13
+    (gh-103372): argparse matches two ``nargs='?'`` positionals per contiguous run, so on
+    3.12 the first run alone satisfies both and ``prompt`` is reported unrecognized."""
     options: list[str] = []
     positionals: list[str] = []
     i = 0
