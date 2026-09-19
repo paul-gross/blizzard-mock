@@ -19,10 +19,8 @@ from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
 class RunnerCapability:
     """One harness binding a registered runner reported it can execute (blizzard#433) —
     the mock's own domain-core mirror of the wire shape, kept import-free of it. ``version``
-    is ``None`` when the binding exposes none; ``default`` marks the runner's own default
-    binding. ``default``/``available`` are keyword-only (``test_wire_parity.py``'s own
-    transposable-positional-argument guard): two adjacent bools would otherwise swap
-    silently at an unkeyworded call site."""
+    is ``None`` when absent; ``default`` marks the runner's own default binding. ``default``/
+    ``available`` are keyword-only so two adjacent bools can't swap silently unkeyworded."""
 
     harness_id: str
     version: str | None = None

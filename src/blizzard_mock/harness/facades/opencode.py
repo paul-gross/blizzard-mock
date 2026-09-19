@@ -18,6 +18,7 @@ from pathlib import Path
 from blizzard_mock.harness.engine import ITranscriptWriter, RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._opencode_transcript import (
+    _MOCK_VERSION,
     OpenCodeTranscriptWriter,
     document_path,
     transcripts_root,
@@ -288,6 +289,11 @@ def main(argv: list[str] | None = None) -> None:
     argparse/dispatch runs — ``run``'s path below is untouched from before either
     existed."""
     args_list = sys.argv[1:] if argv is None else list(argv)
+    if args_list and args_list[0] == "--version":
+        # The health probe (blizzard#438) shells out to this same binary, not only
+        # `emit`'s separate CLI-surface artifact — so `run` must answer `--version` too.
+        print(_MOCK_VERSION)
+        raise SystemExit(0)
     if args_list and args_list[0] == "emit":
         raise SystemExit(_run_emit(args_list[1:]))
     if args_list and args_list[0] == "export":
