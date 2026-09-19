@@ -78,7 +78,13 @@ def peek_matched_queue(
         return service.peek_matched(
             runner_id=runner_id,
             capabilities=tuple(
-                RunnerCapability(harness_id=c.harness_id, version=c.version, tiers=tuple(c.tiers), default=c.default)
+                RunnerCapability(
+                    harness_id=c.harness_id,
+                    version=c.version,
+                    tiers=tuple(c.tiers),
+                    default=c.default,
+                    available=c.available,
+                )
                 for c in body.capabilities
             ),
             policy=body.policy,
@@ -297,7 +303,13 @@ def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubServ
         redirect_uris=tuple(body.redirect_uris),
         env_capacity=body.env_capacity,
         capabilities=tuple(
-            RunnerCapability(harness_id=c.harness_id, version=c.version, tiers=tuple(c.tiers), default=c.default)
+            RunnerCapability(
+                harness_id=c.harness_id,
+                version=c.version,
+                tiers=tuple(c.tiers),
+                default=c.default,
+                available=c.available,
+            )
             for c in body.capabilities
         ),
     )
