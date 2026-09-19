@@ -1,8 +1,8 @@
-"""Claude-Code-shaped JSONL transcript writer — only the ``claude_code`` facade uses it.
+"""Claude-Code-shaped JSONL transcript writer for the ``claude_code`` facade.
 
-Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`. Assistant
-records carry ``model``/``usage`` (epic #57), synthesized by :mod:`._usage`,
-not a real token count.
+Implements :class:`~blizzard_mock.harness.engine.ITranscriptWriter`. Assistant records carry
+``model``/``usage`` (epic #57), synthesized by :mod:`._usage`, not a real token count.
+``TRANSCRIPTS_ROOT_ENV_VAR``/:func:`transcripts_root` are shared with ``opencode``'s own writer.
 """
 
 from __future__ import annotations

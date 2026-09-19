@@ -15,7 +15,7 @@ import re
 import textwrap
 import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Protocol
@@ -436,6 +436,7 @@ def run_prompt(
     env: Mapping[str, str] | None = None,
     out: IO[str] | None = None,
     transcript: ITranscriptWriter | None = None,
+    transcript_factory: Callable[[str], ITranscriptWriter] | None = None,
     hooks: IHookRunner | None = None,
     model: str | None = None,
     effort: str | None = None,
@@ -445,9 +446,9 @@ def run_prompt(
 ) -> int:
     """Execute a behavior-script ``prompt`` and return the process exit code.
 
-    Refuses to run unless :func:`assert_fenced` passes. Renders the resulting
-    :class:`RunResult` through ``wire`` to ``out`` exactly once.
-    """
+    Refuses to run unless :func:`assert_fenced` passes; renders the resulting
+    :class:`RunResult` through ``wire`` exactly once. ``transcript_factory`` builds a
+    self-minting harness's writer once ``session_id`` is known."""
     import sys
 
     from blizzard_mock.harness.facades._text import PlainTextWire
@@ -497,6 +498,8 @@ def run_prompt(
     else:
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
+    if transcript is None and transcript_factory is not None:
+        transcript = transcript_factory(session_id)
     state.turns += 1
     # What this turn was actually launched with (issue #144, blizzard#343).
     state.invocations.append(

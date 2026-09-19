@@ -140,19 +140,21 @@ and how a settings document's hook commands are executed* — see "Hook executio
 
 ## Conversation transcripts
 
-`mock-claude-code` mints a genuine Claude-Code-shaped JSONL transcript for every
-run that has a known session id — the same record shapes the real runner's
-transcript normalizer (`blizzard.runner.harness.internal.claude_code_normalizer`,
-blizzard#245) reads, so a chunk run through the fleet produces a conversation the
-runner panel can open. This is **claude_code-only**: only Claude Code has a
-reader today, so `codex.py` and `opencode.py` never construct a writer and the
-engine no-ops for them.
+`mock-claude-code` and `mock-opencode` each mint a genuine harness-shaped transcript for
+every run that has a known session id — the same record shapes the real runner's own
+normalizer for that harness (`claude_code_normalizer`, blizzard#245; `opencode_normalizer`,
+blizzard#437) reads, so a chunk run through the fleet produces a conversation the runner
+panel can open. This is **claude_code/opencode-only**: `codex` has no reader today, so
+`codex.py` never constructs a writer and the engine no-ops for it.
 
 - `engine.ITranscriptWriter` — the protocol, mirroring `IHarnessWire`:
   `record_user` (the spawn/resume turn), `record_result` (the final assistant
   turn), and `record_tool_call` / `record_tool_result`. `engine.run_prompt` takes
   an optional `transcript` parameter and calls into it at those points; `None`
-  (every facade but claude_code) is a total no-op.
+  (codex) is a total no-op. It also takes `transcript_factory`, called with the
+  session id once `run_prompt` has settled on one (a fresh mint or a resume's
+  own) — for a harness whose facade cannot know the id up front, unlike
+  `claude_code.py` below.
 - **The tool-call call sites — stated here and nowhere else.** Three helpers
   mint a matched `tool_use`/`tool_result` pair: `apply_diff` (as `Edit`), `commit`
   (as `Bash`), and `tool_call(name)`, which mints one and touches nothing else.
@@ -177,6 +179,19 @@ engine no-ops for them.
   spawn and honors it, so this covers the fleet-driven path in full; a bare
   direct invocation that lets the engine self-assign a uuid skips transcript
   writing.
+- `facades/_opencode_transcript.OpenCodeTranscriptWriter` — OpenCode's own
+  implementation, wired through `opencode.py`'s `transcript_factory` since a
+  fresh `mock-opencode run` self-mints its session id (real OpenCode's own
+  fresh-session handshake), unknown to the facade until `run_prompt` mints it.
+  Unlike Claude Code's append-only JSONL, real `opencode export <id>` returns
+  one `{info, messages}` JSON document, so this writer keeps that document in
+  memory and rewrites the whole file at `<root>/mock-opencode/<session_id>.json`
+  on every mutation — what makes a tool call's `pending` -> `completed`
+  transition visible to a reader between the two calls. `mock-opencode export
+  <id>` reads that same path back verbatim, matching the real CLI's contract.
+  A `task` tool call additionally mints a second, linked child document, the
+  child's own `info.parentID` naming the parent — the same
+  `state.metadata.sessionID` pointer real OpenCode carries.
 - **The sidechain/thinking-fidelity gap — stated here and nowhere else.** This is
   the one place to update if the gap's shape changes. Beyond `sessionId`/`cwd`/
   `timestamp` per record — `facades/_transcript.py`'s module docstring is the one
