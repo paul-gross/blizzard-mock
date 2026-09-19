@@ -65,7 +65,7 @@ body), mirroring the real hub's own always-raising demand on this one route.
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy (blizzard#247) |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record (blizzard#249) |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and the newest usage sample |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and its reported per-slug usage collection |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 
 ## Batched fact push (`POST /api/fleet/events`)
@@ -90,13 +90,10 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 The three runner-scoped kinds — both `runner.locally_*` and the usage sample — are held
 per `runner_id` and applied whether or not that runner has registered, so a report the
 outbound buffer replays ahead of its registration is readable once that registration
-lands. The usage payload is coerced at ingest (defaulted `sampled_at`, unusable windows
-dropped), so an accepted fact can never make a later read raise. Held per `(runner_id,
-slug)`, defaulted to the legacy Anthropic slug when a payload carries none (blizzard#436
-phase 3): one subscription's sample never overwrites a sibling's, and `RunnerView`'s
-legacy `external_subscription_usage` field derives from the legacy slug's row alone,
-alongside the additive `subscriptions` collection carrying every declared slug's own
-view.
+lands. A usage sample must carry a non-empty `slug`; its payload is coerced at ingest
+(defaulted `sampled_at`, unusable windows dropped), so an accepted fact can never make a
+later read raise. Held per `(runner_id, slug)`, one subscription's sample never overwrites
+a sibling's, and `RunnerView.subscriptions` carries every reported slug's own view.
 
 ## Control plane
 

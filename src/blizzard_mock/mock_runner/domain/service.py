@@ -429,7 +429,7 @@ class MockRunnerService:
     def report_external_usage(
         self,
         *,
-        slug: str,
+        slug: Any,
         sampled_at: str,
         windows: list[dict[str, Any]],
         name: str | None = None,

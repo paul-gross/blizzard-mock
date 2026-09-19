@@ -196,11 +196,22 @@ class ReportEventBody(BaseModel):
 
 class ReportExternalUsageBody(BaseModel):
     """POST /_drive/report-external-usage — push one
-    ``external_subscription_usage.sampled`` fact naming an arbitrary ``slug`` (issue #218,
-    blizzard#436 phase 3), without waiting on a real runner's sampling cadence. ``name`` is
-    optional — additive on the real wire, omitted defaults to ``slug`` at the hub."""
+    ``external_subscription_usage.sampled`` fact naming an arbitrary ``slug`` (issue #218),
+    without waiting on a real runner's sampling cadence. ``name`` is optional — additive on
+    the real wire, omitted defaults to ``slug`` at the hub."""
 
-    slug: str
+    #: The declared subscription this sample belongs to. Narrow on purpose: the drive
+    #: plane still documents and enforces the shape a real runner reports.
+    slug: str = ""
     sampled_at: str
     windows: list[dict[str, Any]] = Field(default_factory=list)
     name: str | None = None
+    #: The malformed-slug lever. Set it to push this value as the fact's ``slug``
+    #: unnarrowed, so a test can prove the hub's own intake rejects a shape the drive
+    #: plane would never produce. Rejection is the hub's job, not this model's — which
+    #: is exactly what such a test asserts.
+    raw_slug: Any | None = None
+
+    def pushed_slug(self) -> Any:
+        """The value to send as the fact's ``slug`` — the lever when set, else ``slug``."""
+        return self.slug if self.raw_slug is None else self.raw_slug

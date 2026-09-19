@@ -187,7 +187,7 @@ def drive_report_external_usage(
     body: ReportExternalUsageBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
     return service.report_external_usage(
-        slug=body.slug, sampled_at=body.sampled_at, windows=body.windows, name=body.name
+        slug=body.pushed_slug(), sampled_at=body.sampled_at, windows=body.windows, name=body.name
     )
 
 

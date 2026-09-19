@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from blizzard_mock.clock import Clock
 from blizzard_mock.levers import ILeverStore
@@ -40,7 +41,6 @@ from blizzard_mock.mock_hub.domain.wire import (
     ChunkEscalationView,
     ChunkStatusView,
     EnvelopeChoice,
-    ExternalSubscriptionUsageView,
     ExternalSubscriptionUsageWindowView,
     FindingView,
     GardenProposalView,
@@ -77,9 +77,20 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 
-#: Mirrors `blizzard.wire.facts.LEGACY_ANTHROPIC_SLUG` — restated, not imported (no
-#: `blizzard` dep). The slug a fact missing one defaults to, and the legacy field derives from.
-_LEGACY_ANTHROPIC_SLUG = "anthropic"
+
+class _ExternalSubscriptionUsageWindowFact(BaseModel):
+    """One complete subscription-usage window accepted from a runner fact.
+
+    Mirrors `blizzard.wire.facts.ExternalSubscriptionUsageWindowFact` — restated, not
+    imported (no ``blizzard`` dep) — including its per-field strictness, so the mock
+    drops exactly the entries the real hub's intake drops. ``resets_at`` stays lax on
+    both sides: it arrives as an ISO-8601 string."""
+
+    window: str = Field(strict=True)
+    utilization_pct: float = Field(ge=0, le=100, allow_inf_nan=False, strict=True)
+    resets_at: datetime
+    window_seconds: int = Field(gt=0, strict=True)
+
 
 #: The real hub's caps, restated not imported (no ``blizzard`` dep); the daily-rate one needs
 #: a wall clock. Keep the record cap >= the RUNNER's, or this rejects what the real hub stores.
@@ -697,9 +708,10 @@ class MockHubService:
             reported.locally_paused_reason = None
             return True
         if kind == EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED:
-            # Coerced here, never at the read, mirroring the real hub's own ingest defaults.
-            # Upserted per slug: a sibling slug's stored view is untouched by this write.
-            slug = str(payload.get("slug") or _LEGACY_ANTHROPIC_SLUG)
+            # A non-empty string slug upserts per slug; a sibling's stored view is untouched.
+            slug = payload.get("slug")
+            if not isinstance(slug, str) or not slug:
+                return False
             self._state.reported_facts(runner_id).subscription_usage[slug] = self._usage_view(payload, slug=slug)
             return True
         # usage.recorded / event.recorded (issue #125) are accepted as no-ops.
@@ -857,8 +869,6 @@ class MockHubService:
         # Reported facts are merged in at the read, so one that arrived before this
         # registration surfaces the moment the registration lands.
         reported = self._state.reported_facts(runner_id)
-        # The legacy field derives from the legacy slug's row alone.
-        legacy = reported.subscription_usage.get(_LEGACY_ANTHROPIC_SLUG)
         return RunnerView(
             runner_id=row.runner_id,
             workspace_id=row.workspace_id,
@@ -870,32 +880,49 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
-            external_subscription_usage=(
-                ExternalSubscriptionUsageView(sampled_at=legacy.sampled_at, windows=legacy.windows)
-                if legacy is not None
-                else None
-            ),
             subscriptions=list(reported.subscription_usage.values()),
         )
 
     def _usage_view(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageView:
-        """One sampled payload as the mirrored view, total over any payload shape.
+        """One sampled payload as the mirrored view, with malformed windows omitted.
 
-        ``sampled_at`` and ``windows`` default exactly as the real hub's ingest defaults them; a window
-        that does not validate is dropped rather than failing the whole fact. ``name`` defaults to
-        ``slug`` itself for a payload with no additive ``name`` field, mirroring the real hub's own default."""
+        ``sampled_at`` defaults exactly as the real hub's ingest does. ``name`` defaults to ``slug``
+        itself for a payload with no additive ``name`` field, mirroring the real hub's own default."""
         windows = []
-        for entry in payload.get("windows") or []:
+        entries = payload.get("windows")
+        for entry in entries if isinstance(entries, list) else []:
             try:
-                windows.append(ExternalSubscriptionUsageWindowView.model_validate(entry))
+                window = _ExternalSubscriptionUsageWindowFact.model_validate(entry)
+                windows.append(
+                    ExternalSubscriptionUsageWindowView(
+                        window=window.window,
+                        utilization_pct=window.utilization_pct,
+                        resets_at=(
+                            window.resets_at.isoformat()
+                            if window.resets_at.tzinfo is not None
+                            else window.resets_at.replace(tzinfo=UTC).isoformat()
+                        ),
+                        window_seconds=window.window_seconds,
+                    )
+                )
             except ValidationError:
                 continue
         sampled_at = payload.get("sampled_at")
+        if isinstance(sampled_at, str):
+            try:
+                parsed_at = datetime.fromisoformat(sampled_at)
+                sampled_at = (
+                    parsed_at.astimezone(UTC) if parsed_at.tzinfo is not None else parsed_at.replace(tzinfo=UTC)
+                )
+            except ValueError:
+                sampled_at = self._clock.now()
+        else:
+            sampled_at = self._clock.now()
         name = payload.get("name")
         return SubscriptionUsageView(
             slug=slug,
             name=str(name) if name else slug,
-            sampled_at=str(sampled_at) if sampled_at else self._clock.now().isoformat(),
+            sampled_at=sampled_at.isoformat(),
             windows=windows,
         )
 

@@ -998,7 +998,11 @@ def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client
     without a known runner; acking and discarding would make that ordering untestable."""
     for seq, kind, payload in (
         (1, "runner.locally_paused", {"by": "op", "reason": "maintenance"}),
-        (2, "external_subscription_usage.sampled", {"sampled_at": "2026-08-01T12:00:00+00:00", "windows": []}),
+        (
+            2,
+            "external_subscription_usage.sampled",
+            {"slug": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+        ),
     ):
         ack = client.post(
             "/api/fleet/events",
@@ -1011,15 +1015,21 @@ def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client
     view = client.get("/api/fleet/runners/late").json()
     assert view["locally_paused"] is True
     assert view["locally_paused_by"] == "op"
-    assert view["external_subscription_usage"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
+    assert view["subscriptions"] == [
+        {"slug": "anthropic", "name": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []}
+    ]
 
 
-def test_a_partial_usage_payload_never_poisons_the_runner_read(client: TestClient) -> None:
-    """An accepted fact must not be able to make a later read raise. The payload is coerced
-    at ingest the way the real hub defaults it, so a missing ``sampled_at`` and an unusable
-    window degrade the sample rather than 500-ing every subsequent ``GET /runners/{id}``."""
+def test_malformed_usage_windows_are_omitted_and_a_later_valid_empty_sample_renders(client: TestClient) -> None:
+    """The mock drops invalid windows while accepting the advisory sample, like the real hub."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
-    ack = client.post(
+    valid_window = {
+        "window": "5h",
+        "utilization_pct": 42.5,
+        "resets_at": "2026-08-01T17:00:00+00:00",
+        "window_seconds": 18000,
+    }
+    malformed = client.post(
         "/api/fleet/events",
         json={
             "runner_id": "r1",
@@ -1027,18 +1037,147 @@ def test_a_partial_usage_payload_never_poisons_the_runner_read(client: TestClien
                 {
                     "seq": 1,
                     "kind": "external_subscription_usage.sampled",
-                    "payload": {"windows": [{"window": "5h", "utilization_pct": 10.0}]},
+                    "payload": {
+                        "slug": "anthropic",
+                        "name": "Anthropic",
+                        "sampled_at": "2026-08-01T12:00:00+00:00",
+                        "windows": [
+                            valid_window,
+                            {"window": "7d", "utilization_pct": 10.0},
+                            {
+                                "window": "1h",
+                                "utilization_pct": "not-a-number",
+                                "resets_at": "2026-08-01T13:00:00+00:00",
+                                "window_seconds": 3600,
+                            },
+                            {
+                                "window": "daily",
+                                "utilization_pct": 20.0,
+                                "resets_at": "not-an-instant",
+                                "window_seconds": 86400,
+                            },
+                            {
+                                "window": "zero",
+                                "utilization_pct": 20.0,
+                                "resets_at": "2026-08-01T12:00:00+00:00",
+                                "window_seconds": 0,
+                            },
+                        ],
+                    },
                 }
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
+    assert malformed.json()["applied"] == [1]
 
-    view = client.get("/api/fleet/runners/r1")
+    first_read = client.get("/api/fleet/runners/r1")
+    assert first_read.status_code == 200
+    assert first_read.json()["subscriptions"][0]["windows"] == [valid_window]
 
-    assert view.status_code == 200
-    assert view.json()["external_subscription_usage"]["sampled_at"]  # defaulted, never absent
-    assert view.json()["external_subscription_usage"]["windows"] == []  # the unusable window dropped
+    healthy = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "anthropic",
+                        "name": "Anthropic",
+                        "sampled_at": "2026-08-01T12:01:00+00:00",
+                        "windows": [],
+                    },
+                }
+            ],
+        },
+    )
+    assert healthy.json()["applied"] == [2]
+
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == [
+        {
+            "slug": "anthropic",
+            "name": "Anthropic",
+            "sampled_at": "2026-08-01T12:01:00+00:00",
+            "windows": [],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sampled_at", "expected"),
+    [
+        ("not-an-instant", "2026-07-13T00:00:00+00:00"),
+        ("2026-08-01T12:00:00", "2026-08-01T12:00:00+00:00"),
+        ("2026-08-01T14:00:00+02:00", "2026-08-01T12:00:00+00:00"),
+    ],
+)
+def test_sampled_at_matches_the_real_hubs_utc_and_fallback_semantics(
+    client: TestClient, sampled_at: str, expected: str
+) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    response = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {"slug": "anthropic", "sampled_at": sampled_at, "windows": []},
+                }
+            ],
+        },
+    )
+
+    assert response.json()["applied"] == [1]
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"][0]["sampled_at"] == expected
+
+
+@pytest.mark.parametrize(
+    "invalid_pct",
+    [float("nan"), float("inf"), float("-inf"), -0.1, 100.1],
+    ids=["nan", "inf", "-inf", "below", "above"],
+)
+def test_non_finite_or_out_of_range_utilization_windows_are_omitted_at_ingest(
+    client: TestClient, invalid_pct: float
+) -> None:
+    service = client.app.state.service  # type: ignore[attr-defined]
+    valid_window = {
+        "window": "5h",
+        "utilization_pct": 42.5,
+        "resets_at": "2026-08-01T17:00:00+00:00",
+        "window_seconds": 18_000,
+    }
+
+    ack = service.ingest_facts(
+        "r1",
+        [
+            {
+                "seq": 1,
+                "kind": "external_subscription_usage.sampled",
+                "payload": {
+                    "slug": "anthropic",
+                    "sampled_at": "2026-08-01T12:00:00+00:00",
+                    "windows": [
+                        valid_window,
+                        {
+                            "window": "7d",
+                            "utilization_pct": invalid_pct,
+                            "resets_at": "2026-08-08T12:00:00+00:00",
+                            "window_seconds": 604_800,
+                        },
+                    ],
+                },
+            }
+        ],
+    )
+
+    assert ack.applied == [1]
+    assert client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"}).status_code == 201
+    windows = client.get("/api/fleet/runners/r1").json()["subscriptions"][0]["windows"]
+    assert windows == [valid_window]
+    json.dumps(windows, allow_nan=False)
 
 
 def test_events_event_recorded_is_accepted(client: TestClient) -> None:
@@ -1061,10 +1200,8 @@ def test_events_event_recorded_is_accepted(client: TestClient) -> None:
     assert ack.json()["rejected"] == []
 
 
-def test_events_newest_external_usage_sample_wins_on_the_runner_view(client: TestClient) -> None:
-    """The newest sample overwrites the one before it and is served on the runner view — the
-    mirror field a real client reads, not an accepted-and-discarded fact. Which store holds it
-    is ``test_a_report_that_outruns_its_registration_is_readable_once_it_lands``'s question."""
+def test_events_newest_external_usage_sample_wins_on_its_subscription(client: TestClient) -> None:
+    """The newest sample overwrites the earlier sample for its slug."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     for seq, pct in ((1, 42.0), (2, 71.5)):
         ack = client.post(
@@ -1076,6 +1213,7 @@ def test_events_newest_external_usage_sample_wins_on_the_runner_view(client: Tes
                         "seq": seq,
                         "kind": "external_subscription_usage.sampled",
                         "payload": {
+                            "slug": "anthropic",
                             "sampled_at": f"2026-08-01T1{seq}:00:00+00:00",
                             "windows": [
                                 {
@@ -1092,8 +1230,9 @@ def test_events_newest_external_usage_sample_wins_on_the_runner_view(client: Tes
         )
         assert ack.json()["applied"] == [seq]
     view = client.get("/api/fleet/runners/r1").json()
-    assert view["external_subscription_usage"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
-    assert view["external_subscription_usage"]["windows"][0]["utilization_pct"] == 71.5
+    subscription = view["subscriptions"][0]
+    assert subscription["sampled_at"] == "2026-08-01T12:00:00+00:00"
+    assert subscription["windows"][0]["utilization_pct"] == 71.5
 
 
 def test_registration_round_trips_env_capacity_onto_the_runner_view(client: TestClient) -> None:
@@ -1118,6 +1257,7 @@ def test_events_external_subscription_usage_sampled_is_accepted(client: TestClie
                     "seq": 1,
                     "kind": "external_subscription_usage.sampled",
                     "payload": {
+                        "slug": "anthropic",
                         "sampled_at": "2026-08-01T12:00:00+00:00",
                         "windows": [
                             {
@@ -1136,10 +1276,41 @@ def test_events_external_subscription_usage_sampled_is_accepted(client: TestClie
     assert ack.json()["rejected"] == []
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+        {"slug": "", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+        {"slug": 123, "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
+    ],
+    ids=["missing-slug", "empty-slug", "non-string-slug"],
+)
+def test_events_invalid_external_usage_sample_is_rejected_without_a_subscription(
+    client: TestClient, payload: dict[str, object]
+) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": payload,
+                }
+            ],
+        },
+    )
+
+    assert ack.json()["rejected"] == [1]
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+
+
 def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_collection(client: TestClient) -> None:
     """A runner declaring more than one subscription (blizzard#436 phase 3) — each slug's
-    sample lands and renders as its own entry, distinct by slug and name, on the additive
-    ``subscriptions`` collection, beside the legacy field's own singular view."""
+    sample lands and renders as its own entry in ``subscriptions``, distinct by slug and name."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     for seq, slug, name, pct in ((1, "anthropic", "Anthropic", 42.0), (2, "openai", "OpenAI", 17.0)):
         ack = client.post(
@@ -1176,9 +1347,6 @@ def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_colle
     assert subscriptions["openai"]["name"] == "OpenAI"
     assert subscriptions["anthropic"]["windows"][0]["utilization_pct"] == 42.0
     assert subscriptions["openai"]["windows"][0]["utilization_pct"] == 17.0
-
-    # The legacy field mirrors the legacy slug's own row exactly.
-    assert view["external_subscription_usage"]["windows"] == subscriptions["anthropic"]["windows"]
 
 
 def test_each_subscription_advances_on_its_own_cadence_independently(client: TestClient) -> None:
