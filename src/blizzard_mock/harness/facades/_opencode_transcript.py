@@ -66,6 +66,7 @@ class OpenCodeTranscriptWriter:
     def __init__(self, *, session_id: str, root: Path, cwd: Path) -> None:
         self._session_id = session_id
         self._cwd = cwd
+        self._root = root
         self._dir = root / PROJECT_DIR_NAME
         self._path = document_path(root, session_id)
         # A resume is a fresh process re-opening the same session id — load whatever this
@@ -151,13 +152,24 @@ class OpenCodeTranscriptWriter:
             self._open_assistant = message
         return self._open_assistant
 
-    def _new_message(self, role: str) -> dict[str, Any]:
-        return {"info": {"id": _new_id("msg"), "sessionID": self._session_id, "role": role}, "parts": []}
+    def _new_message(self, role: str, *, session_id: str | None = None) -> dict[str, Any]:
+        """A message under ``session_id`` — this writer's own session by default, or an
+        explicit one for the child document :meth:`_write_child_session` builds."""
+        return {
+            "info": {
+                "id": _new_id("msg"),
+                "sessionID": session_id if session_id is not None else self._session_id,
+                "role": role,
+            },
+            "parts": [],
+        }
 
-    def _new_part(self, message: Mapping[str, Any], fields: Mapping[str, Any]) -> dict[str, Any]:
+    def _new_part(
+        self, message: Mapping[str, Any], fields: Mapping[str, Any], *, session_id: str | None = None
+    ) -> dict[str, Any]:
         part: dict[str, Any] = {
             "id": _new_id("prt"),
-            "sessionID": self._session_id,
+            "sessionID": session_id if session_id is not None else self._session_id,
             "messageID": message["info"]["id"],
         }
         part.update(fields)
@@ -171,48 +183,37 @@ class OpenCodeTranscriptWriter:
         """A trivial, complete child document — one user turn seeded from the parent
         call's own ``prompt`` (else empty), one assistant text reply — round-trippable
         through the real ``OpenCodeTranscriptSource``/``parse_session_export`` as a
-        resolved sidechain."""
+        resolved sidechain. Built through the same ``_new_message``/``_new_part`` this
+        writer's own root document uses, keyed to the child's own session id."""
         prompt = tool_input.get("prompt", "")
         doc = _new_document(child_id, self._cwd, title="mock-opencode child session", parent_id=self._session_id)
-        user = {"info": {"id": _new_id("msg"), "sessionID": child_id, "role": "user"}, "parts": []}
-        user["parts"].append(
-            {
-                "id": _new_id("prt"),
-                "sessionID": child_id,
-                "messageID": user["info"]["id"],
-                "type": "text",
-                "text": str(prompt),
-            }
-        )
-        assistant = {"info": {"id": _new_id("msg"), "sessionID": child_id, "role": "assistant"}, "parts": []}
+
+        user = self._new_message("user", session_id=child_id)
+        user["parts"].append(self._new_part(user, {"type": "text", "text": str(prompt)}, session_id=child_id))
+
+        assistant = self._new_message("assistant", session_id=child_id)
         reply_text = "the child session completed its delegated task"
-        assistant["parts"].append(
-            {
-                "id": _new_id("prt"),
-                "sessionID": child_id,
-                "messageID": assistant["info"]["id"],
-                "type": "text",
-                "text": reply_text,
-            }
-        )
+        assistant["parts"].append(self._new_part(assistant, {"type": "text", "text": reply_text}, session_id=child_id))
         usage = synthesize_usage_tokens(reply_text, base_input=50, base_output=10)
         assistant["parts"].append(
-            {
-                "id": _new_id("prt"),
-                "sessionID": child_id,
-                "messageID": assistant["info"]["id"],
-                "type": "step-finish",
-                "reason": _STEP_REASON,
-                "tokens": _tokens_field(usage),
-                "cost": synthesize_cost_usd(usage),
-            }
+            self._new_part(
+                assistant,
+                {
+                    "type": "step-finish",
+                    "reason": _STEP_REASON,
+                    "tokens": _tokens_field(usage),
+                    "cost": synthesize_cost_usd(usage),
+                },
+                session_id=child_id,
+            )
         )
         assistant["info"]["tokens"] = _tokens_field(usage)
         assistant["info"]["cost"] = synthesize_cost_usd(usage)
         doc["messages"] = [user, assistant]
-        child_dir = self._dir
-        child_dir.mkdir(parents=True, exist_ok=True)
-        (child_dir / f"{child_id}.json").write_text(json.dumps(doc))
+
+        child_path = document_path(self._root, child_id)
+        child_path.parent.mkdir(parents=True, exist_ok=True)
+        child_path.write_text(json.dumps(doc))
 
 
 def _new_document(session_id: str, cwd: Path, *, title: str, parent_id: str | None = None) -> dict[str, Any]:
