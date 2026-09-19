@@ -140,13 +140,12 @@ and how a settings document's hook commands are executed* — see "Hook executio
 
 ## Conversation transcripts
 
-`mock-claude-code` mints a genuine Claude-Code-shaped JSONL transcript for every
-run that has a known session id — the same record shapes the real runner's
-transcript normalizer (`blizzard.runner.harness.internal.claude_code_normalizer`,
-blizzard#245) reads, so a chunk run through the fleet produces a conversation the
-runner panel can open. This is **claude_code-only**: only Claude Code has a
-reader today, so `codex.py` and `opencode.py` never construct a writer and the
-engine no-ops for them.
+`mock-claude-code` and `mock-opencode` each mint a genuine harness-shaped transcript for
+every run that has a known session id — the same record shapes the real runner's own
+normalizer for that harness (`claude_code_normalizer`, blizzard#245; `opencode_normalizer`,
+blizzard#437) reads, so a chunk run through the fleet produces a conversation the runner
+panel can open. This is **claude_code/opencode-only**: `codex` has no reader today, so
+`codex.py` never constructs a writer and the engine no-ops for it.
 
 - `engine.ITranscriptWriter` — the protocol, mirroring `IHarnessWire`:
   `record_user` (the spawn/resume turn), `record_result` (the final assistant
