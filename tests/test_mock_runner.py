@@ -598,6 +598,24 @@ def test_drive_report_external_usage_lands_the_named_slugs_sample(stack: tuple[T
     assert subscriptions["openai"]["name"] == "OpenAI Plan"
 
 
+def test_drive_report_external_usage_raw_slug_lever_pushes_an_unnarrowed_slug(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """The malformed-slug lever reaches the hub's intake unnarrowed, so the hub is what
+    rejects it — the drive plane's own `slug: str` never gets the chance."""
+    hub, runner = stack
+    runner.post("/_drive/register")
+    out = runner.post(
+        "/_drive/report-external-usage",
+        json={"raw_slug": 123, "sampled_at": "2026-07-13T00:00:00Z", "windows": []},
+    ).json()
+
+    assert out["status"] == 200
+    assert len(out["response"]["rejected"]) == 1
+    assert out["response"]["applied"] == []
+    assert hub.get("/api/fleet/runners/runner-mock").json()["subscriptions"] == []
+
+
 def test_driver_reads_a_batch_of_chunk_statuses_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
     """blizzard#521: the runner tick's slim batch read — a repeatable ``chunk_id`` query
     param that omits an unknown id rather than 404ing."""
