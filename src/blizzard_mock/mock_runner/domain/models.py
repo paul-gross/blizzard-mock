@@ -143,8 +143,7 @@ class DecideBody(BaseModel):
 
 class AskBody(BaseModel):
     """POST /_drive/ask — push a ``question.asked`` fact, minting a pollable question
-    hub-side. ``harness_id`` is optional (D8): absent, the service's own Claude Code
-    compatibility default applies; set it to drive a mixed-harness scenario."""
+    hub-side. ``harness_id`` (D8) defaults to the Claude Code compatibility value."""
 
     chunk_id: str
     question: str
@@ -162,8 +161,7 @@ class PushTranscriptBody(BaseModel):
     """POST /_drive/push-transcript — push one transcript segment record via
     ``POST /transcripts`` (blizzard#246/#247), the transcript lane's counterpart to
     ``AskBody``'s ``/events`` push. ``turns`` defaults to one placeholder turn when
-    empty. ``harness_id`` is optional (D8): absent, the service's own Claude Code
-    compatibility default applies; set it to drive a mixed-harness scenario."""
+    empty; ``harness_id`` (D8) defaults to the Claude Code compatibility value."""
 
     chunk_id: str
     segment_id: str = "sg_mock"

@@ -139,14 +139,7 @@ def answer() -> str | None:
 
 
 # -- The misbehaviour plane (D7) — OpenCode-only wire shapes ----------------- #
-#
-# ``permission_denial``, ``interrupt_tool``, and ``malformed_record`` stage a raw,
-# pre-rendered JSONL line on ``ctx.wire_events`` (in call order); ``run_prompt``
-# carries that list onto the turn's final ``RunResult`` regardless of which path
-# ends the turn, and ``OpenCodeRunWire.render`` splices the lines into its own
-# output, just before the turn's own closing text/error record. Meaningful only on
-# OpenCode's wire — no other facade has a permission-event or this style of
-# tool-state JSONL shape — so each first checks the active wire can carry one.
+# Each stages a raw JSONL line on ``ctx.wire_events``, spliced into the render.
 
 
 def _require_opencode_wire(ctx: RunContext, helper: str) -> None:
@@ -162,11 +155,9 @@ def _require_opencode_wire(ctx: RunContext, helper: str) -> None:
 
 
 def permission_denial(name: str, patterns: Sequence[str] | None = None, *, permission_id: str | None = None) -> None:
-    """Stage an OpenCode ``permission`` event — a permission request the operator denied.
+    """Stage an OpenCode ``permission`` event for a denied request.
 
-    ``name`` is the permission name (e.g. ``"bash"``); ``patterns`` the glob(s) it
-    covers, defaulting to a single wildcard. OpenCode-only; raises on any other
-    facade's wire.
+    ``patterns`` defaults to a single wildcard. OpenCode-only.
     """
     ctx = current_context()
     _require_opencode_wire(ctx, "permission_denial")
@@ -219,12 +210,9 @@ def interrupt_tool(
 
 
 def malformed_record(line: str | None = None) -> None:
-    """Stage a raw line in the OpenCode JSONL stream the real parser rejects outright.
+    """Stage a raw line in the OpenCode JSONL stream the real parser rejects.
 
-    Defaults to a line that fails ``json.loads`` outright; pass an explicit
-    ``line`` to exercise a different rejection (valid JSON missing a required
-    field, or an unknown ``type`` discriminator). OpenCode-only, like
-    :func:`permission_denial`.
+    Defaults to invalid JSON; pass ``line`` for a different rejection shape.
     """
     ctx = current_context()
     _require_opencode_wire(ctx, "malformed_record")

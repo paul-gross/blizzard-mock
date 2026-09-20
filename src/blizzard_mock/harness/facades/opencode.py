@@ -148,9 +148,7 @@ class OpenCodeRunWire:
     first ``step_start`` record as soon as a fresh mint self-assigns it, matching
     the real handshake's early identity rather than waiting for process exit."""
 
-    #: The marker ``helpers.py``'s misbehaviour-plane primitives (D7:
-    #: ``permission_denial``, ``interrupt_tool``, ``malformed_record``) duck-type
-    #: against — only this wire has a JSONL stream those raw lines can ride on.
+    #: The marker ``helpers.py``'s misbehaviour-plane primitives duck-type against.
     carries_opencode_wire_events = True
 
     def __init__(self) -> None:
@@ -169,10 +167,8 @@ class OpenCodeRunWire:
         lines: list[str] = []
         if self._streamed_message_id is None:
             lines.append(json.dumps(_step_start_event(session_id, message_id)))
-        # The misbehaviour plane (D7): raw, pre-rendered lines a behavior script
-        # staged via permission_denial/interrupt_tool/malformed_record, spliced in
-        # call order — they represent things that happened mid-turn, so they go
-        # before the turn's own closing text/error record.
+        # The misbehaviour plane (D7): mid-turn wire lines a behavior script staged,
+        # spliced in before the turn's own closing text/error record.
         lines.extend(result.wire_events)
         if result.is_error:
             lines.append(json.dumps(_error_event(session_id, text or "the worker ended without a verdict")))

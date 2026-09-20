@@ -300,10 +300,7 @@ class MockRunnerService:
     ) -> dict[str, Any]:
         """Push a ``question.asked`` fact via ``/events`` — mints a pollable question
         hub-side. Returns the minted ``question_id`` so a test can poll it.
-
-        ``harness_id`` names the coding harness the question came from (D8); it
-        defaults to the historical Claude Code compatibility value, preserving
-        every existing caller's behavior."""
+        ``harness_id`` (D8) defaults to the Claude Code compatibility value."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -342,11 +339,8 @@ class MockRunnerService:
         """Push one transcript segment record via ``/transcripts`` (blizzard#246/#247) —
         the transcript lane's counterpart to ``ask``'s ``/events`` push, letting a
         hub-service test drive a transcript push from a mock runner (``bzh:wire-change-
-        extends-mock``) rather than a raw client.
-
-        ``harness_id`` names the coding harness the transcript came from (D8); it
-        defaults to the historical Claude Code compatibility value, preserving
-        every existing caller's behavior."""
+        extends-mock``) rather than a raw client. ``harness_id`` (D8) defaults to the
+        Claude Code compatibility value."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:

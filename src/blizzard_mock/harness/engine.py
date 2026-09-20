@@ -95,12 +95,7 @@ class RunResult:
     """What one turn produced, before a facade renders it to the wire.
 
     ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``.
-    ``wire_events`` is the misbehaviour plane (D7): raw, pre-rendered wire lines a
-    helper (e.g. ``permission_denial``, ``interrupt_tool``, ``malformed_record`` in
-    ``helpers.py``) staged on the :class:`RunContext`, carried here verbatim so a
-    wire that understands them (only :class:`~facades.opencode.OpenCodeRunWire`
-    today) can splice them into its own rendering.
-    """
+    ``wire_events`` is the misbehaviour plane (D7, see ``helpers.py``)."""
 
     session_id: str
     text: str = ""
@@ -172,11 +167,7 @@ class RunContext:
     """Ambient state for the currently-executing behavior script.
 
     Set by :func:`run_prompt`; read via :func:`current_context`. ``wire_events``
-    is the misbehaviour plane (D7): a helper appends one raw, pre-rendered wire
-    line per call (in call order), regardless of which control-flow path ends the
-    turn (``verdict``, ``ask``, ``crash``, or falling off the end of the script) —
-    ``run_prompt`` copies it onto the final :class:`RunResult` once the turn ends.
-    """
+    is the misbehaviour plane (D7, see ``helpers.py``)."""
 
     session: SessionState
     wire: IHarnessWire
