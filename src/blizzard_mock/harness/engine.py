@@ -16,7 +16,7 @@ import textwrap
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Protocol
 
@@ -94,8 +94,7 @@ class _AskExit(Exception):
 class RunResult:
     """What one turn produced, before a facade renders it to the wire.
 
-    ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``.
-    ``wire_events`` is the misbehaviour plane (D7, see ``helpers.py``)."""
+    ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``."""
 
     session_id: str
     text: str = ""
@@ -105,7 +104,6 @@ class RunResult:
     duration_ms: int = 0
     exit_code: int = 0
     ask: Ask | None = None
-    wire_events: list[str] = field(default_factory=list)
 
 
 class IHarnessWire(Protocol):
@@ -166,8 +164,7 @@ class IHookRunner(Protocol):
 class RunContext:
     """Ambient state for the currently-executing behavior script.
 
-    Set by :func:`run_prompt`; read via :func:`current_context`. ``wire_events``
-    is the misbehaviour plane (D7, see ``helpers.py``)."""
+    Set by :func:`run_prompt`; read via :func:`current_context`."""
 
     session: SessionState
     wire: IHarnessWire
@@ -180,7 +177,6 @@ class RunContext:
     result: RunResult | None = None
     transcript: ITranscriptWriter | None = None
     hooks: IHookRunner | None = None
-    wire_events: list[str] = field(default_factory=list)
 
 
 _CURRENT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar("blizzard_mock_run_context", default=None)
@@ -583,9 +579,6 @@ def run_prompt(
     result.session_id = session_id
     result.num_turns = state.turns
     result.duration_ms = int((time.monotonic() - started) * 1000)
-    # The misbehaviour plane (D7) accumulates on the context regardless of which
-    # path ended the turn — carried onto the result last, so every path picks it up.
-    result.wire_events = ctx.wire_events
     if transcript is not None:
         transcript.record_result(result)
     stream.write(wire.render(result))

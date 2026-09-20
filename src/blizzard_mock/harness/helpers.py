@@ -12,6 +12,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Sequence
+from typing import Protocol, cast
 
 from blizzard_mock.harness.engine import (
     CHOICE_CLOSE,
@@ -139,11 +140,20 @@ def answer() -> str | None:
 
 
 # -- The misbehaviour plane (D7) — OpenCode-only wire shapes ----------------- #
-# Each stages a raw JSONL line on ``ctx.wire_events``, spliced into the render.
+# Each stages a raw JSONL line on the active wire's own ``wire_events`` list
+# (``OpenCodeRunWire.wire_events``, see ``facades/opencode.py``), spliced into the render.
 
 
-def _require_opencode_wire(ctx: RunContext, helper: str) -> None:
-    """Refuse loudly when the active wire has no JSONL stream to carry a raw line.
+class _OpenCodeCapableWire(Protocol):
+    """The structural shape the misbehaviour-plane helpers need off the active wire —
+    just enough to duck-type against, so this module never has to import a facade."""
+
+    wire_events: list[str]
+
+
+def _opencode_wire(ctx: RunContext, helper: str) -> _OpenCodeCapableWire:
+    """Return ``ctx.wire`` narrowed to :class:`_OpenCodeCapableWire`, or refuse loudly
+    when the active wire has no JSONL stream to carry a raw line.
 
     Checked via a duck-typed marker (``carries_opencode_wire_events``) rather than
     an isinstance check, so this module never has to import a facade.
@@ -152,6 +162,7 @@ def _require_opencode_wire(ctx: RunContext, helper: str) -> None:
         raise RuntimeError(
             f"{helper}() is OpenCode-only — {type(ctx.wire).__name__} has no JSONL event stream to carry it"
         )
+    return cast(_OpenCodeCapableWire, ctx.wire)
 
 
 def permission_denial(name: str, patterns: Sequence[str] | None = None, *, permission_id: str | None = None) -> None:
@@ -160,7 +171,7 @@ def permission_denial(name: str, patterns: Sequence[str] | None = None, *, permi
     ``patterns`` defaults to a single wildcard. OpenCode-only.
     """
     ctx = current_context()
-    _require_opencode_wire(ctx, "permission_denial")
+    wire = _opencode_wire(ctx, "permission_denial")
     event = {
         "type": "permission",
         "sessionID": ctx.session.session_id,
@@ -170,7 +181,7 @@ def permission_denial(name: str, patterns: Sequence[str] | None = None, *, permi
             "patterns": list(patterns) if patterns else ["*"],
         },
     }
-    ctx.wire_events.append(json.dumps(event))
+    wire.wire_events.append(json.dumps(event))
 
 
 def interrupt_tool(
@@ -185,7 +196,7 @@ def interrupt_tool(
     "interrupted" discriminator. OpenCode-only, like :func:`permission_denial`.
     """
     ctx = current_context()
-    _require_opencode_wire(ctx, "interrupt_tool")
+    wire = _opencode_wire(ctx, "interrupt_tool")
     session_id = ctx.session.session_id
     event = {
         "type": "tool_use",
@@ -206,7 +217,7 @@ def interrupt_tool(
             },
         },
     }
-    ctx.wire_events.append(json.dumps(event))
+    wire.wire_events.append(json.dumps(event))
 
 
 def malformed_record(line: str | None = None) -> None:
@@ -215,5 +226,5 @@ def malformed_record(line: str | None = None) -> None:
     Defaults to invalid JSON; pass ``line`` for a different rejection shape.
     """
     ctx = current_context()
-    _require_opencode_wire(ctx, "malformed_record")
-    ctx.wire_events.append(line if line is not None else '{"type": "tool_use", "sessionID":')
+    wire = _opencode_wire(ctx, "malformed_record")
+    wire.wire_events.append(line if line is not None else '{"type": "tool_use", "sessionID":')

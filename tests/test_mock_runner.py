@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
+from blizzard_mock.harness_identity import OPENCODE_HARNESS_ID
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
 from blizzard_mock.mock_hub.domain.service import MockHubService
 from blizzard_mock.mock_runner.app import create_app as create_runner_app
@@ -515,6 +516,27 @@ def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
     assert question["harness_id"] == "claude_code"
 
 
+def test_drive_ask_forwards_an_explicit_harness_id(stack: tuple[TestClient, TestClient]) -> None:
+    """An explicit ``harness_id`` supplied through ``/_drive/ask`` reaches the pushed
+    ``question.asked`` fact's own field, rather than always stamping the Claude Code
+    compatibility default (F3, review round on D8's caller-supplied ``harness_id``)."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    asked = runner.post(
+        "/_drive/ask", json={"chunk_id": chunk_id, "question": "which db?", "harness_id": OPENCODE_HARNESS_ID}
+    ).json()
+    assert asked["drove"] is True
+    question_id = asked["question_id"]
+
+    polled = runner.post("/_drive/poll-answer", json={"question_id": question_id}).json()
+    assert polled["response"]["harness_id"] == OPENCODE_HARNESS_ID
+
+    detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
+    [question] = [q for q in detail["questions"] if q["question_id"] == question_id]
+    assert question["harness_id"] == OPENCODE_HARNESS_ID
+
+
 def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
     stack: tuple[TestClient, TestClient],
 ) -> None:
@@ -545,6 +567,24 @@ def test_drive_push_transcript_requires_a_held_chunk(stack: tuple[TestClient, Te
     pushed = runner.post("/_drive/push-transcript", json={"chunk_id": chunk_id}).json()
 
     assert pushed["drove"] is False
+
+
+def test_drive_push_transcript_forwards_an_explicit_harness_id(stack: tuple[TestClient, TestClient]) -> None:
+    """An explicit ``harness_id`` supplied through ``/_drive/push-transcript`` reaches the
+    pushed transcript record's own field (F3, mirrors the ``/_drive/ask`` coverage above)."""
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+
+    pushed = runner.post(
+        "/_drive/push-transcript",
+        json={"chunk_id": chunk_id, "segment_id": "sg_1", "harness_id": OPENCODE_HARNESS_ID},
+    ).json()
+
+    assert pushed["drove"] is True
+    service = hub.app.state.service  # type: ignore[attr-defined]
+    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()
+    assert record["harness_id"] == OPENCODE_HARNESS_ID
 
 
 def test_drive_poll_answer_reflects_an_operator_answer(stack: tuple[TestClient, TestClient]) -> None:
