@@ -31,8 +31,8 @@ class Held:
 class RegisterBody(BaseModel):
     """POST /_drive/register — register (or heartbeat) with the hub. ``capabilities`` is
     settable directly over the wire, each entry the raw ``{harness_id, version?, tiers?,
-    default?}`` shape, letting a test drive a chosen capability snapshot without a real
-    harness adapter behind it."""
+    default?, available?}`` shape, letting a test drive a chosen capability snapshot without a
+    real harness adapter behind it."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
 

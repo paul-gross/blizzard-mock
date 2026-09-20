@@ -68,17 +68,20 @@ def _effective_model(node: NodeSpec, chunk: ChunkState) -> list[str]:
 
 def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[RunnerCapability]) -> bool:
     """Whether some reported capability could serve ``node_id``'s effective session —
-    the mock's own mirror of ``EligibilityCheck._lineage_satisfied``."""
+    the mock's own mirror of ``EligibilityCheck._lineage_satisfied``. A capability health
+    has withdrawn from selection (blizzard#438) satisfies no lineage, mirroring the real
+    hub's own filter."""
     node = chunk.node(node_id)
     if node is None:
         return True  # unreachable defensively — an unseeded node id was never walked to
+    available = [capability for capability in capabilities if capability.available]
     harnesses = _effective_harnesses(node, chunk)
     if not harnesses:
-        return any(capability.default for capability in capabilities)
+        return any(capability.default for capability in available)
     model = _effective_model(node, chunk)
     strict = len(harnesses) > 1 and bool(model)
     for harness_id in harnesses:
-        capability = next((c for c in capabilities if c.harness_id == harness_id), None)
+        capability = next((c for c in available if c.harness_id == harness_id), None)
         if capability is None:
             continue
         if strict and not any(tier in capability.tiers for tier in model):

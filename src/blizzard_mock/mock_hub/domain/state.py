@@ -7,7 +7,7 @@ implements; the routers never touch it (``bzh:controller-read-only``).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
@@ -19,13 +19,14 @@ from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
 class RunnerCapability:
     """One harness binding a registered runner reported it can execute (blizzard#433) —
     the mock's own domain-core mirror of the wire shape, kept import-free of it. ``version``
-    is ``None`` when the binding exposes none; ``default`` marks the runner's own default
-    binding."""
+    is ``None`` when absent; ``default`` marks the runner's own default binding. ``default``/
+    ``available`` are keyword-only so two adjacent bools can't swap silently unkeyworded."""
 
     harness_id: str
     version: str | None = None
     tiers: tuple[str, ...] = ()
-    default: bool = False
+    default: bool = field(default=False, kw_only=True)
+    available: bool = field(default=True, kw_only=True)
 
 
 class ReportedRunnerFacts:

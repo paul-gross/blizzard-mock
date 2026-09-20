@@ -41,6 +41,7 @@ class RunnerCapabilityBody(MirroredWireBody):
     version: str | None = None
     tiers: list[str] = Field(default_factory=list)
     default: bool = False
+    available: bool = True
 
 
 class QueuePeekBody(MirroredWireBody):
