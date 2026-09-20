@@ -213,6 +213,18 @@ class SubscriptionUsageView(BaseModel):
     windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
 
 
+class RunnerCapabilityView(BaseModel):
+    """One harness binding a registered runner reported it can execute (blizzard#433) —
+    mirrors ``blizzard.wire.runner.RunnerCapability``, the output counterpart to
+    ``deps.RunnerCapabilityBody``."""
+
+    harness_id: str
+    version: str | None = None
+    tiers: list[str] = Field(default_factory=list)
+    default: bool = False
+    available: bool = True
+
+
 class RunnerView(BaseModel):
     runner_id: str
     workspace_id: str
@@ -228,6 +240,8 @@ class RunnerView(BaseModel):
     env_capacity: int | None = None
     # Every reported per-slug sample, empty when no sample was reported.
     subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
+    # The runner's reported capability snapshot — every harness/tier it can execute right now.
+    capabilities: list[RunnerCapabilityView] = Field(default_factory=list)
 
 
 class RunnerFactAck(BaseModel):

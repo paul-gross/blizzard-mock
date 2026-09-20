@@ -204,9 +204,8 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
 
 
 def _registered_capabilities(client: TestClient, runner_id: str) -> tuple:
-    """A registered runner's stored capability snapshot — introspection the wire surface
-    doesn't expose (``RunnerView`` carries no ``capabilities`` field, mirroring the real
-    hub, blizzard#433), so this reaches the composition root's own service directly."""
+    """A registered runner's stored capability snapshot, read from the composition root's
+    own service directly — the domain-core dataclass shape, not the wire view."""
     service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
     row = service._state.get_runner(runner_id)
     assert row is not None
@@ -235,6 +234,40 @@ def test_registration_accepts_and_stores_capabilities(client: TestClient) -> Non
     assert capability.version == "1.2.3"
     assert capability.tiers == ("blizzard:frontier",)
     assert capability.default is True
+
+
+def test_runner_view_carries_the_registered_capability_snapshot(client: TestClient) -> None:
+    """blizzard#441 — ``RunnerView`` mirrors the real hub's ``capabilities`` field, so the
+    board can read it back the same way it reads liveness or the pause brakes."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-cap-view",
+            "workspace_id": "ws",
+            "capabilities": [
+                {"harness_id": "claude_code", "version": "1.2.3", "tiers": ["blizzard:frontier"], "default": True}
+            ],
+        },
+    )
+
+    resp = client.get("/api/fleet/runners/r-cap-view")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["capabilities"] == [
+        {
+            "harness_id": "claude_code",
+            "version": "1.2.3",
+            "tiers": ["blizzard:frontier"],
+            "default": True,
+            "available": True,
+        }
+    ]
+
+
+def test_runner_view_has_no_capabilities_when_none_were_registered(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r-no-cap-view", "workspace_id": "ws"})
+    resp = client.get("/api/fleet/runners/r-no-cap-view")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["capabilities"] == []
 
 
 def test_registration_without_capabilities_leaves_it_empty(client: TestClient) -> None:
