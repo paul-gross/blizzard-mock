@@ -56,6 +56,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteClaimResponse,
     RouteTokenRekeyResponse,
     RouteView,
+    RunnerCapabilityView,
     RunnerFactAck,
     RunnerView,
     SubscriptionUsageView,
@@ -881,6 +882,16 @@ class MockHubService:
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
             subscriptions=list(reported.subscription_usage.values()),
+            capabilities=[
+                RunnerCapabilityView(
+                    harness_id=c.harness_id,
+                    version=c.version,
+                    tiers=list(c.tiers),
+                    default=c.default,
+                    available=c.available,
+                )
+                for c in row.capabilities
+            ],
         )
 
     def _usage_view(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageView:
