@@ -9,3 +9,6 @@ from __future__ import annotations
 
 #: The only historical harness every pre-provenance session backfills to; both mocks' compatibility default.
 CLAUDE_CODE_HARNESS_ID = "claude_code"
+#: OpenCode's harness id — matches the string blizzard's own adapter registers under
+#: (``runner/harness/identity.py``'s ``OPENCODE_HARNESS_ID``).
+OPENCODE_HARNESS_ID = "opencode"

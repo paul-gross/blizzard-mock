@@ -16,7 +16,7 @@ import textwrap
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Protocol
 
@@ -95,6 +95,11 @@ class RunResult:
     """What one turn produced, before a facade renders it to the wire.
 
     ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``.
+    ``wire_events`` is the misbehaviour plane (D7): raw, pre-rendered wire lines a
+    helper (e.g. ``permission_denial``, ``interrupt_tool``, ``malformed_record`` in
+    ``helpers.py``) staged on the :class:`RunContext`, carried here verbatim so a
+    wire that understands them (only :class:`~facades.opencode.OpenCodeRunWire`
+    today) can splice them into its own rendering.
     """
 
     session_id: str
@@ -105,6 +110,7 @@ class RunResult:
     duration_ms: int = 0
     exit_code: int = 0
     ask: Ask | None = None
+    wire_events: list[str] = field(default_factory=list)
 
 
 class IHarnessWire(Protocol):
@@ -165,7 +171,11 @@ class IHookRunner(Protocol):
 class RunContext:
     """Ambient state for the currently-executing behavior script.
 
-    Set by :func:`run_prompt`; read via :func:`current_context`.
+    Set by :func:`run_prompt`; read via :func:`current_context`. ``wire_events``
+    is the misbehaviour plane (D7): a helper appends one raw, pre-rendered wire
+    line per call (in call order), regardless of which control-flow path ends the
+    turn (``verdict``, ``ask``, ``crash``, or falling off the end of the script) —
+    ``run_prompt`` copies it onto the final :class:`RunResult` once the turn ends.
     """
 
     session: SessionState
@@ -179,6 +189,7 @@ class RunContext:
     result: RunResult | None = None
     transcript: ITranscriptWriter | None = None
     hooks: IHookRunner | None = None
+    wire_events: list[str] = field(default_factory=list)
 
 
 _CURRENT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar("blizzard_mock_run_context", default=None)
@@ -419,6 +430,9 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
         "crash": helpers.crash,
         "state": helpers.state,
         "answer": helpers.answer,
+        "permission_denial": helpers.permission_denial,
+        "interrupt_tool": helpers.interrupt_tool,
+        "malformed_record": helpers.malformed_record,
     }
     return ns
 
@@ -578,6 +592,9 @@ def run_prompt(
     result.session_id = session_id
     result.num_turns = state.turns
     result.duration_ms = int((time.monotonic() - started) * 1000)
+    # The misbehaviour plane (D7) accumulates on the context regardless of which
+    # path ended the turn — carried onto the result last, so every path picks it up.
+    result.wire_events = ctx.wire_events
     if transcript is not None:
         transcript.record_result(result)
     stream.write(wire.render(result))

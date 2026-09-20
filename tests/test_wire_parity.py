@@ -140,6 +140,81 @@ def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fence
     assert not any(event.type == "step_finish" for event in events)
 
 
+def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """D7: ``permission_denial()`` stages a ``permission`` event whose stdout still parses
+    cleanly through the real parser, carrying the denied permission's name and patterns."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(
+        cwd, env, "run", "permission_denial('bash', ['git push *']); verdict('deny', 'not allowed')"
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    events = shapes.parse_run_jsonl(proc.stdout)
+
+    permission_events = [event for event in events if event.type == "permission"]
+    assert len(permission_events) == 1
+    permission = permission_events[0].permission
+    assert permission is not None
+    assert permission.id
+    assert permission.permission == "bash"
+    assert permission.patterns == ("git push *",)
+
+
+def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """D7: ``interrupt_tool()`` stages a ``tool_use`` event whose part's ``state.status`` is
+    ``"error"`` — an interruption reads on OpenCode's wire exactly as a tool failure does,
+    since there is no separate "interrupted" discriminator — and it still parses cleanly."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(
+        cwd,
+        env,
+        "run",
+        "interrupt_tool('bash', {'command': 'rm -rf /'}, error='interrupted by the user'); verdict('deny')",
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    events = shapes.parse_run_jsonl(proc.stdout)
+
+    tool_events = [event for event in events if event.type == "tool_use"]
+    assert len(tool_events) == 1
+    part = tool_events[0].part
+    assert part is not None
+    assert part.tool == "bash"
+    assert part.state is not None
+    assert part.state.status == "error"
+    assert part.state.error == "interrupted by the user"
+
+
+def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """D7: ``malformed_record()`` stages a line the real parser genuinely rejects — proving
+    the production rejection path is exercised against this mock, not only against
+    blizzard's own hand-built fixtures."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(cwd, env, "run", "malformed_record(); verdict('approve')")
+    assert proc.returncode == 0, proc.stderr
+
+    with pytest.raises(shapes.OpenCodeShapeError):
+        shapes.parse_run_jsonl(proc.stdout)
+
+
+def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
+    """D7's misbehaviour plane is OpenCode-only — calling it from a facade whose wire has
+    no JSONL stream to carry it fails the turn clearly rather than silently no-op'ing."""
+    cwd, env = fenced_repo
+    proc = subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "permission_denial('bash')"],
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert "OpenCode-only" in proc.stdout
+
+
 #: Mirror model -> the hub schema it mirrors, plus the real fields it deliberately omits.
 #: A mirror model missing from this map fails, so a new one is mapped on purpose.
 _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {

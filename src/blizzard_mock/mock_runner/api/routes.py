@@ -164,7 +164,10 @@ def drive_decide(body: DecideBody, service: Annotated[MockRunnerService, Depends
 
 @drive_router.post("/ask")
 def drive_ask(body: AskBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.ask(body.chunk_id, question=body.question, options=body.options)
+    kwargs: dict[str, Any] = {"question": body.question, "options": body.options}
+    if body.harness_id is not None:
+        kwargs["harness_id"] = body.harness_id
+    return service.ask(body.chunk_id, **kwargs)
 
 
 @drive_router.post("/report-event")
@@ -202,13 +205,15 @@ def drive_poll_answer(
 def drive_push_transcript(
     body: PushTranscriptBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
-    return service.push_transcript(
-        body.chunk_id,
-        segment_id=body.segment_id,
-        turns=body.turns,
-        final=body.final,
-        record_truncated=body.record_truncated,
-    )
+    kwargs: dict[str, Any] = {
+        "segment_id": body.segment_id,
+        "turns": body.turns,
+        "final": body.final,
+        "record_truncated": body.record_truncated,
+    }
+    if body.harness_id is not None:
+        kwargs["harness_id"] = body.harness_id
+    return service.push_transcript(body.chunk_id, **kwargs)
 
 
 @drive_router.post("/pause")

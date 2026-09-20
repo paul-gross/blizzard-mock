@@ -7,8 +7,10 @@ Bound into the script namespace by :func:`~engine.run_prompt`; a script calls
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
+import uuid
 from collections.abc import Sequence
 
 from blizzard_mock.harness.engine import (
@@ -134,3 +136,96 @@ def answer() -> str | None:
     its blocks elided; an untagged resume returns the whole raw message.
     """
     return current_context().session.last_answer
+
+
+# -- The misbehaviour plane (D7) — OpenCode-only wire shapes ----------------- #
+#
+# ``permission_denial``, ``interrupt_tool``, and ``malformed_record`` stage a raw,
+# pre-rendered JSONL line on ``ctx.wire_events`` (in call order); ``run_prompt``
+# carries that list onto the turn's final ``RunResult`` regardless of which path
+# ends the turn, and ``OpenCodeRunWire.render`` splices the lines into its own
+# output, just before the turn's own closing text/error record. Meaningful only on
+# OpenCode's wire — no other facade has a permission-event or this style of
+# tool-state JSONL shape — so each first checks the active wire can carry one.
+
+
+def _require_opencode_wire(ctx: RunContext, helper: str) -> None:
+    """Refuse loudly when the active wire has no JSONL stream to carry a raw line.
+
+    Checked via a duck-typed marker (``carries_opencode_wire_events``) rather than
+    an isinstance check, so this module never has to import a facade.
+    """
+    if not getattr(ctx.wire, "carries_opencode_wire_events", False):
+        raise RuntimeError(
+            f"{helper}() is OpenCode-only — {type(ctx.wire).__name__} has no JSONL event stream to carry it"
+        )
+
+
+def permission_denial(name: str, patterns: Sequence[str] | None = None, *, permission_id: str | None = None) -> None:
+    """Stage an OpenCode ``permission`` event — a permission request the operator denied.
+
+    ``name`` is the permission name (e.g. ``"bash"``); ``patterns`` the glob(s) it
+    covers, defaulting to a single wildcard. OpenCode-only; raises on any other
+    facade's wire.
+    """
+    ctx = current_context()
+    _require_opencode_wire(ctx, "permission_denial")
+    event = {
+        "type": "permission",
+        "sessionID": ctx.session.session_id,
+        "permission": {
+            "id": permission_id or f"perm_{uuid.uuid4().hex[:16]}",
+            "permission": name,
+            "patterns": list(patterns) if patterns else ["*"],
+        },
+    }
+    ctx.wire_events.append(json.dumps(event))
+
+
+def interrupt_tool(
+    name: str,
+    tool_input: dict[str, object] | None = None,
+    *,
+    error: str = "interrupted",
+    call_id: str | None = None,
+) -> None:
+    """Stage a ``tool_use`` event whose part's state is ``"error"`` — how an
+    interrupted or denied tool call reads on OpenCode's wire; it has no separate
+    "interrupted" discriminator. OpenCode-only, like :func:`permission_denial`.
+    """
+    ctx = current_context()
+    _require_opencode_wire(ctx, "interrupt_tool")
+    session_id = ctx.session.session_id
+    event = {
+        "type": "tool_use",
+        "sessionID": session_id,
+        "part": {
+            "id": f"prt_{uuid.uuid4().hex[:16]}",
+            "sessionID": session_id,
+            "messageID": f"msg_{uuid.uuid4().hex[:16]}",
+            "type": "tool",
+            "callID": call_id or f"call_{uuid.uuid4().hex[:16]}",
+            "tool": name,
+            "state": {
+                "status": "error",
+                "input": dict(tool_input or {}),
+                "output": None,
+                "error": error,
+                "title": None,
+            },
+        },
+    }
+    ctx.wire_events.append(json.dumps(event))
+
+
+def malformed_record(line: str | None = None) -> None:
+    """Stage a raw line in the OpenCode JSONL stream the real parser rejects outright.
+
+    Defaults to a line that fails ``json.loads`` outright; pass an explicit
+    ``line`` to exercise a different rejection (valid JSON missing a required
+    field, or an unknown ``type`` discriminator). OpenCode-only, like
+    :func:`permission_denial`.
+    """
+    ctx = current_context()
+    _require_opencode_wire(ctx, "malformed_record")
+    ctx.wire_events.append(line if line is not None else '{"type": "tool_use", "sessionID":')
