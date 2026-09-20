@@ -153,11 +153,7 @@ class OpenCodeRunWire:
 
     def __init__(self) -> None:
         self._streamed_message_id: str | None = None
-        #: The misbehaviour plane (D7): raw, pre-rendered JSONL lines
-        #: ``helpers.py``'s ``permission_denial``/``interrupt_tool``/``malformed_record``
-        #: append here (via ``ctx.wire.wire_events``, in call order), regardless of which
-        #: control-flow path ends the turn — read back by :meth:`render`, which splices
-        #: them in just before the turn's own closing text/error record.
+        #: The misbehaviour plane (D7) — see ``helpers.py`` — spliced in by :meth:`render`.
         self.wire_events: list[str] = []
 
     def render_identity(self, session_id: str) -> str:

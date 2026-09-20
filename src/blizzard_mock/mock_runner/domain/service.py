@@ -299,10 +299,8 @@ class MockRunnerService:
         harness_id: str | None = None,
     ) -> dict[str, Any]:
         """Push a ``question.asked`` fact via ``/events`` — mints a pollable question
-        hub-side. Returns the minted ``question_id`` so a test can poll it. ``harness_id``
-        (D8) defaults to the Claude Code compatibility value when omitted (``None``) — the
-        one place that default is applied; a caller (e.g. the ``/_drive/ask`` route) passes
-        whatever it received straight through."""
+        hub-side. ``harness_id`` (D8) defaults to Claude Code when omitted (``None``) —
+        the one place that default is applied; callers pass what they received through."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -340,10 +338,8 @@ class MockRunnerService:
     ) -> dict[str, Any]:
         """Push one transcript segment record via ``/transcripts`` (blizzard#246/#247) —
         the transcript lane's counterpart to ``ask``'s ``/events`` push, letting a
-        hub-service test drive a transcript push from a mock runner (``bzh:wire-change-
-        extends-mock``) rather than a raw client. ``harness_id`` (D8) defaults to the
-        Claude Code compatibility value when omitted (``None``), the same one-layer-owns-
-        it convention as :meth:`ask`."""
+        hub-service test drive a transcript push from a mock runner rather than a raw
+        client. ``harness_id`` (D8) defaults to Claude Code when omitted, like :meth:`ask`."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:

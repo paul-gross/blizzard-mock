@@ -140,8 +140,7 @@ def answer() -> str | None:
 
 
 # -- The misbehaviour plane (D7) — OpenCode-only wire shapes ----------------- #
-# Each stages a raw JSONL line on the active wire's own ``wire_events`` list
-# (``OpenCodeRunWire.wire_events``, see ``facades/opencode.py``), spliced into the render.
+# Each stages a raw JSONL line on the active wire's own ``wire_events`` list.
 
 
 class _OpenCodeCapableWire(Protocol):
@@ -153,11 +152,8 @@ class _OpenCodeCapableWire(Protocol):
 
 def _opencode_wire(ctx: RunContext, helper: str) -> _OpenCodeCapableWire:
     """Return ``ctx.wire`` narrowed to :class:`_OpenCodeCapableWire`, or refuse loudly
-    when the active wire has no JSONL stream to carry a raw line.
-
-    Checked via a duck-typed marker (``carries_opencode_wire_events``) rather than
-    an isinstance check, so this module never has to import a facade.
-    """
+    when the active wire has no JSONL stream — checked via a duck-typed marker rather
+    than an isinstance check, so this module never has to import a facade."""
     if not getattr(ctx.wire, "carries_opencode_wire_events", False):
         raise RuntimeError(
             f"{helper}() is OpenCode-only — {type(ctx.wire).__name__} has no JSONL event stream to carry it"
