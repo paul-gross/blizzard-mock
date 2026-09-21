@@ -94,8 +94,7 @@ class _AskExit(Exception):
 class RunResult:
     """What one turn produced, before a facade renders it to the wire.
 
-    ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``.
-    """
+    ``subtype`` is ``"success"``, ``"ask"``, or ``"error_during_execution"``."""
 
     session_id: str
     text: str = ""
@@ -165,8 +164,7 @@ class IHookRunner(Protocol):
 class RunContext:
     """Ambient state for the currently-executing behavior script.
 
-    Set by :func:`run_prompt`; read via :func:`current_context`.
-    """
+    Set by :func:`run_prompt`; read via :func:`current_context`."""
 
     session: SessionState
     wire: IHarnessWire
@@ -419,6 +417,9 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
         "crash": helpers.crash,
         "state": helpers.state,
         "answer": helpers.answer,
+        "permission_denial": helpers.permission_denial,
+        "interrupt_tool": helpers.interrupt_tool,
+        "malformed_record": helpers.malformed_record,
     }
     return ns
 

@@ -290,9 +290,17 @@ class MockRunnerService:
         status, response = self._gw.submit_decision(chunk_id, body)
         return {"drove": True, "status": status, "response": response}
 
-    def ask(self, chunk_id: str, *, question: str, options: list[str] | None = None) -> dict[str, Any]:
+    def ask(
+        self,
+        chunk_id: str,
+        *,
+        question: str,
+        options: list[str] | None = None,
+        harness_id: str | None = None,
+    ) -> dict[str, Any]:
         """Push a ``question.asked`` fact via ``/events`` — mints a pollable question
-        hub-side. Returns the minted ``question_id`` so a test can poll it."""
+        hub-side. ``harness_id`` (D8) defaults to Claude Code when omitted (``None``) —
+        the one place that default is applied; callers pass what they received through."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -303,7 +311,7 @@ class MockRunnerService:
             "question_id": question_id,
             "chunk_id": chunk_id,
             "session_id": f"mock-session-{chunk_id}",
-            "harness_id": CLAUDE_CODE_HARNESS_ID,
+            "harness_id": harness_id if harness_id is not None else CLAUDE_CODE_HARNESS_ID,
             "runner_id": self._runner_id,
             "epoch": held.epoch,
             "question": question,
@@ -326,11 +334,12 @@ class MockRunnerService:
         turns: list[dict[str, Any]] | None = None,
         final: bool = False,
         record_truncated: bool = False,
+        harness_id: str | None = None,
     ) -> dict[str, Any]:
         """Push one transcript segment record via ``/transcripts`` (blizzard#246/#247) —
         the transcript lane's counterpart to ``ask``'s ``/events`` push, letting a
-        hub-service test drive a transcript push from a mock runner (``bzh:wire-change-
-        extends-mock``) rather than a raw client."""
+        hub-service test drive a transcript push from a mock runner rather than a raw
+        client. ``harness_id`` (D8) defaults to Claude Code when omitted, like :meth:`ask`."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -347,7 +356,7 @@ class MockRunnerService:
             "turn_range_start": 0,
             "turn_range_end": len(turn_list) - 1,
             "final": final,
-            "harness_id": CLAUDE_CODE_HARNESS_ID,
+            "harness_id": harness_id if harness_id is not None else CLAUDE_CODE_HARNESS_ID,
             "normalizer_version": "mock/1",
             "harness_version": None,
             "record_truncated": record_truncated,

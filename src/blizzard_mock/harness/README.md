@@ -118,9 +118,11 @@ and how a settings document's hook commands are executed* — see "Hook executio
 - `helpers.py` — the terse helper library bound into every behavior script's
   namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
   `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
-  state. Raw Python is available underneath for the weird cases. Its tool-call
-  helpers also drive the transcript and the hook seam — see "Conversation
-  transcripts" below.
+  state, plus the OpenCode-only misbehaviour plane (D7) — `permission_denial`,
+  `interrupt_tool`, `malformed_record` — see "Script helper API" below. Raw
+  Python is available underneath for the weird cases. Its tool-call helpers
+  also drive the transcript and the hook seam — see "Conversation transcripts"
+  below.
 - `internal/` — real git plumbing (`git.py`) and stderr-routed structlog
   (`logging.py`); kept out of the framework-free core and the script surface.
 - `facades/` — one module per harness, each a thin CLI + wire over the engine:
@@ -419,6 +421,21 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 | `crash(hard=False)` | Die without a verdict — soft (error run, exit 1) or `hard` (`os._exit`). |
 | `state()` | The `SessionState` — `state().last_ask`, `state().last_answer`. |
 | `answer()` | The resume message this turn was resumed with — a tagged resume's **prose**, so a script never reads its own source back; an untagged one's raw message, as always. |
+| `permission_denial(name, patterns=None, *, permission_id=None)` | Stage an OpenCode `permission` event for a denied request — `patterns` defaults to a single wildcard. **OpenCode-only**, part of the misbehaviour plane (D7) below. |
+| `interrupt_tool(name, tool_input=None, *, error="interrupted", call_id=None)` | Stage a `tool_use` event whose part's state is `"error"` — how an interrupted or denied tool call reads on OpenCode's wire. **OpenCode-only.** |
+| `malformed_record(line=None)` | Stage a raw line in the OpenCode JSONL stream the real parser rejects — defaults to invalid JSON; pass `line` for a different rejection shape. **OpenCode-only.** |
+
+### The misbehaviour plane (D7)
+
+`permission_denial`, `interrupt_tool`, and `malformed_record` stage a raw,
+pre-rendered JSONL line onto the active wire's own `wire_events` list — owned
+by `OpenCodeRunWire` (`facades/opencode.py`), the only wire that carries one —
+in call order, regardless of which control-flow path ends the turn. `render`
+splices them in just before the turn's own closing text/error record. Calling
+any of the three from a facade whose wire has no JSONL event stream (Claude
+Code, Codex) raises loudly rather than silently no-op'ing — checked via a
+duck-typed marker (`carries_opencode_wire_events`) so `helpers.py` never has
+to import a facade.
 
 ## Binaries
 

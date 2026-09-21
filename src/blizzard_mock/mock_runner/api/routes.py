@@ -164,7 +164,7 @@ def drive_decide(body: DecideBody, service: Annotated[MockRunnerService, Depends
 
 @drive_router.post("/ask")
 def drive_ask(body: AskBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
-    return service.ask(body.chunk_id, question=body.question, options=body.options)
+    return service.ask(body.chunk_id, question=body.question, options=body.options, harness_id=body.harness_id)
 
 
 @drive_router.post("/report-event")
@@ -208,6 +208,7 @@ def drive_push_transcript(
         turns=body.turns,
         final=body.final,
         record_truncated=body.record_truncated,
+        harness_id=body.harness_id,
     )
 
 

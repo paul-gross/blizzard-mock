@@ -148,8 +148,13 @@ class OpenCodeRunWire:
     first ``step_start`` record as soon as a fresh mint self-assigns it, matching
     the real handshake's early identity rather than waiting for process exit."""
 
+    #: The marker ``helpers.py``'s misbehaviour-plane primitives duck-type against.
+    carries_opencode_wire_events = True
+
     def __init__(self) -> None:
         self._streamed_message_id: str | None = None
+        #: The misbehaviour plane (D7) — see ``helpers.py`` — spliced in by :meth:`render`.
+        self.wire_events: list[str] = []
 
     def render_identity(self, session_id: str) -> str:
         """Mint and return the identity-bearing ``step_start`` line, remembering its
@@ -161,15 +166,18 @@ class OpenCodeRunWire:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         session_id = result.session_id
         message_id = self._streamed_message_id or _new_id("msg")
-        events: list[dict[str, object]] = []
+        lines: list[str] = []
         if self._streamed_message_id is None:
-            events.append(_step_start_event(session_id, message_id))
+            lines.append(json.dumps(_step_start_event(session_id, message_id)))
+        # The misbehaviour plane (D7): mid-turn wire lines a behavior script staged,
+        # spliced in before the turn's own closing text/error record.
+        lines.extend(self.wire_events)
         if result.is_error:
-            events.append(_error_event(session_id, text or "the worker ended without a verdict"))
+            lines.append(json.dumps(_error_event(session_id, text or "the worker ended without a verdict")))
         else:
-            events.append(_text_event(session_id, message_id, text))
-            events.append(_step_finish_event(session_id, message_id, text))
-        return "".join(json.dumps(event) + "\n" for event in events)
+            lines.append(json.dumps(_text_event(session_id, message_id, text)))
+            lines.append(json.dumps(_step_finish_event(session_id, message_id, text)))
+        return "".join(line + "\n" for line in lines)
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -143,11 +143,13 @@ class DecideBody(BaseModel):
 
 class AskBody(BaseModel):
     """POST /_drive/ask — push a ``question.asked`` fact, minting a pollable question
-    hub-side."""
+    hub-side. ``harness_id`` (D8) rides through unresolved — ``MockRunnerService.ask``
+    is the one place ``None`` resolves to the Claude Code compatibility value."""
 
     chunk_id: str
     question: str
     options: list[str] = Field(default_factory=list)
+    harness_id: str | None = None
 
 
 class PollAnswerBody(BaseModel):
@@ -159,13 +161,15 @@ class PollAnswerBody(BaseModel):
 class PushTranscriptBody(BaseModel):
     """POST /_drive/push-transcript — push one transcript segment record via
     ``POST /transcripts`` (blizzard#246/#247), the transcript lane's counterpart to
-    ``AskBody``'s ``/events`` push. ``turns`` defaults to one placeholder turn when empty."""
+    ``AskBody``'s ``/events`` push. ``turns`` defaults to one placeholder turn when
+    empty; ``harness_id`` (D8) rides through unresolved, same as ``AskBody``'s."""
 
     chunk_id: str
     segment_id: str = "sg_mock"
     turns: list[dict[str, Any]] = Field(default_factory=list)
     final: bool = False
     record_truncated: bool = False
+    harness_id: str | None = None
 
 
 class PauseBody(BaseModel):
