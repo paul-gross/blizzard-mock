@@ -519,7 +519,7 @@ def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
 def test_drive_ask_forwards_an_explicit_harness_id(stack: tuple[TestClient, TestClient]) -> None:
     """An explicit ``harness_id`` supplied through ``/_drive/ask`` reaches the pushed
     ``question.asked`` fact's own field, rather than always stamping the Claude Code
-    compatibility default (F3, review round on D8's caller-supplied ``harness_id``)."""
+    compatibility default (D8's caller-supplied ``harness_id``)."""
     hub, runner = stack
     chunk_id = _seed(hub)
     _claim(runner, chunk_id)
@@ -571,7 +571,7 @@ def test_drive_push_transcript_requires_a_held_chunk(stack: tuple[TestClient, Te
 
 def test_drive_push_transcript_forwards_an_explicit_harness_id(stack: tuple[TestClient, TestClient]) -> None:
     """An explicit ``harness_id`` supplied through ``/_drive/push-transcript`` reaches the
-    pushed transcript record's own field (F3, mirrors the ``/_drive/ask`` coverage above)."""
+    pushed transcript record's own field (mirrors the ``/_drive/ask`` coverage above)."""
     hub, runner = stack
     chunk_id = _seed(hub)
     _claim(runner, chunk_id)

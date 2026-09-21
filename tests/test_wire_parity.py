@@ -201,7 +201,7 @@ def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_r
 
 
 def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced_repo) -> None:
-    """F25: ``permission_id`` is a non-default kwarg no prior test exercised — the staged
+    """``permission_id`` is a non-default kwarg no prior test exercised — the staged
     event must carry the caller's id rather than always minting a fresh one."""
     shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
@@ -220,7 +220,7 @@ def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced
 
 
 def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo) -> None:
-    """F25: ``call_id`` is a non-default kwarg no prior test exercised — the staged tool
+    """``call_id`` is a non-default kwarg no prior test exercised — the staged tool
     part must carry the caller's call id rather than always minting a fresh one."""
     shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
@@ -237,7 +237,7 @@ def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo) 
 
 
 def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> None:
-    """F25: an explicit ``line`` is a non-default kwarg no prior test exercised — a
+    """An explicit ``line`` is a non-default kwarg no prior test exercised — a
     caller-chosen rejection shape (here, valid JSON missing a required field) must reach
     the wire verbatim, not just the default invalid-JSON line."""
     shapes = _load_opencode_shapes()
