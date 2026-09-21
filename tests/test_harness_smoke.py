@@ -173,6 +173,44 @@ def test_crash_yields_error_run(fenced_repo) -> None:
     assert result.subtype == "error_during_execution"
 
 
+def test_usage_limited_writes_the_synthetic_rate_limit_transcript_record(fenced_repo, tmp_path) -> None:
+    """blizzard#594: ``usage_limited()`` writes the verbatim 2026-09-05 shape — a
+    synthetic assistant record with ``isApiErrorMessage: true``/``error: "rate_limit"``
+    — and still ends the turn with an ordinary (non-error) envelope."""
+    from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter
+
+    cwd, env = fenced_repo
+    writer = ClaudeTranscriptWriter(session_id="sess-limited", root=tmp_path, cwd=cwd)
+
+    code, result = _run("usage_limited()", (cwd, env), transcript=writer, session_id="sess-limited")
+
+    assert code == 0
+    assert result.is_error is False
+    lines = writer.path.read_text().splitlines()
+    # `run_prompt` always brackets a script with its own `record_user`/`record_result`
+    # lines (engine.py) — the synthetic record is the one the script itself wrote, between them.
+    record = json.loads(lines[1])
+    assert record["type"] == "assistant"
+    assert record["isApiErrorMessage"] is True
+    assert record["error"] == "rate_limit"
+    assert record["message"]["model"] == "<synthetic>"
+    assert record["message"]["usage"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
+    text = record["message"]["content"][0]["text"]
+    assert "resets 5:40pm (America/Chicago)" in text
+
+
+def test_usage_limited_refuses_without_a_claude_transcript_writer(fenced_repo) -> None:
+    code, result = _run("usage_limited()", fenced_repo)
+    assert code == 1
+    assert result.is_error is True
+    assert "Claude-Code-only" in result.text
+
+
 def test_uncaught_exception_is_an_error_run(fenced_repo) -> None:
     code, result = _run("raise ValueError('boom')", fenced_repo)
     assert code == 1

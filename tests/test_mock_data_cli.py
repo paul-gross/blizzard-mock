@@ -517,6 +517,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("paused", Boolean, nullable=False),
         Column("set_at", DateTime, nullable=False),
         Column("set_by", String, nullable=False),
+        Column("reason", String, nullable=True),
     )
     meta.create_all(engine)
     return url, meta
@@ -2423,6 +2424,57 @@ def test_create_runner_pause_requires_exactly_one_of_local_fleet(tmp_path: Path)
     )
     assert both.exit_code != 0
     assert "exactly one" in both.output
+
+
+def test_create_runner_pause_store_runner_local_lands_into_the_runners_own_table(tmp_path: Path) -> None:
+    """``--store runner`` lands into ``local_pause_facts`` — the table the runner's own
+    ``GET /api/runner``/panel actually reads, distinct from the hub's own mirror
+    (blizzard#594)."""
+    url, meta = _full_runner_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner-pause",
+            "--store",
+            "runner",
+            "--url",
+            url,
+            "--runner-id",
+            "runner-local",
+            "--local",
+            "--reason",
+            "usage limit: claude_code (resets 2026-07-13T17:40Z)",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "local_pause_facts"))).all()
+    assert [(r.runner_id, r.paused, r.reason) for r in rows] == [
+        ("runner-local", True, "usage limit: claude_code (resets 2026-07-13T17:40Z)")
+    ]
+
+
+def test_create_runner_pause_store_runner_local_without_a_reason_lands_none(tmp_path: Path) -> None:
+    url, meta = _full_runner_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "runner", "--url", url, "--runner-id", "runner-local", "--local"]
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "local_pause_facts"))).all()
+    assert [(r.runner_id, r.paused, r.reason) for r in rows] == [("runner-local", True, None)]
+
+
+def test_create_runner_pause_store_runner_fleet_is_rejected(tmp_path: Path) -> None:
+    """The runner store carries no fleet-brake mirror of its own — ``--fleet`` only means
+    something against ``--store hub``."""
+    url, _meta = _full_runner_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "runner", "--url", url, "--runner-id", "runner-local", "--fleet"]
+    )
+    assert result.exit_code != 0
+    assert "--fleet" in result.output
 
 
 # --- scenario board (implemented) --------------------------------------------

@@ -47,6 +47,7 @@ from blizzard_mock.mock_data.domain.hub.usage_seed import KINDS as USAGE_KINDS
 from blizzard_mock.mock_data.domain.hub.usage_seed import UsageCompositionError, compose_usage
 from blizzard_mock.mock_data.domain.ids import seeded_rng
 from blizzard_mock.mock_data.domain.runner.lease_seed import compose_lease as compose_runner_lease
+from blizzard_mock.mock_data.domain.runner.local_pause_seed import compose_local_pause
 from blizzard_mock.mock_data.domain.runner.scenario_seed import (
     RunnerFleetCompositionError,
     compose_runner_fleet,
@@ -1002,13 +1003,22 @@ def create_runner_pause(
 ) -> None:
     """Land one pause fact, engaged — exactly one of ``--local``/``--fleet`` is
     required. ``--fleet --reason`` fails loud (``runner_pause_facts`` has no
-    ``reason`` column) rather than silently dropping the reason."""
+    ``reason`` column) rather than silently dropping the reason. ``--store runner``
+    lands into the runner's own ``local_pause_facts`` — the table the runner's own
+    ``GET /api/runner``/panel actually read — rather than the hub's mirror of it;
+    ``--fleet`` has no meaning there, since the runner store carries no fleet-brake
+    mirror of its own."""
     _require_store("runner-pause", store)
     if local == fleet:
         raise click.UsageError("pass exactly one of --local or --fleet")
+    if store == "runner" and fleet:
+        raise click.UsageError("--fleet has no meaning against --store runner — pass --local")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     try:
-        row = compose_runner_pause(runner_id=runner_id, local=local, reason=reason, set_at=SystemClock().now())
+        if store == "runner":
+            row = compose_local_pause(runner_id=runner_id, reason=reason, set_at=SystemClock().now())
+        else:
+            row = compose_runner_pause(runner_id=runner_id, local=local, reason=reason, set_at=SystemClock().now())
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc

@@ -10,7 +10,7 @@ from __future__ import annotations
 from blizzard_mock.mock_data.domain.store_targets import HUB, RUNNER, STORE_TARGETS, store_mismatch_message
 
 #: Concepts store-polymorphic across hub and runner — everything else still lives in exactly one store.
-_MULTI_STORE = {"lease", "usage"}
+_MULTI_STORE = {"lease", "usage", "runner-pause"}
 
 
 def test_every_hub_only_concept_is_declared_that_way() -> None:
@@ -21,7 +21,7 @@ def test_every_hub_only_concept_is_declared_that_way() -> None:
         assert allowed in (frozenset({HUB}), frozenset({RUNNER})), concept
 
 
-def test_lease_and_usage_serve_both_stores() -> None:
+def test_lease_usage_and_runner_pause_serve_both_stores() -> None:
     for concept in _MULTI_STORE:
         assert STORE_TARGETS[concept] == frozenset({HUB, RUNNER}), concept
 

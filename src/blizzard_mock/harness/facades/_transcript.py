@@ -77,13 +77,23 @@ class ClaudeTranscriptWriter:
         content = [{"type": "tool_result", "tool_use_id": tool_use_id, "content": output}]
         self._append("user", {"role": "user", "content": content})
 
-    def _append(self, record_type: str, message: dict[str, object]) -> None:
+    def record_raw(self, record_type: str, message: dict[str, object], *, extra: Mapping[str, object]) -> None:
+        """Append a record carrying top-level fields ``_append`` never sets — today, only
+        the synthetic usage-limit shape's own ``isApiErrorMessage``/``error`` siblings of
+        ``message`` (blizzard#594, the verbatim 2026-09-05 shape). ``extra`` merges onto
+        the record after the ordinary fields."""
+        self._append(record_type, message, extra=extra)
+
+    def _append(
+        self, record_type: str, message: dict[str, object], *, extra: Mapping[str, object] | None = None
+    ) -> None:
         record = {
             "type": record_type,
             "sessionId": self._session_id,
             "cwd": str(self._cwd),
             "timestamp": datetime.now(UTC).isoformat(),
             "message": message,
+            **(extra or {}),
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as f:
