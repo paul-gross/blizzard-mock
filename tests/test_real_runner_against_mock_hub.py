@@ -16,12 +16,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import pytest
 import uvicorn
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.domain.service import MockHubService
+
+#: Reads the sibling ``blizzard`` checkout's built runner binary; CI deselects the marker
+#: (`mise run test -- -m "not needs_blizzard"`) since a standalone checkout has no sibling.
+pytestmark = pytest.mark.needs_blizzard
 
 #: The same sibling-resolution convention as ``test_wire_parity.py``'s ``_BLIZZARD``.
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")

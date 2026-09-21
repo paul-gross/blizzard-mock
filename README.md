@@ -54,6 +54,19 @@ OpenAPI and fact-kind constants, and **fails** rather than skips when it cannot 
 one — parity it never checked is not a green. A winter feature environment supplies the
 sibling by construction; elsewhere, point `$BLIZZARD_SOURCE` at the checkout.
 
+### CI
+
+A PR gate (`.github/workflows/pr.yml`) and a push-to-master gate (`.github/workflows/push.yml`)
+both run the reusable `gate.yml`: a `quality` job (`ruff format --check`, `mise run lint`,
+`mise run typecheck`) and a `test` job (`mise run test -- -m "not needs_blizzard"`). CI
+deselects the `needs_blizzard` marker — the wire-parity guard
+(`tests/test_wire_parity.py`) and the real-runner-against-mock-hub proof
+(`tests/test_real_runner_against_mock_hub.py`), both of which read the sibling `blizzard`
+checkout a single-repo CI runner does not carry — so it stays a local-only,
+sibling-checkout gate; the bare `uv run pytest` above is unaffected and still runs (and
+fails closed on) both. The check names are `gate / ruff + pyright` and
+`gate / pytest (sans needs_blizzard)`.
+
 ## Acceptance proof
 
 `tests/test_acceptance_loop_e2e.py` (pytest marker `e2e`) is the fleet's standing

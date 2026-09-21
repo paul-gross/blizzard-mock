@@ -1,0 +1,66 @@
+# The merge gate — the reusable check suite.
+#
+# This is the PR-to-master gate. `pr.yml` runs it on every pull request; `push.yml` calls
+# it too, so the gate is defined once and never drifts between triggers.
+#
+# `tests/test_wire_parity.py` and `tests/test_real_runner_against_mock_hub.py` read a
+# sibling `blizzard` checkout this workflow does not carry, and are marked
+# `needs_blizzard` (blizzard-context verification/blizzard/commands/mock.md); the test job
+# deselects that marker rather than skip it silently. The wire-parity guard stays a
+# local-only, sibling-checkout gate.
+name: gate
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: ruff + pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # Pinned to match mise.toml's [tools] uv version: `mise run lint`/`typecheck`
+          # below resolve uv through mise's own shim, not this step's — an unpinned
+          # "latest" here would drift from mise's pin inside the same job.
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync
+      - name: install mise (runs the mise.toml task definitions, not their tools)
+        uses: jdx/mise-action@v2
+        with:
+          # Pinned: mise's VERSION endpoint can advertise a release before that
+          # release's assets exist, and the unpinned action then 404s fetching one.
+          version: 2026.9.2
+          install: false
+      - name: ruff format --check
+        run: uv run ruff format --check .
+      - name: ruff check (mise run lint)
+        run: mise run lint
+      - name: pyright (mise run typecheck)
+        run: mise run typecheck
+
+  test:
+    name: pytest (sans needs_blizzard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # Pinned to match mise.toml's [tools] uv version — see the quality job's comment.
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync
+      - name: install mise (runs the mise.toml task definitions, not their tools)
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.9.2
+          install: false
+      - name: pytest -m "not needs_blizzard" (mise run test)
+        run: mise run test -- -m "not needs_blizzard"

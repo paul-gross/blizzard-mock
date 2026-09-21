@@ -1,0 +1,22 @@
+# PR to master — the merge gate.
+#
+# ruff format/check, pyright, and the unit + component suite minus the sibling-reading
+# `needs_blizzard` tests (gate.yml). No upper tier here: this repo has none of its own —
+# `blizzard`'s service and crash-sweep tiers exercise this repo's code from `blizzard`'s
+# own CI, not from here.
+name: pr
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    uses: ./.github/workflows/gate.yml
