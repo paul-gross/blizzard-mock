@@ -1,0 +1,17 @@
+# Push to master — the same merge gate as pr.yml, run again once the merge lands.
+name: push
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: push-master
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/gate.yml

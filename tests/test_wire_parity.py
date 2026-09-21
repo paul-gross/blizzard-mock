@@ -38,6 +38,10 @@ from blizzard_mock.mock_hub.domain import state as hub_state
 from blizzard_mock.mock_runner.domain import gateway as runner_gateway
 from blizzard_mock.mock_runner.domain import service as runner_service
 
+#: Every test here reads the sibling ``blizzard`` checkout; CI deselects the marker
+#: (`mise run test -- -m "not needs_blizzard"`) since a standalone checkout has no sibling.
+pytestmark = pytest.mark.needs_blizzard
+
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
 _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "wire" / "facts.py"
