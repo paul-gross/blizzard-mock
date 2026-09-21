@@ -21,6 +21,11 @@ def test_compose_local_pause_lands_engaged() -> None:
     assert row.values["set_by"] == "mock-data"
 
 
-def test_compose_local_pause_carries_no_reason_column() -> None:
+def test_compose_local_pause_reason_defaults_to_none() -> None:
     row = compose_local_pause(runner_id="runner-1", set_at=_NOW)
-    assert "reason" not in row.values
+    assert row.values["reason"] is None
+
+
+def test_compose_local_pause_carries_a_reason_when_given_one() -> None:
+    row = compose_local_pause(runner_id="runner-1", set_at=_NOW, reason="usage limit: claude_code")
+    assert row.values["reason"] == "usage limit: claude_code"

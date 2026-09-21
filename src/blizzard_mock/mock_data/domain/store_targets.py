@@ -22,7 +22,7 @@ STORE_TARGETS: dict[str, frozenset[str]] = {
     "escalation": frozenset({HUB}),
     "question": frozenset({HUB}),
     "event": frozenset({HUB}),
-    "runner-pause": frozenset({HUB}),
+    "runner-pause": frozenset({HUB, RUNNER}),
     "transcript-segment": frozenset({RUNNER}),
 }
 
