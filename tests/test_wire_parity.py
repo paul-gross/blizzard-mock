@@ -204,6 +204,27 @@ def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_r
         shapes.parse_run_jsonl(proc.stdout)
 
 
+def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+    """blizzard#594 D6: ``usage_limit_error()`` stages the captured OpenCode limit shape —
+    still parseable by the real parser, carrying the 429 status and usage-limit phrasing
+    the real runner adapter's own ``classify_usage_limit`` reads (proven directly by that
+    adapter's own unit tests in the sibling ``blizzard`` checkout)."""
+    shapes = _load_opencode_shapes()
+    cwd, env = fenced_repo
+    proc = _run_mock_opencode(cwd, env, "run", "usage_limit_error(); verdict('deny')")
+    assert proc.returncode == 0, proc.stderr
+
+    events = shapes.parse_run_jsonl(proc.stdout)
+
+    error_events = [event for event in events if event.type == "error"]
+    assert len(error_events) == 1
+    error = error_events[0].error
+    assert error is not None
+    assert error.name == "AI_APICallError"
+    assert error.status_code == 429
+    assert "usage limit" in error.message.lower()
+
+
 def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced_repo) -> None:
     """``permission_id`` is a non-default kwarg no prior test exercised — the staged
     event must carry the caller's id rather than always minting a fresh one."""

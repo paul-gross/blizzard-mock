@@ -121,6 +121,60 @@ def crash(*, hard: bool = False) -> None:
     raise HarnessCrash("behavior script called crash()")
 
 
+def usage_limited(*, resets_at: str = "5:40pm (America/Chicago)") -> None:
+    """Simulate a Claude Code subscription usage-limit exit (blizzard#594) — the real
+    2026-09-05 shape: a synthetic assistant transcript record (``isApiErrorMessage:
+    true``, ``error: "rate_limit"``) in place of a turn's own reply. The runner's
+    classifier reads this record alone, never the ordinary envelope this call still
+    ends the turn with. Claude-Code-only; :func:`usage_limit_error` is OpenCode's own."""
+    from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter
+
+    ctx = current_context()
+    if not isinstance(ctx.transcript, ClaudeTranscriptWriter):
+        raise RuntimeError("usage_limited() is Claude-Code-only — no Claude transcript writer is wired")
+    text = f"You've hit your session limit · resets {resets_at}"
+    ctx.transcript.record_raw(
+        "assistant",
+        {
+            "model": "<synthetic>",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+            "content": [{"type": "text", "text": text}],
+        },
+        extra={"isApiErrorMessage": True, "error": "rate_limit"},
+    )
+    ctx.result = RunResult(session_id=ctx.session.session_id, subtype="success", text="")
+
+
+def usage_limit_error(*, message: str | None = None) -> None:
+    """Stage OpenCode's own captured usage-limit ``error`` event (blizzard#594 D6) — the
+    ``AI_APICallError``/429 shape confirmed against the installed ``opencode-ai`` binary
+    (see ``tests/opencode_usage_limit_fixture.py`` in the sibling ``blizzard`` checkout for
+    its full provenance). OpenCode-only; :func:`usage_limited` is Claude Code's own."""
+    ctx = current_context()
+    wire = _opencode_wire(ctx, "usage_limit_error")
+    event = {
+        "type": "error",
+        "sessionID": ctx.session.session_id,
+        "error": {
+            "name": "AI_APICallError",
+            "data": {
+                "message": message
+                or (
+                    "Usage limit reached. It will reset in 2 hours. "
+                    "To continue using this model now, enable usage from your available balance"
+                ),
+                "statusCode": 429,
+            },
+        },
+    }
+    wire.wire_events.append(json.dumps(event))
+
+
 def state() -> SessionState:
     """Return the current :class:`~blizzard_mock.harness.session.SessionState`.
 

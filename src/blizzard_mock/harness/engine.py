@@ -420,6 +420,8 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
         "permission_denial": helpers.permission_denial,
         "interrupt_tool": helpers.interrupt_tool,
         "malformed_record": helpers.malformed_record,
+        "usage_limited": helpers.usage_limited,
+        "usage_limit_error": helpers.usage_limit_error,
     }
     return ns
 
