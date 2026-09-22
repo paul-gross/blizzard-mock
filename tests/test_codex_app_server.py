@@ -66,7 +66,7 @@ def test_account_read_without_refresh_token_reports_the_account_and_writes_nothi
 
     assert proc.returncode == 0
     response = next(m for m in _messages(proc.stdout) if m.get("id") == 2)
-    assert response["result"]["requiresOpenaiAuth"] is False
+    assert response["result"]["requiresOpenaiAuth"] is True
     assert response["result"]["account"] == {"account_id": "acct-1"}
     assert auth_path.read_text() == before  # no rotation on a plain read
     assert not (tmp_path / "auth.json.audit.log").exists()
@@ -80,7 +80,7 @@ def test_account_read_with_refresh_token_rotates_both_tokens_atomically(tmp_path
 
     assert proc.returncode == 0
     response = next(m for m in _messages(proc.stdout) if m.get("id") == 2)
-    assert response["result"]["requiresOpenaiAuth"] is False
+    assert response["result"]["requiresOpenaiAuth"] is True
 
     rotated = json.loads(auth_path.read_text())
     assert rotated["tokens"]["access_token"] != "old-access"
@@ -98,7 +98,7 @@ def test_account_read_with_refresh_token_rotates_both_tokens_atomically(tmp_path
     assert entry["content_digest"] == hashlib.sha256(auth_path.read_bytes()).hexdigest()[:16]
 
 
-def test_a_missing_auth_file_reports_requires_openai_auth_without_crashing(tmp_path: Path) -> None:
+def test_a_missing_auth_file_reports_a_null_account_without_crashing(tmp_path: Path) -> None:
     proc = _run_app_server(tmp_path, _INITIALIZE + _account_read(refresh_token=True))
 
     assert proc.returncode == 0

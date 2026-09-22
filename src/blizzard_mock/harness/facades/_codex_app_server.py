@@ -59,7 +59,8 @@ def _handle(message: dict[str, object], *, auth_path: Path, audit_log_path: Path
         params = message.get("params")
         refresh = isinstance(params, dict) and bool(params.get("refreshToken"))
         account = _rotate(auth_path, audit_log_path) if refresh else _read_account(auth_path)
-        _reply(request_id, {"account": account, "requiresOpenaiAuth": account is None})
+        # True for any ChatGPT-mode home, logged in or not (confirmed live): only account tells them apart.
+        _reply(request_id, {"account": account, "requiresOpenaiAuth": True})
         return
     if request_id is not None:
         _reply(request_id, {})
