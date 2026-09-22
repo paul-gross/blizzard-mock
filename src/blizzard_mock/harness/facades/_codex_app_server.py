@@ -1,18 +1,9 @@
-"""The ``mock-codex app-server`` verb (blizzard#504) — a JSON-RPC-over-stdio double for
-``codex app-server``, answering ``initialize`` and ``account/read`` the same shape the
-real binary does (confirmed live against Codex 0.149.0, D1's tested assumption): the
-matching response for an id-carrying request, an unsolicited notification interleaved in
-between, exactly like the real server's own reply ordering. Lets blizzard's renewer
-binding (``blizzard.runner.subscriptions.internal.openai_credential_renewer``) be proven
-against a double, never a real login.
-
-A refreshing ``account/read`` takes the same lock a concurrent vendor-style writer would
-(``auth.json.lock``, ``fcntl.flock``) and rewrites ``auth.json`` atomically — a temp file
-in the same directory, renamed over the target — so two writers racing this file never
-leave a reader with a half-written one. Every rotation appends one audit line: the
-rotating process's pid and a digest of the exact bytes it wrote, never a token itself —
-proof, after a race, that the file's final digest matches the last logged write rather
-than a third, unaccounted party's."""
+"""The ``mock-codex app-server`` verb (blizzard#504) — a JSON-RPC-over-stdio double for ``codex
+app-server``, answering ``initialize`` and ``account/read`` in the real binary's own shape
+(confirmed live against Codex 0.149.0): an id-matched response with an unsolicited notification
+interleaved. A refreshing ``account/read`` takes the same lock a vendor-style writer would
+(``auth.json.lock``) and rewrites ``auth.json`` atomically, appending one audit line per rotation
+— the writer's pid and a digest of the bytes written, never a token — so a race can be proven."""
 
 from __future__ import annotations
 
@@ -30,8 +21,7 @@ from pathlib import Path
 _METHOD_INITIALIZE = "initialize"
 _METHOD_ACCOUNT_READ = "account/read"
 
-# The rotated access token's own lifetime — long enough that a caller sampling right
-# after a renewal never races it, short enough to look like a real one.
+# The rotated access token's lifetime — long enough that a sample right after a renewal never races it.
 _ACCESS_TOKEN_LIFETIME_SECONDS = 3600
 
 
@@ -61,9 +51,8 @@ def _handle(message: dict[str, object], *, auth_path: Path, audit_log_path: Path
     request_id = message.get("id")
     if method == _METHOD_INITIALIZE:
         _reply(request_id, {})
-        # The real server interleaves unsolicited notifications between a request and
-        # its own id-matched response — a caller must skip this, never mistake it for
-        # the reply it is waiting on.
+        # The real server interleaves unsolicited notifications between a request and its
+        # id-matched response — a caller must skip this, never mistake it for the reply.
         _notify("sessionConfigured", {})
         return
     if method == _METHOD_ACCOUNT_READ:

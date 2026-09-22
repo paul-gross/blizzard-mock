@@ -1,10 +1,8 @@
-"""``mock-codex app-server`` (blizzard#504) — the JSON-RPC-over-stdio double for
-``codex app-server``'s own ``initialize``/``account/read`` exchange, driven exactly the
-way blizzard's own renewer seam drives it: both requests written to stdin, then closed.
-
-Not the exec-engine's "prompt is the program" mode (``test_harness_smoke.py``) — this
-verb answers a fixed protocol against ``$CODEX_HOME/auth.json`` and never runs a script,
-so it is unfenced."""
+"""``mock-codex app-server`` (blizzard#504) — the JSON-RPC-over-stdio double for ``codex
+app-server``'s ``initialize``/``account/read`` exchange, driven the way blizzard's renewer seam
+drives it: both requests written to stdin, then closed. Not the exec-engine's "prompt is the
+program" mode (``test_harness_smoke.py``): this verb answers a fixed protocol against
+``$CODEX_HOME/auth.json`` and never runs a script, so it is unfenced."""
 
 from __future__ import annotations
 
@@ -110,10 +108,9 @@ def test_a_missing_auth_file_reports_requires_openai_auth_without_crashing(tmp_p
 
 
 def test_two_concurrent_refreshes_never_corrupt_the_file_and_both_are_audited(tmp_path: Path) -> None:
-    """The concurrent-writer proof (blizzard#504 Phase 2 acceptance): two rotations
-    racing the same lock over the same file never leave it unparseable, and each
-    rotation lands its own audit line — proof the lock actually serializes the two
-    read-modify-write cycles rather than merely looking like it does."""
+    """The concurrent-writer proof (blizzard#504 Phase 2): two rotations racing the same lock
+    never leave the file unparseable, and each lands its own audit line — proof the lock
+    serializes the two read-modify-write cycles rather than merely looking like it does."""
     auth_path = tmp_path / "auth.json"
     _write_auth(auth_path)
     request = _INITIALIZE + _account_read(refresh_token=True)
@@ -148,9 +145,8 @@ def test_two_concurrent_refreshes_never_corrupt_the_file_and_both_are_audited(tm
     entries = [json.loads(line) for line in audit_lines]
     digests = {entry["content_digest"] for entry in entries}
     assert len(digests) == 2  # two distinct rotations, not one writer clobbering the other silently
-    # Every write matches a mock-codex pid, and the final file's own digest matches
-    # whichever entry was appended last — proof the lock serialized the two
-    # read-modify-write cycles rather than merely looking like it did.
+    # Every write matches a mock-codex pid, and the final file's digest matches whichever
+    # entry was appended last — the lock serialized the cycles rather than merely seeming to.
     assert all("pid" in entry for entry in entries)
     last_logged = max(entries, key=lambda entry: entry["at"])
     assert last_logged["content_digest"] == hashlib.sha256(final_bytes).hexdigest()[:16]
