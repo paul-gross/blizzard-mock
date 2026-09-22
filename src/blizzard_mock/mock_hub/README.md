@@ -67,6 +67,7 @@ body), mirroring the real hub's own always-raising demand on this one route.
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record (blizzard#249) |
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and its reported per-slug usage collection |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
+| `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first (blizzard#582 D2) |
 
 ## Batched fact push (`POST /api/fleet/events`)
 
@@ -110,6 +111,10 @@ a sibling's, and `RunnerView.subscriptions` carries every reported slug's own vi
   accepted, minted garden proposal answers — an independent lever from `garden_run`/
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
   chunk answers no such proposal. `POST /_seed/reset` clears all state.
+- `POST /_seed/scopes {slug, description?, retired?, created_at?}` — upsert one scope
+  in the global vocabulary (blizzard#582 D2); a scenario seeds the end state it wants
+  directly rather than replaying create/retire. Seeding the same `slug` twice replaces
+  it.
 - `POST /_seed/answer {question_id, answer, answered_by?}` — test-control only, plays
   the operator's answer so a scenario can make the runner's poll return
   `answered=True` without a real operator surface (the fleet mirror carries no

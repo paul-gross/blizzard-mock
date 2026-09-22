@@ -353,6 +353,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerCapabilityView": ("RunnerCapability", frozenset()),
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
+    "ScopeView": ("ScopeView", frozenset()),
     "SubscriptionUsageView": ("SubscriptionUsageView", frozenset()),
     "SystemArtifactView": ("SystemArtifactView", frozenset()),
     "TranscriptSegmentAck": ("TranscriptSegmentAck", frozenset()),

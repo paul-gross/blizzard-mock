@@ -107,6 +107,12 @@ def get_system_artifact(name: str, service: Annotated[MockHubService, Depends(ge
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
+@fleet_router.get("/scopes")
+def list_scopes(service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The deployment's scope vocabulary, worker-facing (blizzard#582 D2)."""
+    return service.scopes()
+
+
 @fleet_router.post("/routes", status_code=201)
 def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:

@@ -16,7 +16,7 @@ from blizzard_mock.levers import Lever, LeverParams
 from blizzard_mock.mock_hub.api.deps import AnswerControlBody, StopControlBody, get_captured, get_service
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
-from blizzard_mock.mock_hub.domain.models import ChunkSpec, SystemArtifactSpec
+from blizzard_mock.mock_hub.domain.models import ChunkSpec, ScopeSpec, SystemArtifactSpec
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
@@ -38,6 +38,13 @@ def seed_system_artifact(
     ``/_seed/chunk`` this names no chunk to seed it onto."""
     service.seed_system_artifact(spec)
     return {"name": spec.name}
+
+
+@seed_router.post("/scopes", status_code=201)
+def seed_scope(spec: ScopeSpec, service: Annotated[MockHubService, Depends(get_service)]) -> dict[str, str]:
+    """Upsert one scope in the deployment's vocabulary — global, unlike ``/_seed/chunk``."""
+    service.seed_scope(spec)
+    return {"slug": spec.slug}
 
 
 @seed_router.post("/reset")

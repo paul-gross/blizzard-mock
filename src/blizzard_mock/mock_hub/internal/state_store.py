@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
-from blizzard_mock.mock_hub.domain.state import ReportedRunnerFacts, RunnerCapability, RunnerRow
+from blizzard_mock.mock_hub.domain.state import ReportedRunnerFacts, RunnerCapability, RunnerRow, ScopeRow
 
 
 class InMemoryHubState:
@@ -21,6 +21,7 @@ class InMemoryHubState:
         self._reported: dict[str, ReportedRunnerFacts] = {}
         self._questions: dict[str, QuestionState] = {}
         self._system_artifacts: dict[str, str] = {}
+        self._scopes: dict[str, ScopeRow] = {}
 
     def put_chunk(self, chunk: ChunkState) -> None:
         self._chunks[chunk.chunk_id] = chunk
@@ -89,8 +90,15 @@ class InMemoryHubState:
     def list_system_artifacts(self) -> list[tuple[str, str]]:
         return sorted(self._system_artifacts.items())
 
+    def put_scope(self, row: ScopeRow) -> None:
+        self._scopes[row.slug] = row
+
+    def list_scopes(self) -> list[ScopeRow]:
+        return sorted(self._scopes.values(), key=lambda row: row.created_at, reverse=True)
+
     def clear(self) -> None:
         self._chunks.clear()
         self._runners.clear()
         self._questions.clear()
         self._system_artifacts.clear()
+        self._scopes.clear()
