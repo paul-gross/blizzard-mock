@@ -444,7 +444,7 @@ Each facade registers a `[project.scripts]` binary:
 | Binary | Facade | Surface |
 |--------|--------|---------|
 | `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0 (blizzard#606), the runner's health probe's own shape. |
-| `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. |
+| `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` (blizzard#504) — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
@@ -458,3 +458,7 @@ seam: the lifecycle fire points, the exits that fire nothing, and real
 lever roster, `emit`'s validate-before-write contract, the emitted artifact
 running unfenced under a bare system `python3` with no `blizzard_mock` import
 reachable, and `run`'s output staying byte-identical to before `emit` existed.
+`tests/test_codex_app_server.py` covers `app-server` instead: the id-matched
+response with an interleaved notification, a plain read, a refreshing
+rotation's atomic rewrite and audit log, a missing credential file, and two
+concurrent rotations racing the same lock without corrupting the file.

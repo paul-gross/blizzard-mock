@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades import _common
+from blizzard_mock.harness.facades._codex_app_server import run_app_server
 from blizzard_mock.harness.facades._text import render_ask_text
 
 _USAGE = """\
@@ -22,10 +25,15 @@ Usage:
   mock-codex exec [--json] "<script>"
   mock-codex exec resume <session-id> "<resume-script>"
   mock-codex exec --last "<resume-script>"
+  mock-codex app-server
 
 The prompt is the program (Python, exec()'d in the acquired worktree). Fenced —
-refuses to run unless test scaffolding marks the environment.
+refuses to run unless test scaffolding marks the environment. ``app-server`` is
+unfenced: a JSON-RPC-over-stdio double for ``codex app-server``, reading and rotating
+``$CODEX_HOME/auth.json`` (default ``~/.codex/auth.json``) rather than running a script.
 """
+
+_DEFAULT_CODEX_HOME = str(Path.home() / ".codex")
 
 
 class CodexJsonlWire:
@@ -53,7 +61,7 @@ class CodexJsonlWire:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mock-codex", add_help=True)
-    parser.add_argument("subcommand", nargs="?", default=None, help="'exec'")
+    parser.add_argument("subcommand", nargs="?", default=None, help="'exec' or 'app-server'")
     parser.add_argument("resume", nargs="?", default=None, help="'resume' or the script")
     parser.add_argument("rest", nargs="*", default=None, help="session id and/or script")
     parser.add_argument("--json", action="store_true")
@@ -81,6 +89,9 @@ def _resolve(args: argparse.Namespace) -> tuple[str | None, str | None, bool]:
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-codex`` binary."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    if args.subcommand == "app-server":
+        codex_home = Path(os.environ.get("CODEX_HOME", _DEFAULT_CODEX_HOME))
+        raise SystemExit(run_app_server(auth_path=codex_home / "auth.json"))
     if args.subcommand not in ("exec", None):
         print(_USAGE, file=sys.stderr)
         raise SystemExit(2)
