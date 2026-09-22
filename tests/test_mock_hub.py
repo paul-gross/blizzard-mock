@@ -1049,7 +1049,13 @@ def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client
     assert view["locally_paused"] is True
     assert view["locally_paused_by"] == "op"
     assert view["subscriptions"] == [
-        {"slug": "anthropic", "name": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []}
+        {
+            "slug": "anthropic",
+            "name": "anthropic",
+            "sampled_at": "2026-08-01T12:00:00+00:00",
+            "windows": [],
+            "condition": None,
+        }
     ]
 
 
@@ -1133,6 +1139,7 @@ def test_malformed_usage_windows_are_omitted_and_a_later_valid_empty_sample_rend
             "name": "Anthropic",
             "sampled_at": "2026-08-01T12:01:00+00:00",
             "windows": [],
+            "condition": None,
         }
     ]
 
@@ -1339,6 +1346,260 @@ def test_events_invalid_external_usage_sample_is_rejected_without_a_subscription
 
     assert ack.json()["rejected"] == [1]
     assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+
+
+# blizzard#504 D7 — the `missed` fact and its `condition` derivation.
+# --------------------------------------------------------------------------- #
+
+
+def test_events_external_subscription_usage_missed_is_accepted(client: TestClient) -> None:
+    """A missed-fact report (blizzard#504 D7) is runner-scoped and advisory-only, mirroring
+    its sampled sibling — applied for a runner the registry has never seen."""
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+    assert ack.json()["rejected"] == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"missed_at": "2026-08-01T12:00:00+00:00", "reason": "credential_lapsed"},
+        {"slug": "", "missed_at": "2026-08-01T12:00:00+00:00", "reason": "credential_lapsed"},
+        {"slug": 123, "missed_at": "2026-08-01T12:00:00+00:00", "reason": "credential_lapsed"},
+    ],
+    ids=["missing-slug", "empty-slug", "non-string-slug"],
+)
+def test_events_invalid_external_usage_miss_is_rejected_without_a_subscription(
+    client: TestClient, payload: dict[str, object]
+) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 1, "kind": "external_subscription_usage.missed", "payload": payload}],
+        },
+    )
+
+    assert ack.json()["rejected"] == [1]
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+
+
+def test_a_miss_with_no_prior_sample_renders_a_miss_only_lapsed_row(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == [
+        {"slug": "openai", "name": "OpenAI", "sampled_at": None, "windows": [], "condition": "credential_lapsed"}
+    ]
+
+
+def test_a_miss_newer_than_the_sample_supersedes_it_as_a_lapsed_row(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "sampled_at": "2026-08-01T12:00:00+00:00",
+                        "windows": [],
+                    },
+                }
+            ],
+        },
+    )
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:05:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [2]
+
+    view = client.get("/api/fleet/runners/r1").json()["subscriptions"]
+    assert view == [
+        {"slug": "openai", "name": "OpenAI", "sampled_at": None, "windows": [], "condition": "credential_lapsed"}
+    ]
+
+
+def test_a_sample_newer_than_the_miss_clears_the_condition(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                }
+            ],
+        },
+    )
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 2,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "sampled_at": "2026-08-01T12:05:00+00:00",
+                        "windows": [],
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [2]
+
+    view = client.get("/api/fleet/runners/r1").json()["subscriptions"]
+    assert view == [
+        {
+            "slug": "openai",
+            "name": "OpenAI",
+            "sampled_at": "2026-08-01T12:05:00+00:00",
+            "windows": [],
+            "condition": None,
+        }
+    ]
+
+
+def test_a_non_lapsed_miss_reason_never_surfaces_as_a_condition(client: TestClient) -> None:
+    """Only `credential_lapsed` ever surfaces as `condition` (D7) — every other reason is
+    silent, whether or not a sample exists for the same slug."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "endpoint_unreachable",
+                    },
+                }
+            ],
+        },
+    )
+    assert ack.json()["applied"] == [1]
+
+    # Never sampled, and only a non-lapsed miss on record — simply absent.
+    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+
+
+def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client: TestClient) -> None:
+    """The sample and miss are sibling records (D7) — a later sample after a miss reads
+    back the sample's own report, not a value carried over from the miss."""
+    client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                },
+                {
+                    "seq": 2,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "sampled_at": "2026-08-01T12:05:00+00:00",
+                        "windows": [
+                            {
+                                "window": "5h",
+                                "utilization_pct": 12.0,
+                                "resets_at": "2026-08-01T17:00:00+00:00",
+                                "window_seconds": 18000,
+                            }
+                        ],
+                    },
+                },
+            ],
+        },
+    )
+
+    subscriptions = client.get("/api/fleet/runners/r1").json()["subscriptions"]
+    assert len(subscriptions) == 1
+    assert subscriptions[0]["condition"] is None
+    assert subscriptions[0]["windows"][0]["utilization_pct"] == 12.0
 
 
 def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_collection(client: TestClient) -> None:

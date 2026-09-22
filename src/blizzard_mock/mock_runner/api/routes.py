@@ -32,6 +32,7 @@ from blizzard_mock.mock_runner.domain.models import (
     RegisterBody,
     ReportEventBody,
     ReportExternalUsageBody,
+    ReportExternalUsageMissBody,
     ResumeBody,
 )
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
@@ -188,6 +189,15 @@ def drive_report_external_usage(
 ) -> dict[str, Any]:
     return service.report_external_usage(
         slug=body.pushed_slug(), sampled_at=body.sampled_at, windows=body.windows, name=body.name
+    )
+
+
+@drive_router.post("/report-external-usage-miss")
+def drive_report_external_usage_miss(
+    body: ReportExternalUsageMissBody, service: Annotated[MockRunnerService, Depends(get_service)]
+) -> dict[str, Any]:
+    return service.report_external_usage_miss(
+        slug=body.pushed_slug(), missed_at=body.missed_at, reason=body.reason, name=body.name
     )
 
 

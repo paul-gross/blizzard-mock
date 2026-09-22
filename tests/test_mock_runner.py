@@ -656,6 +656,46 @@ def test_drive_report_external_usage_raw_slug_lever_pushes_an_unnarrowed_slug(
     assert hub.get("/api/fleet/runners/runner-mock").json()["subscriptions"] == []
 
 
+def test_drive_report_external_usage_miss_lands_a_lapsed_condition(stack: tuple[TestClient, TestClient]) -> None:
+    """The miss-half sibling drive verb (blizzard#504 D7) — a miss with no prior sample
+    renders as a miss-only, ``credential_lapsed`` row."""
+    hub, runner = stack
+    runner.post("/_drive/register")
+    out = runner.post(
+        "/_drive/report-external-usage-miss",
+        json={
+            "slug": "openai",
+            "name": "OpenAI Plan",
+            "missed_at": "2026-07-13T00:00:00Z",
+            "reason": "credential_lapsed",
+        },
+    ).json()
+    assert out["status"] == 200
+    view = hub.get("/api/fleet/runners/runner-mock").json()
+    subscriptions = {s["slug"]: s for s in view["subscriptions"]}
+    assert subscriptions["openai"]["name"] == "OpenAI Plan"
+    assert subscriptions["openai"]["condition"] == "credential_lapsed"
+    assert subscriptions["openai"]["sampled_at"] is None
+    assert subscriptions["openai"]["windows"] == []
+
+
+def test_drive_report_external_usage_miss_raw_slug_lever_pushes_an_unnarrowed_slug(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """Mirrors the sampled drive verb's own malformed-slug lever."""
+    hub, runner = stack
+    runner.post("/_drive/register")
+    out = runner.post(
+        "/_drive/report-external-usage-miss",
+        json={"raw_slug": 123, "missed_at": "2026-07-13T00:00:00Z", "reason": "credential_lapsed"},
+    ).json()
+
+    assert out["status"] == 200
+    assert len(out["response"]["rejected"]) == 1
+    assert out["response"]["applied"] == []
+    assert hub.get("/api/fleet/runners/runner-mock").json()["subscriptions"] == []
+
+
 def test_driver_reads_a_batch_of_chunk_statuses_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
     """blizzard#521: the runner tick's slim batch read — a repeatable ``chunk_id`` query
     param that omits an unknown id rather than 404ing."""

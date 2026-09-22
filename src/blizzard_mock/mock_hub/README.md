@@ -87,14 +87,24 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
 | `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled (issue #125) |
 | `external_subscription_usage.sampled` | Upserts the runner's newest sample for its `slug` — readable via `GET /runners/{id}` (issue #218) |
+| `external_subscription_usage.missed` | Upserts the runner's newest reported miss for its `slug`, in its own store, never touching the sample row (blizzard#504 D7) |
 
-The three runner-scoped kinds — both `runner.locally_*` and the usage sample — are held
-per `runner_id` and applied whether or not that runner has registered, so a report the
-outbound buffer replays ahead of its registration is readable once that registration
-lands. A usage sample must carry a non-empty `slug`; its payload is coerced at ingest
-(defaulted `sampled_at`, unusable windows dropped), so an accepted fact can never make a
-later read raise. Held per `(runner_id, slug)`, one subscription's sample never overwrites
-a sibling's, and `RunnerView.subscriptions` carries every reported slug's own view.
+The four runner-scoped kinds — both `runner.locally_*` and the usage sample/miss pair —
+are held per `runner_id` and applied whether or not that runner has registered, so a
+report the outbound buffer replays ahead of its registration is readable once that
+registration lands. A usage sample or miss must carry a non-empty `slug`; its payload is
+coerced at ingest (defaulted `sampled_at`/`missed_at`, unusable windows dropped), so an
+accepted fact can never make a later read raise. Held per `(runner_id, slug)`, one
+subscription's sample never overwrites a sibling's (nor does a miss overwrite a sample,
+or vice versa), and `RunnerView.subscriptions` carries every reported slug's own view.
+
+A slug's view is the union of its sample and its miss (D7): when the newest miss carries
+`credential_lapsed` and postdates the newest (or absent) sample, that slug renders as a
+miss-only row — `sampled_at: null`, `windows: []`, `condition: "credential_lapsed"` — in
+place of its sample, or in place of nothing at all if it was never sampled. A miss with
+any other reason, or one that predates the newest sample, never surfaces as a
+`condition` — `RunnerView.subscriptions[].condition` is `null` for every other slug.
+Unlike the real hub, this mock applies no staleness gate to either a sample or a miss.
 
 ## Control plane
 

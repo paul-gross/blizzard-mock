@@ -219,3 +219,22 @@ class ReportExternalUsageBody(BaseModel):
     def pushed_slug(self) -> Any:
         """The value to send as the fact's ``slug`` — the lever when set, else ``slug``."""
         return self.slug if self.raw_slug is None else self.raw_slug
+
+
+class ReportExternalUsageMissBody(BaseModel):
+    """POST /_drive/report-external-usage-miss — push one ``external_subscription_usage.missed``
+    fact naming an arbitrary ``slug`` (blizzard#504 D7), the miss-half sibling of
+    :class:`ReportExternalUsageBody`. ``name`` is optional (the hub defaults it to ``slug``);
+    ``reason`` is the sampler's closed-set miss reason — never a token, refresh token, or path."""
+
+    #: The declared subscription this miss belongs to — narrow on purpose, like :attr:`ReportExternalUsageBody.slug`.
+    slug: str = ""
+    missed_at: str
+    reason: str
+    name: str | None = None
+    #: The malformed-slug lever, mirroring :attr:`ReportExternalUsageBody.raw_slug`.
+    raw_slug: Any | None = None
+
+    def pushed_slug(self) -> Any:
+        """The value to send as the fact's ``slug`` — the lever when set, else ``slug``."""
+        return self.slug if self.raw_slug is None else self.raw_slug
