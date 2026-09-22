@@ -170,6 +170,18 @@ class SystemArtifactSpec(BaseModel):
     content: str
 
 
+class ScopeSpec(BaseModel):
+    """One seeded scope (``POST /_seed/scopes``) — global, mirrors the real hub's own
+    mint-on-name vocabulary rather than modeling its create/retire lifecycle: a scenario
+    seeds the end state it wants directly. ``created_at`` defaults to mint time when
+    omitted, the :class:`GardenProposalSpec` pattern."""
+
+    slug: str
+    description: str = ""
+    created_at: str | None = None
+    retired: bool = False
+
+
 class GardenRunSpec(BaseModel):
     """A seeded chunk's garden run identity — mirrors the real hub's ``RunContext``,
     resolved server-side from the chunk rather than named by the caller. ``None`` on a

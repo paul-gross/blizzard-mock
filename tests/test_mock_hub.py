@@ -2260,6 +2260,53 @@ def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
     assert resp.json() == []
 
 
+# --- scopes (global vocabulary, blizzard#582 D2) ------------------------------
+
+
+def test_scopes_start_empty(client: TestClient) -> None:
+    resp = client.get("/api/fleet/scopes")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+def test_seeded_scope_is_readable_by_the_fleet_route(client: TestClient) -> None:
+    seeded = client.post("/_seed/scopes", json={"slug": "blizzard", "description": "the platform"})
+    assert seeded.status_code == 201, seeded.text
+    assert seeded.json() == {"slug": "blizzard"}
+
+    listed = client.get("/api/fleet/scopes")
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()) == 1
+    row = listed.json()[0]
+    assert row["slug"] == "blizzard"
+    assert row["description"] == "the platform"
+    assert row["retired"] is False
+
+
+def test_a_retired_scope_is_seedable_directly(client: TestClient) -> None:
+    client.post("/_seed/scopes", json={"slug": "gone", "retired": True})
+
+    resp = client.get("/api/fleet/scopes")
+    assert resp.json()[0]["retired"] is True
+
+
+def test_seeding_the_same_slug_twice_replaces_it(client: TestClient) -> None:
+    client.post("/_seed/scopes", json={"slug": "blizzard", "description": "first"})
+    client.post("/_seed/scopes", json={"slug": "blizzard", "description": "second"})
+
+    resp = client.get("/api/fleet/scopes")
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["description"] == "second"
+
+
+def test_reset_clears_seeded_scopes(client: TestClient) -> None:
+    client.post("/_seed/scopes", json={"slug": "blizzard"})
+    assert client.post("/_seed/reset").status_code == 200
+
+    resp = client.get("/api/fleet/scopes")
+    assert resp.json() == []
+
+
 # --- garden findings (worker-scoped bucket read) ------------------------------
 
 
@@ -2301,6 +2348,9 @@ def test_garden_findings_reads_the_seeded_live_bucket(client: TestClient) -> Non
             "note": None,
             "last_seen_at": None,
             "observed_count": 0,
+            "source": "routine",
+            "severity": None,
+            "raised_by_chunk_id": None,
         }
     ]
 
@@ -2437,6 +2487,9 @@ def test_chunk_findings_reads_the_seeded_answered_set(client: TestClient) -> Non
             "note": None,
             "last_seen_at": None,
             "observed_count": 0,
+            "source": "routine",
+            "severity": None,
+            "raised_by_chunk_id": None,
         }
     ]
 

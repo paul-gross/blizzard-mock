@@ -31,9 +31,10 @@ from blizzard_mock.mock_hub.domain.models import (
     GardenProposalSpec,
     NodeSpec,
     QuestionState,
+    ScopeSpec,
     SystemArtifactSpec,
 )
-from blizzard_mock.mock_hub.domain.state import IHubState, RunnerCapability
+from blizzard_mock.mock_hub.domain.state import IHubState, RunnerCapability, ScopeRow
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     BlockedView,
@@ -59,6 +60,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RunnerCapabilityView,
     RunnerFactAck,
     RunnerView,
+    ScopeView,
     SubscriptionUsageView,
     SystemArtifactView,
     TranscriptSegmentAck,
@@ -282,6 +284,28 @@ class MockHubService:
         if content is None:
             raise SystemArtifactNotFound(f"no system artifact {name!r}")
         return SystemArtifactView(name=name, content=content)
+
+    # -- scopes (global vocabulary, blizzard#582 D2) ------------------------
+
+    def seed_scope(self, spec: ScopeSpec) -> None:
+        """Upsert one scope (``POST /_seed/scopes``) — global, mirrors the real hub's
+        mint-on-name vocabulary; a scenario seeds the end state it wants directly rather
+        than replaying create/retire."""
+        self._state.put_scope(
+            ScopeRow(
+                slug=spec.slug,
+                description=spec.description,
+                created_at=spec.created_at or self._clock.now().isoformat(),
+                retired=spec.retired,
+            )
+        )
+
+    def scopes(self) -> list[ScopeView]:
+        """Every seeded scope, newest first — mirrors ``GET /api/fleet/scopes``."""
+        return [
+            ScopeView(slug=row.slug, description=row.description, created_at=row.created_at, retired=row.retired)
+            for row in self._state.list_scopes()
+        ]
 
     # -- queue -------------------------------------------------------------
 

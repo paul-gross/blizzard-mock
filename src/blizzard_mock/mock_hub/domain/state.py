@@ -46,6 +46,19 @@ class ReportedRunnerFacts:
         self.subscription_usage: dict[str, SubscriptionUsageView] = {}
 
 
+@dataclass(frozen=True)
+class ScopeRow:
+    """One seeded scope — global vocabulary, mirrors the real hub's minted ``Scope``.
+
+    ``description``/``created_at`` are keyword-only: two adjacent ``str`` positionals
+    swap silently at a call site otherwise."""
+
+    slug: str
+    description: str = field(kw_only=True)
+    created_at: str = field(kw_only=True)
+    retired: bool = False
+
+
 class RunnerRow:
     """A registered runner's mutable registry row (liveness + the fleet's brake).
 
@@ -122,5 +135,13 @@ class IHubState(Protocol):
 
     def get_system_artifact(self, name: str) -> str | None: ...
     def list_system_artifacts(self) -> list[tuple[str, str]]: ...
+
+    def put_scope(self, row: ScopeRow) -> None:
+        """Upsert one seeded scope, global vocabulary like the system-artifact set."""
+        ...
+
+    def list_scopes(self) -> list[ScopeRow]:
+        """Every seeded scope, newest first — mirrors the real hub's own ``list_all``."""
+        ...
 
     def clear(self) -> None: ...

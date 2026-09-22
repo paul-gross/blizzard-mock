@@ -316,7 +316,7 @@ class FindingView(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     finding_id: str
-    routine_name: str
+    routine_name: str | None = None
     scope_slug: str
     class_: str = Field(alias="class")
     locus: str
@@ -329,6 +329,19 @@ class FindingView(BaseModel):
     note: str | None = None
     last_seen_at: str | None
     observed_count: int
+    source: str = "routine"
+    severity: str | None = None
+    raised_by_chunk_id: str | None = None
+
+
+class ScopeView(BaseModel):
+    """A scope in the deployment's vocabulary — mirrors ``blizzard.wire.scope.ScopeView``,
+    served worker-facing by ``GET /api/fleet/scopes`` (blizzard#582 D2)."""
+
+    slug: str
+    description: str
+    created_at: str
+    retired: bool = False
 
 
 class GardenProposalView(BaseModel):
