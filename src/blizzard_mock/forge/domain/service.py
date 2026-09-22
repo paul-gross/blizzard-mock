@@ -255,8 +255,11 @@ class ForgeService:
         if sha is not None and sha != head_sha:
             raise HeadMismatch("Head branch was modified. Review and try the merge again.")
         commit_message = message or f"Merge pull request #{number} from {pull.head}"
-        new_sha = self._git.merge(repo, pull.base, pull.head, commit_message)
-        self._record_merge(repo, pull, new_sha, merged_by=user)
+        if method is MergeMethod.REBASE:
+            new_sha = self._git.rebase(repo, pull.base, pull.head, commit_message)
+        else:
+            new_sha = self._git.merge(repo, pull.base, pull.head, commit_message)
+        self._record_merge(repo, pull, new_sha, merged_by=user, head_sha=head_sha)
         return MergeResult(new_sha, "Pull Request successfully merged")
 
     def is_merged(self, owner: str, name: str, number: int) -> bool:
@@ -334,9 +337,10 @@ class ForgeService:
         pull = self._require_pull(repo, params.number)
         if pull.merged:
             return
+        head_sha = self._git.resolve_ref(repo, pull.head)
         message = f"Merge pull request #{pull.number} from {pull.head} (external)"
         new_sha = self._git.merge(repo, pull.base, pull.head, message)
-        self._record_merge(repo, pull, new_sha, merged_by="external")
+        self._record_merge(repo, pull, new_sha, merged_by="external", head_sha=head_sha)
 
     def _comment_midflight(self, params: LeverParams) -> None:
         if params.repo is None or params.number is None or params.body is None:
@@ -352,18 +356,25 @@ class ForgeService:
             raise PullNotFound(f"pull request #{number} not found in {repo.full_name}")
         return pull
 
-    def _record_merge(self, repo: Repo, pull: PullRequest, sha: str, *, merged_by: str) -> None:
+    def _record_merge(self, repo: Repo, pull: PullRequest, sha: str, *, merged_by: str, head_sha: str) -> None:
         now = self._clock.now()
         pull.merged = True
         pull.merged_at = now
         pull.merged_by = merged_by
         pull.merge_commit_sha = sha
+        pull.head_sha_at_merge = head_sha
         pull.state = State.CLOSED
         pull.updated_at = now
         self._state.put_pull(repo.full_name, pull)
 
     def _view(self, repo: Repo, pull: PullRequest) -> PullView:
-        head_sha = self._git.resolve_ref(repo, pull.head)
+        # A merged PR's head sha is frozen at merge time, not tracked live — real GitHub
+        # never updates a merged PR's own `head.sha` after a later, unrelated push.
+        head_sha = (
+            pull.head_sha_at_merge
+            if pull.merged and pull.head_sha_at_merge is not None
+            else (self._git.resolve_ref(repo, pull.head))
+        )
         base_sha = self._git.resolve_ref(repo, pull.base)
         mergeable, mstate = self._mergeability(repo, pull)
         return PullView(pull, head_sha, base_sha, mergeable, mstate)

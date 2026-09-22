@@ -337,6 +337,35 @@ def test_merge_lands_commit_reachable_from_bare_main(client: TestClient, repos_d
     assert _is_ancestor(repos_dir, merge_sha, "refs/heads/main")
 
 
+def test_rebase_merge_replays_commits_new_shas_not_the_original_head(client: TestClient, repos_dir: Path) -> None:
+    """Rebase-merge fidelity: the original head sha
+    is never reachable from base, but its changes are, via a new commit."""
+    pull = _open_pull(client, "feature")
+    head_sha = pull["head"]["sha"]
+    number = pull["number"]
+
+    merged = client.put(f"/repos/{REPO}/pulls/{number}/merge", json={"merge_method": "rebase"})
+    assert merged.status_code == 200
+    merge_sha = merged.json()["sha"]
+    assert merged.json()["merged"] is True
+
+    after = client.get(f"/repos/{REPO}/pulls/{number}").json()
+    assert after["merged"] is True
+    assert after["merge_commit_sha"] == merge_sha
+
+    assert merge_sha != head_sha
+    assert not _is_ancestor(repos_dir, head_sha, "refs/heads/main")
+    assert _is_ancestor(repos_dir, merge_sha, "refs/heads/main")
+
+    contents = subprocess.run(
+        ["git", "--git-dir", str(repos_dir / BARE_REL), "show", "refs/heads/main:feature.txt"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert contents == "feature\n"
+
+
 def test_real_conflict_merge_is_405(client: TestClient) -> None:
     number = _open_pull(client, "clash")["number"]
     assert client.put(f"/repos/{REPO}/pulls/{number}/merge", json={}).status_code == 405
