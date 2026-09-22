@@ -205,12 +205,15 @@ class ExternalSubscriptionUsageWindowView(BaseModel):
 
 class SubscriptionUsageView(BaseModel):
     """One reported subscription's newest sampled usage, carrying its identity
-    (blizzard#436 phase 3) — mirrors ``blizzard.wire.runner.SubscriptionUsageView``."""
+    (blizzard#436 phase 3) — mirrors ``blizzard.wire.runner.SubscriptionUsageView``.
+    ``sampled_at`` is ``None`` for a miss-only row (blizzard#504 D7) — ``condition``
+    carries the reason in that case, and ``windows`` is empty."""
 
     slug: str
     name: str
-    sampled_at: str
+    sampled_at: str | None = None
     windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
+    condition: str | None = None
 
 
 class RunnerCapabilityView(BaseModel):

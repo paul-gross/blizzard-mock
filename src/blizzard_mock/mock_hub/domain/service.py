@@ -34,7 +34,13 @@ from blizzard_mock.mock_hub.domain.models import (
     ScopeSpec,
     SystemArtifactSpec,
 )
-from blizzard_mock.mock_hub.domain.state import IHubState, RunnerCapability, ScopeRow
+from blizzard_mock.mock_hub.domain.state import (
+    IHubState,
+    ReportedRunnerFacts,
+    RunnerCapability,
+    ScopeRow,
+    SubscriptionUsageMiss,
+)
 from blizzard_mock.mock_hub.domain.wire import (
     ApplyResponse,
     BlockedView,
@@ -79,6 +85,10 @@ RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
+EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
+
+#: The one miss reason surfaced as a per-slug `condition` (D7) — restated from the real hub, not imported.
+_CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
 
 
 class _ExternalSubscriptionUsageWindowFact(BaseModel):
@@ -739,6 +749,14 @@ class MockHubService:
                 return False
             self._state.reported_facts(runner_id).subscription_usage[slug] = self._usage_view(payload, slug=slug)
             return True
+        if kind == EXTERNAL_SUBSCRIPTION_USAGE_MISSED:
+            # Sibling to the sampled kind above (D7) — upserts per slug into its own
+            # dict, never touching the sample a sibling slug (or this same slug) holds.
+            slug = payload.get("slug")
+            if not isinstance(slug, str) or not slug:
+                return False
+            self._state.reported_facts(runner_id).subscription_usage_misses[slug] = self._usage_miss(payload, slug=slug)
+            return True
         # usage.recorded / event.recorded (issue #125) are accepted as no-ops.
         return kind in (USAGE_RECORDED, EVENT_RECORDED)
 
@@ -905,7 +923,7 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
-            subscriptions=list(reported.subscription_usage.values()),
+            subscriptions=self._usage_condition_views(reported),
             capabilities=[
                 RunnerCapabilityView(
                     harness_id=c.harness_id,
@@ -917,6 +935,17 @@ class MockHubService:
                 for c in row.capabilities
             ],
         )
+
+    def _parse_instant(self, value: Any) -> datetime:
+        """An ISO-8601 stamp off a fact payload, falling back to the clock's own instant on
+        a missing or malformed one — shared by the sampled and missed fact handlers."""
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+                return parsed.astimezone(UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+            except ValueError:
+                pass
+        return self._clock.now()
 
     def _usage_view(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageView:
         """One sampled payload as the mirrored view, with malformed windows omitted.
@@ -942,17 +971,7 @@ class MockHubService:
                 )
             except ValidationError:
                 continue
-        sampled_at = payload.get("sampled_at")
-        if isinstance(sampled_at, str):
-            try:
-                parsed_at = datetime.fromisoformat(sampled_at)
-                sampled_at = (
-                    parsed_at.astimezone(UTC) if parsed_at.tzinfo is not None else parsed_at.replace(tzinfo=UTC)
-                )
-            except ValueError:
-                sampled_at = self._clock.now()
-        else:
-            sampled_at = self._clock.now()
+        sampled_at = self._parse_instant(payload.get("sampled_at"))
         name = payload.get("name")
         return SubscriptionUsageView(
             slug=slug,
@@ -960,6 +979,44 @@ class MockHubService:
             sampled_at=sampled_at.isoformat(),
             windows=windows,
         )
+
+    def _usage_miss(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageMiss:
+        """One missed-fact payload as the mirrored miss record (blizzard#504 D7) — ``name``
+        defaults to ``slug`` itself, mirroring :meth:`_usage_view`'s own default."""
+        name = payload.get("name")
+        reason = payload.get("reason")
+        return SubscriptionUsageMiss(
+            slug=slug,
+            name=str(name) if name else slug,
+            missed_at=self._parse_instant(payload.get("missed_at")),
+            reason=str(reason) if reason else "",
+        )
+
+    @staticmethod
+    def _usage_condition_views(reported: ReportedRunnerFacts) -> list[SubscriptionUsageView]:
+        """Every declared subscription's rendered view, unioned across samples and misses
+        by slug (blizzard#504 D7) — a slug whose newest miss is a ``credential_lapsed``
+        newer than its newest (or absent) sample renders as a miss-only, lapsed row; every
+        other slug with a sample renders it unchanged. No staleness gate: unlike the real
+        hub, this mock never ages a report out on its own."""
+        slugs = sorted(set(reported.subscription_usage) | set(reported.subscription_usage_misses))
+        views: list[SubscriptionUsageView] = []
+        for slug in slugs:
+            sample = reported.subscription_usage.get(slug)
+            miss = reported.subscription_usage_misses.get(slug)
+            lapsed = miss is not None and miss.reason == _CREDENTIAL_LAPSED_CONDITION
+            if lapsed and sample is not None and sample.sampled_at is not None:
+                lapsed = miss.missed_at > datetime.fromisoformat(sample.sampled_at)
+            if lapsed:
+                assert miss is not None  # narrowed by `lapsed`'s own condition above
+                views.append(
+                    SubscriptionUsageView(
+                        slug=slug, name=miss.name, sampled_at=None, windows=[], condition=_CREDENTIAL_LAPSED_CONDITION
+                    )
+                )
+            elif sample is not None:
+                views.append(sample)
+        return views
 
     def set_paused(self, runner_id: str, paused: bool) -> None:
         row = self._state.get_runner(runner_id)

@@ -27,6 +27,7 @@ RUNNER_LOCALLY_PAUSED = "runner.locally_paused"
 RUNNER_LOCALLY_RESUMED = "runner.locally_resumed"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
+EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
 
 
 def _placeholder_turn(timestamp: str) -> dict[str, Any]:
@@ -457,6 +458,31 @@ class MockRunnerService:
             {
                 "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED, "payload": payload}],
+            }
+        )
+        return {"drove": True, "status": status, "response": response}
+
+    def report_external_usage_miss(
+        self,
+        *,
+        slug: Any,
+        missed_at: str,
+        reason: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Push one ``external_subscription_usage.missed`` fact via ``/events`` (blizzard#504
+        D7), per-slug — the sibling drive verb to :meth:`report_external_usage` for the miss
+        half of a sample attempt. Runner-scoped, like it: no chunk_id/lease_id, no held
+        lease required. ``reason`` only crosses — never a token, a refresh token, or a path."""
+        self._apply_delay(None)
+        self._runner_seq += 1
+        payload: dict[str, Any] = {"slug": slug, "missed_at": missed_at, "reason": reason}
+        if name is not None:
+            payload["name"] = name
+        status, response = self._gw.push_facts(
+            {
+                "runner_id": self._runner_id,
+                "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_MISSED, "payload": payload}],
             }
         )
         return {"drove": True, "status": status, "response": response}

@@ -29,6 +29,19 @@ class RunnerCapability:
     available: bool = field(default=True, kw_only=True)
 
 
+@dataclass(frozen=True, kw_only=True)
+class SubscriptionUsageMiss:
+    """One declared subscription's newest reported miss (blizzard#504 D7) — a sibling to
+    :class:`SubscriptionUsageView`, held per slug and never overwriting the sample it is unioned
+    with at read time; mirrors the real hub's ``runner_external_usage_misses`` row. Keyword-only:
+    ``slug``/``name``/``reason`` share one type, and a positional call could swap them silently."""
+
+    slug: str
+    name: str
+    missed_at: datetime
+    reason: str
+
+
 class ReportedRunnerFacts:
     """What a runner reports *about itself*, held per ``runner_id`` and never gated on a
     registration: the outbound buffer replays an outage in FIFO order, so one of these can
@@ -44,6 +57,9 @@ class ReportedRunnerFacts:
         # Every declared subscription's newest sample, keyed by slug (issue #218,
         # blizzard#436) — a slug absent here has never reported.
         self.subscription_usage: dict[str, SubscriptionUsageView] = {}
+        # Every declared subscription's newest reported miss, keyed by slug (blizzard#504 D7) —
+        # a sibling to `subscription_usage`, never overwriting a sample; unioned at read time.
+        self.subscription_usage_misses: dict[str, SubscriptionUsageMiss] = {}
 
 
 @dataclass(frozen=True)
