@@ -1004,9 +1004,13 @@ class MockHubService:
         for slug in slugs:
             sample = reported.subscription_usage.get(slug)
             miss = reported.subscription_usage_misses.get(slug)
-            lapsed = miss is not None and miss.reason == _CREDENTIAL_LAPSED_CONDITION
-            if lapsed and sample is not None and sample.sampled_at is not None:
-                lapsed = miss.missed_at > datetime.fromisoformat(sample.sampled_at)
+            lapsed = False
+            if miss is not None and miss.reason == _CREDENTIAL_LAPSED_CONDITION:
+                lapsed = (
+                    sample is None
+                    or sample.sampled_at is None
+                    or miss.missed_at > datetime.fromisoformat(sample.sampled_at)
+                )
             if lapsed:
                 assert miss is not None  # narrowed by `lapsed`'s own condition above
                 views.append(
