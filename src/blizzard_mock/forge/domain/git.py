@@ -68,6 +68,12 @@ class IWriteGitBackend(IReadGitBackend, Protocol):
         new commit sha on ``base``. Raises ``NotMergeable`` on real conflict."""
         ...
 
+    def rebase(self, repo: Repo, base: str, head: str, message: str) -> str:
+        """Replay ``head``'s commits onto ``base`` as new commits and advance
+        ``base`` to the new tip, leaving ``head`` untouched — GitHub's
+        rebase-merge. Raises ``NotMergeable`` on real conflict."""
+        ...
+
     def update_ref(self, repo: Repo, ref: str, sha: str) -> None:
         """Set ``refs/heads/<ref>`` to point at ``sha`` unconditionally — the
         raw ref write behind the domain's fast-forward compare-and-swap."""

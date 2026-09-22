@@ -255,7 +255,10 @@ class ForgeService:
         if sha is not None and sha != head_sha:
             raise HeadMismatch("Head branch was modified. Review and try the merge again.")
         commit_message = message or f"Merge pull request #{number} from {pull.head}"
-        new_sha = self._git.merge(repo, pull.base, pull.head, commit_message)
+        if method is MergeMethod.REBASE:
+            new_sha = self._git.rebase(repo, pull.base, pull.head, commit_message)
+        else:
+            new_sha = self._git.merge(repo, pull.base, pull.head, commit_message)
         self._record_merge(repo, pull, new_sha, merged_by=user)
         return MergeResult(new_sha, "Pull Request successfully merged")
 

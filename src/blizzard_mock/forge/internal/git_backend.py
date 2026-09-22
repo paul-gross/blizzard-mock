@@ -153,6 +153,28 @@ class GitBackend:
                 git.git.worktree("remove", "--force", str(tmp))
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def rebase(self, repo: RepoModel, base: str, head: str, message: str) -> str:
+        git = self._open(repo.owner, repo.name)
+        head_sha = self.resolve_ref(repo, head)
+        tmp = Path(tempfile.mkdtemp(prefix="forge-rebase-"))
+        try:
+            # Detached, not on the head branch, so replaying its commits never
+            # rewrites the head ref itself — only base is advanced below.
+            git.git.worktree("add", "--force", "--detach", str(tmp), head_sha)
+            work = Repo(tmp)
+            with work.git.custom_environment(**_MERGE_IDENTITY):
+                try:
+                    work.git.rebase(base)
+                except GitCommandError as exc:
+                    self._raise_rebase_error(exc, work, repo, base, head)
+                new_sha = work.git.rev_parse("HEAD")
+            git.git.update_ref(f"refs/heads/{base}", new_sha)
+            return new_sha
+        finally:
+            with contextlib.suppress(GitCommandError):
+                git.git.worktree("remove", "--force", str(tmp))
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def update_ref(self, repo: RepoModel, ref: str, sha: str) -> None:
         git = self._open(repo.owner, repo.name)
         git.git.update_ref(f"refs/heads/{ref}", sha)
@@ -167,4 +189,16 @@ class GitBackend:
             ) from exc
         raise self._errors.from_git(
             exc, f"merge of {head} into {base} failed", repo=repo.full_name, op="merge"
+        ) from exc
+
+    def _raise_rebase_error(self, exc: GitCommandError, work: Repo, repo: RepoModel, base: str, head: str) -> None:
+        text = f"{exc.stdout}\n{exc.stderr}\n{exc}"
+        with contextlib.suppress(GitCommandError):
+            work.git.rebase("--abort")
+        if "CONFLICT" in text or "could not apply" in text:
+            raise self._errors.conflict(
+                f"rebase of {head} onto {base} conflicts", repo=repo.full_name, op="rebase"
+            ) from exc
+        raise self._errors.from_git(
+            exc, f"rebase of {head} onto {base} failed", repo=repo.full_name, op="rebase"
         ) from exc
