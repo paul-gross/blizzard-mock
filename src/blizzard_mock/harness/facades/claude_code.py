@@ -76,6 +76,10 @@ class ClaudeCodeWire:
             "usage": usage,
             "total_cost_usd": synthesize_cost_usd(usage),
         }
+        if subtype == "error_during_execution":
+            # The real CLI's crash envelope (e.g. a SIGINT-interrupted turn) carries no
+            # `result` key at all, only its cost and usage.
+            del envelope["result"]
         return json.dumps(envelope) + "\n"
 
 

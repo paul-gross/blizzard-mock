@@ -267,6 +267,36 @@ def test_claude_facade_json_envelope(fenced_repo, capsys) -> None:
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
+def test_claude_facade_error_envelope_carries_no_result_key(fenced_repo) -> None:
+    """A real Claude Code ``error_during_execution`` envelope has no ``result`` key at
+    all — a captured crash sample confirmed it — unlike every other subtype's envelope,
+    which always carries one. The mock used to write ``"result": text`` regardless of
+    subtype, hiding a real parsing bug in blizzard's own envelope reader."""
+    cwd, env = fenced_repo
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            "crash-1",
+            "crash()",
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    envelope = json.loads(proc.stdout)
+    assert envelope["subtype"] == "error_during_execution"
+    assert envelope["is_error"] is True
+    assert "result" not in envelope
+
+
 def test_claude_facade_json_envelope_carries_usage_and_cost(fenced_repo) -> None:
     """The result envelope must carry a realistic ``usage`` object + ``total_cost_usd``
     (blizzard epic #57) — what the runner adapter's ``parse_usage`` reads back."""
