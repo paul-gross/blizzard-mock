@@ -39,6 +39,9 @@ environment.
 See src/blizzard_mock/harness/README.md for the full contract.
 """
 
+# The real shape (blizzard#606), so the health probe's real normalizer gets exercised.
+_MOCK_VERSION = "2.1.278 (Claude Code)"
+
 
 class ClaudeCodeWire:
     """Render a :class:`RunResult` as Claude Code's headless output.
@@ -119,7 +122,13 @@ def _build_transcript_writer(
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-claude-code`` binary."""
-    args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    args_list = sys.argv[1:] if argv is None else list(argv)
+    if args_list and args_list[0] == "--version":
+        # The health probe (blizzard#438, blizzard#606) shells out to this same binary
+        # before argparse ever sees it — mirrors `opencode.py`'s own interception.
+        print(_MOCK_VERSION)
+        raise SystemExit(0)
+    args = _parser().parse_args(args_list)
     script = _common.read_script(args.prompt)
     if script is None:
         print(_USAGE)

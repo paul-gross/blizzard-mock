@@ -470,6 +470,17 @@ def test_claude_facade_bare_invocation_prints_usage(capsys) -> None:
     assert "mock-claude-code" in capsys.readouterr().out
 
 
+def test_claude_facade_version_is_intercepted_before_argparse_and_exits_0(capsys) -> None:
+    """The runner's health probe (blizzard#438, blizzard#606) shells out with only
+    `--version` — answered before any fence check or argparse validation runs, mirroring
+    `opencode.py`'s own `--version` interception, unlike the real CLI's argparse-error exit
+    2 this facade used to give it."""
+    with pytest.raises(SystemExit) as exc:
+        claude_code.main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out == "2.1.278 (Claude Code)\n"
+
+
 # --------------------------------------------------------------------------- #
 # Helper + engine seams still present (kept from the scaffold's smoke).
 # --------------------------------------------------------------------------- #
