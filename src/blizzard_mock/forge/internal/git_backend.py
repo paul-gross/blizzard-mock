@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 from git import Repo
@@ -134,71 +135,83 @@ class GitBackend:
     # -- writes ------------------------------------------------------------
 
     def merge(self, repo: RepoModel, base: str, head: str, message: str) -> str:
-        git = self._open(repo.owner, repo.name)
         head_sha = self.resolve_ref(repo, head)
-        tmp = Path(tempfile.mkdtemp(prefix="forge-merge-"))
-        try:
-            git.git.worktree("add", "--force", "--checkout", str(tmp), base)
-            work = Repo(tmp)
-            # The bare repo carries no committer identity; supply the forge's own
-            # so the merge commit can be created (env-scoped to this call only).
-            with work.git.custom_environment(**_MERGE_IDENTITY):
-                try:
-                    work.git.merge("--no-ff", "-m", message, head_sha)
-                except GitCommandError as exc:
-                    self._raise_merge_error(exc, work, repo, base, head)
-                return work.git.rev_parse("HEAD")
-        finally:
-            with contextlib.suppress(GitCommandError):
-                git.git.worktree("remove", "--force", str(tmp))
-            shutil.rmtree(tmp, ignore_errors=True)
+        # Attached to `base`, so the merge commit advances that branch ref directly —
+        # no explicit update_ref needed, unlike rebase's detached worktree below.
+        with (
+            self._throwaway_worktree(repo, checkout_ref=base, detach=False) as work,
+            work.git.custom_environment(**_MERGE_IDENTITY),
+        ):
+            try:
+                work.git.merge("--no-ff", "-m", message, head_sha)
+            except GitCommandError as exc:
+                self._raise_op_error(
+                    exc, work, repo, base, head, op="merge", conflict_markers=("CONFLICT", "Automatic merge failed")
+                )
+            return work.git.rev_parse("HEAD")
 
     def rebase(self, repo: RepoModel, base: str, head: str, message: str) -> str:
         git = self._open(repo.owner, repo.name)
         head_sha = self.resolve_ref(repo, head)
-        tmp = Path(tempfile.mkdtemp(prefix="forge-rebase-"))
-        try:
-            # Detached, not on the head branch, so replaying its commits never
-            # rewrites the head ref itself — only base is advanced below.
-            git.git.worktree("add", "--force", "--detach", str(tmp), head_sha)
-            work = Repo(tmp)
-            with work.git.custom_environment(**_MERGE_IDENTITY):
-                try:
-                    work.git.rebase(base)
-                except GitCommandError as exc:
-                    self._raise_rebase_error(exc, work, repo, base, head)
-                new_sha = work.git.rev_parse("HEAD")
-            git.git.update_ref(f"refs/heads/{base}", new_sha)
-            return new_sha
-        finally:
-            with contextlib.suppress(GitCommandError):
-                git.git.worktree("remove", "--force", str(tmp))
-            shutil.rmtree(tmp, ignore_errors=True)
+        # Detached, not on the head branch, so replaying its commits never rewrites the
+        # head ref itself — only base is advanced explicitly below.
+        with (
+            self._throwaway_worktree(repo, checkout_ref=head_sha, detach=True) as work,
+            work.git.custom_environment(**_MERGE_IDENTITY),
+        ):
+            try:
+                work.git.rebase(base)
+            except GitCommandError as exc:
+                self._raise_op_error(
+                    exc, work, repo, base, head, op="rebase", conflict_markers=("CONFLICT", "could not apply")
+                )
+            new_sha = work.git.rev_parse("HEAD")
+        git.git.update_ref(f"refs/heads/{base}", new_sha)
+        return new_sha
 
     def update_ref(self, repo: RepoModel, ref: str, sha: str) -> None:
         git = self._open(repo.owner, repo.name)
         git.git.update_ref(f"refs/heads/{ref}", sha)
 
-    def _raise_merge_error(self, exc: GitCommandError, work: Repo, repo: RepoModel, base: str, head: str) -> None:
-        text = f"{exc.stdout}\n{exc.stderr}\n{exc}"
-        with contextlib.suppress(GitCommandError):
-            work.git.merge("--abort")
-        if "CONFLICT" in text or "Automatic merge failed" in text:
-            raise self._errors.conflict(
-                f"merge of {head} into {base} conflicts", repo=repo.full_name, op="merge"
-            ) from exc
-        raise self._errors.from_git(
-            exc, f"merge of {head} into {base} failed", repo=repo.full_name, op="merge"
-        ) from exc
+    @contextlib.contextmanager
+    def _throwaway_worktree(self, repo: RepoModel, *, checkout_ref: str, detach: bool) -> Iterator[Repo]:
+        """A throwaway linked worktree at ``checkout_ref``, torn down on the way out
+        whether the block raises or not — the seam :meth:`merge` and :meth:`rebase` share
+        for their only real difference: attached to a branch (merge) or detached at a sha
+        (rebase, so replay never touches the head branch's own ref)."""
+        git = self._open(repo.owner, repo.name)
+        tmp = Path(tempfile.mkdtemp(prefix="forge-worktree-"))
+        try:
+            flag = "--detach" if detach else "--checkout"
+            git.git.worktree("add", "--force", flag, str(tmp), checkout_ref)
+            yield Repo(tmp)
+        finally:
+            with contextlib.suppress(GitCommandError):
+                git.git.worktree("remove", "--force", str(tmp))
+            shutil.rmtree(tmp, ignore_errors=True)
 
-    def _raise_rebase_error(self, exc: GitCommandError, work: Repo, repo: RepoModel, base: str, head: str) -> None:
+    def _raise_op_error(
+        self,
+        exc: GitCommandError,
+        work: Repo,
+        repo: RepoModel,
+        base: str,
+        head: str,
+        *,
+        op: str,
+        conflict_markers: tuple[str, ...],
+    ) -> None:
+        """Abort ``op`` in ``work`` and raise the errors factory's conflict/generic split —
+        the classification :meth:`merge` and :meth:`rebase` share, keyed only by ``op``'s
+        own abort subcommand and which text marks a real conflict."""
         text = f"{exc.stdout}\n{exc.stderr}\n{exc}"
         with contextlib.suppress(GitCommandError):
-            work.git.rebase("--abort")
-        if "CONFLICT" in text or "could not apply" in text:
+            getattr(work.git, op)("--abort")
+        preposition = "into" if op == "merge" else "onto"
+        if any(marker in text for marker in conflict_markers):
             raise self._errors.conflict(
-                f"rebase of {head} onto {base} conflicts", repo=repo.full_name, op="rebase"
+                f"{op} of {head} {preposition} {base} conflicts", repo=repo.full_name, op=op
             ) from exc
         raise self._errors.from_git(
-            exc, f"rebase of {head} onto {base} failed", repo=repo.full_name, op="rebase"
+            exc, f"{op} of {head} {preposition} {base} failed", repo=repo.full_name, op=op
         ) from exc
