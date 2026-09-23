@@ -1,10 +1,7 @@
 """Composes one garden proposal's ``FactRow`` set — the ``garden_proposals``/
-``garden_proposal_closures`` trail (``bzh:facts-not-status``).
-
-A proposal is open while no ``garden_proposal_closures`` row exists for it;
-``--closure`` lands one, either a pass or an acceptance (itself split on
-whether the accepted item was minted or declined).
-"""
+``garden_proposal_closures`` trail (``bzh:facts-not-status``). A proposal is open while
+no ``garden_proposal_closures`` row exists for it; ``--closure`` lands one, a pass or an
+acceptance split on whether the accepted item was minted or declined."""
 
 from __future__ import annotations
 
@@ -20,12 +17,10 @@ CLOSURE_PASSED = "passed"
 CLOSURE_ACCEPTED_MINTED = "accepted-minted"
 CLOSURE_ACCEPTED_DECLINED = "accepted-declined"
 
-#: The three ``--closure`` values :func:`compose_garden_proposal` accepts — ``None`` (its
-#: default) composes no closure row at all, an open proposal.
+#: The three ``--closure`` values :func:`compose_garden_proposal` accepts; ``None`` is open.
 CLOSURES = (CLOSURE_PASSED, CLOSURE_ACCEPTED_MINTED, CLOSURE_ACCEPTED_DECLINED)
 
-#: A ``--closure`` value -> the ``garden_proposal_closures`` ``(closure, item_outcome)``
-#: pair it lands. A pass carries no item outcome; an acceptance always does.
+#: A ``--closure`` value's landed ``garden_proposal_closures`` ``(closure, item_outcome)``.
 _CLOSURE_COLUMNS: dict[str, tuple[str, str | None]] = {
     CLOSURE_PASSED: ("passed", None),
     CLOSURE_ACCEPTED_MINTED: ("accepted", "minted"),
@@ -60,17 +55,11 @@ def compose_garden_proposal(
     closure: str | None = None,
     closed_by: str = DEFAULT_CLOSED_BY,
 ) -> GardenProposalSeed:
-    """Compose one garden proposal, optionally already closed.
-
-    ``title``/``body`` default to boilerplate derived from ``routine_name``/``class_``
-    when omitted. ``created_at`` defaults to ``clock.now()``, but an explicit value is
-    honored verbatim — a manual seed outside the current instant (e.g. outside a
-    verifier's query window) needs this. ``closure`` is one of :data:`CLOSURES`, or
-    ``None`` (the default) for an open proposal with no closure row at all; an unknown
-    value raises :class:`GardenProposalCompositionError`. Unlike ``compose_escalation``/
-    ``compose_question``, no already-seeded chunk or routine is required — ``routine_name``
-    is a plain string column, not a foreign key.
-    """
+    """Compose one garden proposal, optionally already closed. ``title``/``body``
+    default to boilerplate; ``created_at`` defaults to now, but an explicit value seeds
+    outside the current instant. ``closure`` is one of :data:`CLOSURES`, or ``None`` for
+    an open proposal; an unknown value raises :class:`GardenProposalCompositionError`.
+    No already-seeded chunk or routine is required — ``routine_name`` is a plain string."""
     if closure is not None and closure not in CLOSURES:
         raise GardenProposalCompositionError(f"unknown closure {closure!r} — one of {CLOSURES}")
 
