@@ -22,13 +22,13 @@ forge state (`blizzard_mock.forge`), and git state
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
 verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`,
-`artifact`, `usage`, `lease`, `escalation`, `question`, `event`,
-`runner-pause`, `transcript-segment`), `scenario` (a group of its own:
-`board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
+`artifact`, `usage`, `lease`, `escalation`, `question`, `garden-proposal`,
+`event`, `runner-pause`, `transcript-segment`), `scenario` (a group of its
+own: `board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Eleven `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
+**Twelve `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
 still stubbed.** The service tier needs to seed and clean the real hub/runner
 stores, so the workhorse verbs are implemented.
 
@@ -141,6 +141,12 @@ its own entry below owns its flags.
   has no dedicated "resumed" row beyond the delivery. Each call mints its own
   question id, so a chunk can carry several independent trails. Prints the minted
   question id, alone, on stdout.
+- `create garden-proposal --store hub --routine NAME --class CLASS --title TITLE --body BODY [--seed N]`
+  — **implemented**. Lands one `garden_proposals` row citing no findings
+  (`domain/hub/garden_proposal_seed.py`) — the case nothing else can seed. Authored
+  rather than delivered: `source_artifact_id`/`ref` land `NULL`, the same shape a real
+  `GardenProposalAuthoring` mint produces. Prints the minted `gprop_<ulid>` proposal id,
+  alone, on stdout.
 - `create event --store hub --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
   — **implemented**. Lands one `event_log` row (`domain/hub/event_seed.py`), the
   operational event feed. `--runner-id` (NOT NULL on the real table) defaults to

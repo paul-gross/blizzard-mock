@@ -28,6 +28,7 @@ from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     compose_escalation,
 )
 from blizzard_mock.mock_data.domain.hub.event_seed import SEVERITIES, EventCompositionError, compose_event
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import compose_garden_proposal
 from blizzard_mock.mock_data.domain.hub.graph_seed import (
     DEFAULT_GRAPH_NAME,
     GraphCompositionError,
@@ -932,6 +933,46 @@ def create_question(
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(seeded.question_id)
+
+
+@create.command("garden-proposal")
+@click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
+@click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
+@click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
+@click.option("--routine", "routine_name", required=True, help="The garden routine's own name.")
+@click.option("--class", "class_", required=True, help="The deployment's own taxonomy tag; opaque to the hub.")
+@click.option("--title", "title", required=True, help="The proposal's title.")
+@click.option("--body", "body", required=True, help="The proposal's body.")
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
+def create_garden_proposal(
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    routine_name: str,
+    class_: str,
+    title: str,
+    body: str,
+    seed: int | None,
+) -> None:
+    """Land one ``garden_proposals`` row citing no findings — the case nothing else can
+    seed (``domain/hub/garden_proposal_seed.py``). Authored rather than delivered:
+    ``source_artifact_id``/``ref`` land ``NULL``, the same shape a real
+    ``GardenProposalAuthoring`` mint produces. Prints the minted proposal id, alone, on
+    stdout."""
+    _require_store("garden-proposal", store)
+    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    clock = _seeded_clock(seed)
+    rng = seeded_rng(seed)
+    try:
+        seeded = compose_garden_proposal(
+            clock=clock, rng=rng, routine_name=routine_name, class_=class_, title=title, body=body
+        )
+        service.seed(seeded.rows)
+    except _COMPOSITION_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(seeded.proposal_id)
 
 
 @create.command("event")
