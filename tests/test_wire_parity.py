@@ -294,6 +294,10 @@ def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
 #: Mirror model -> the hub schema it mirrors, plus the real fields it deliberately omits.
 #: A mirror model missing from this map fails, so a new one is mapped on purpose.
 _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
+    "AnalyticsCountView": ("AnalyticsCountView", frozenset()),
+    "AnalyticsCountsResponse": ("AnalyticsCountsResponse", frozenset()),
+    "AnalyticsSpendView": ("AnalyticsSpendView", frozenset()),
+    "AnalyticsSpendResponse": ("AnalyticsSpendResponse", frozenset()),
     "ApplyResponse": ("ApplyResponse", frozenset()),
     # The mock models one prerequisite at a time; the real default preserves that
     # compatible single-prerequisite view.

@@ -344,6 +344,39 @@ class FindingView(BaseModel):
     raised_by_chunk_id: str | None = None
 
 
+class AnalyticsCountView(BaseModel):
+    """One grouping key and how many events fell under it — mirrors
+    ``blizzard.wire.analytics.AnalyticsCountView``."""
+
+    key: str
+    count: int
+
+
+class AnalyticsCountsResponse(BaseModel):
+    """Mirrors ``blizzard.wire.analytics.AnalyticsCountsResponse``."""
+
+    counts: list[AnalyticsCountView]
+
+
+class AnalyticsSpendView(BaseModel):
+    """One grouping key's usage/cost rollup — mirrors
+    ``blizzard.wire.analytics.AnalyticsSpendView``."""
+
+    key: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_create_tokens: int
+    cost_usd: float
+    cost_partial: bool
+
+
+class AnalyticsSpendResponse(BaseModel):
+    """Mirrors ``blizzard.wire.analytics.AnalyticsSpendResponse``."""
+
+    spend: list[AnalyticsSpendView]
+
+
 class ScopeView(BaseModel):
     """A scope in the deployment's vocabulary — mirrors ``blizzard.wire.scope.ScopeView``,
     served worker-facing by ``GET /api/fleet/scopes`` (blizzard#582 D2)."""
