@@ -282,6 +282,42 @@ class GardenProposalSpec(BaseModel):
     closure: GardenProposalClosureSpec | None = None
 
 
+class AnalyticsCountRowSpec(BaseModel):
+    """One seeded counts row — mirrors the real hub's ``AnalyticsCountView``
+    (blizzard#545). The mock does not aggregate: this row is served as-is, whatever
+    window the caller names."""
+
+    key: str
+    count: int
+
+
+class AnalyticsSpendRowSpec(BaseModel):
+    """One seeded spend row — mirrors the real hub's ``AnalyticsSpendView``
+    (blizzard#545). Served as-is, whatever window the caller names."""
+
+    key: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_create_tokens: int
+    cost_usd: float
+    cost_partial: bool = False
+
+
+class AnalyticsSpec(BaseModel):
+    """A seeded chunk's canned analytics rows (blizzard#545) — one list per fleet
+    counts/spend route, served whatever the caller's window, gated the same as
+    ``garden_findings``/``garden_proposals`` on the chunk's own seeded
+    :class:`GardenRunSpec` rather than a flag of its own."""
+
+    counts_files: list[AnalyticsCountRowSpec] = Field(default_factory=list)
+    counts_skills: list[AnalyticsCountRowSpec] = Field(default_factory=list)
+    counts_agent_types: list[AnalyticsCountRowSpec] = Field(default_factory=list)
+    counts_nodes: list[AnalyticsCountRowSpec] = Field(default_factory=list)
+    spend_nodes: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
+    spend_graphs: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
@@ -306,6 +342,9 @@ class ChunkSpec(BaseModel):
     #: The chunk's own routine's open proposal bucket, seeded per chunk exactly like
     #: ``garden_findings`` — the real ``GardenProposal`` carries no chunk at all.
     garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
+    #: The chunk's own canned counts/spend rows (blizzard#545) — served as-is, gated on
+    #: ``garden_run`` exactly like the garden reads above.
+    analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -327,6 +366,7 @@ class ChunkState(BaseModel):
     garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
     garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
+    analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

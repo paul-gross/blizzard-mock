@@ -28,7 +28,17 @@ from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     compose_escalation,
 )
 from blizzard_mock.mock_data.domain.hub.event_seed import SEVERITIES, EventCompositionError, compose_event
-from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import compose_garden_proposal
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    CLOSURE_ACCEPTED_MINTED,
+    GardenProposalCompositionError,
+    compose_garden_proposal,
+)
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    CLOSURES as GARDEN_PROPOSAL_CLOSURES,
+)
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    DEFAULT_CLOSED_BY as GARDEN_PROPOSAL_DEFAULT_CLOSED_BY,
+)
 from blizzard_mock.mock_data.domain.hub.graph_seed import (
     DEFAULT_GRAPH_NAME,
     GraphCompositionError,
@@ -69,6 +79,7 @@ _USAGE_KIND_CHOICES = click.Choice(USAGE_KINDS)
 _ARTIFACT_KIND_CHOICES = click.Choice(ARTIFACT_KINDS)
 _SEVERITY_CHOICES = click.Choice(SEVERITIES)
 _CAUSE_CHOICES = click.Choice(CAUSES)
+_GARDEN_PROPOSAL_CLOSURE_CHOICES = click.Choice(GARDEN_PROPOSAL_CLOSURES)
 _COMPOSITION_ERRORS = (
     SchemaDriftError,
     SeedIntegrityError,
@@ -83,6 +94,7 @@ _COMPOSITION_ERRORS = (
     RunnerPauseCompositionError,
     ScenarioCompositionError,
     RunnerFleetCompositionError,
+    GardenProposalCompositionError,
 )
 
 #: Fallback ``event_log.runner_id`` when ``create event`` gets
@@ -939,10 +951,36 @@ def create_question(
 @click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
-@click.option("--routine", "routine_name", required=True, help="The garden routine's own name.")
-@click.option("--class", "class_", required=True, help="The deployment's own taxonomy tag; opaque to the hub.")
-@click.option("--title", "title", required=True, help="The proposal's title.")
-@click.option("--body", "body", required=True, help="The proposal's body.")
+@click.option("--routine", "routine_name", required=True, help="The routine this proposal is against.")
+@click.option("--class", "class_", required=True, help="The gardening class this proposal is against.")
+@click.option("--title", "title", default=None, help="Defaults to boilerplate derived from --routine/--class.")
+@click.option("--body", "body", default=None, help="Defaults to boilerplate derived from --routine/--class.")
+@click.option(
+    "--created-at",
+    "created_at_raw",
+    default=None,
+    help="ISO-8601 instant to land instead of now — e.g. to seed a proposal outside a query window.",
+)
+@click.option(
+    "--closure",
+    "closure",
+    type=_GARDEN_PROPOSAL_CLOSURE_CHOICES,
+    default=None,
+    help="Also land a closure row of this kind. Left unset, the proposal lands open.",
+)
+@click.option(
+    "--closed-by",
+    "closed_by",
+    default=None,
+    help=f"Who closed it (requires --closure). Defaults to {GARDEN_PROPOSAL_DEFAULT_CLOSED_BY!r}.",
+)
+@click.option(
+    "--work-ref",
+    "work_ref_raw",
+    metavar="SOURCE#REF",
+    default=None,
+    help="The minted item's pointer (requires --closure accepted-minted). Defaults to a synthetic one.",
+)
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
@@ -952,22 +990,48 @@ def create_garden_proposal(
     runtime_dir: str | None,
     routine_name: str,
     class_: str,
-    title: str,
-    body: str,
+    title: str | None,
+    body: str | None,
+    created_at_raw: str | None,
+    closure: str | None,
+    closed_by: str | None,
+    work_ref_raw: str | None,
     seed: int | None,
 ) -> None:
-    """Land one ``garden_proposals`` row citing no findings — the case nothing else can
-    seed (``domain/hub/garden_proposal_seed.py``). Authored rather than delivered:
-    ``source_artifact_id``/``ref`` land ``NULL``, the same shape a real
-    ``GardenProposalAuthoring`` mint produces. Prints the minted proposal id, alone, on
-    stdout."""
+    """Land one open-or-closed ``garden_proposals`` row — no already-seeded chunk or
+    routine required, since ``--routine`` is a plain string column, not a foreign key.
+
+    ``--closure`` also lands one ``garden_proposal_closures`` row. Prints the minted
+    proposal id, alone, on stdout.
+    """
     _require_store("garden-proposal", store)
+    if closed_by is not None and closure is None:
+        raise click.UsageError("--closed-by requires --closure — there is no closure row to attribute it to")
+    if work_ref_raw is not None and closure != CLOSURE_ACCEPTED_MINTED:
+        raise click.UsageError("--work-ref requires --closure accepted-minted — no other closure lands a pointer")
+    work_ref = _parse_work_ref(work_ref_raw) if work_ref_raw is not None else None
+    created_at = None
+    if created_at_raw is not None:
+        try:
+            created_at = datetime.fromisoformat(created_at_raw)
+        except ValueError as exc:
+            raise click.UsageError(f"--created-at {created_at_raw!r} is not ISO-8601") from exc
+        created_at = created_at.astimezone(UTC) if created_at.tzinfo is not None else created_at.replace(tzinfo=UTC)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
         seeded = compose_garden_proposal(
-            clock=clock, rng=rng, routine_name=routine_name, class_=class_, title=title, body=body
+            clock=clock,
+            rng=rng,
+            routine_name=routine_name,
+            class_=class_,
+            title=title,
+            body=body,
+            created_at=created_at,
+            closure=closure,
+            closed_by=closed_by if closed_by is not None else GARDEN_PROPOSAL_DEFAULT_CLOSED_BY,
+            work_ref=work_ref,
         )
         service.seed(seeded.rows)
     except _COMPOSITION_ERRORS as exc:

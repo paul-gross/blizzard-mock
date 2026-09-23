@@ -2774,6 +2774,84 @@ def test_garden_proposals_404s_on_an_unknown_chunk(client: TestClient) -> None:
     assert "ch_ghost" in resp.json()["detail"]
 
 
+# --- fleet analytics (worker-scoped counts/spend read, blizzard#545) ----------
+
+_ANALYTICS_ROUTES = [
+    "counts/files",
+    "counts/skills",
+    "counts/agent-types",
+    "counts/nodes",
+    "spend/nodes",
+    "spend/graphs",
+]
+
+
+def _analytics_spec(*, garden_run: dict | None, analytics: dict | None = None) -> dict:
+    spec = dict(_SPEC)
+    if garden_run is not None:
+        spec["garden_run"] = garden_run
+    if analytics is not None:
+        spec["analytics"] = analytics
+    return spec
+
+
+@pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
+def test_analytics_404s_on_a_chunk_with_no_run_context(client: TestClient, suffix: str) -> None:
+    chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_run` at all
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
+    assert resp.status_code == 404
+    assert "no run context" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
+def test_analytics_404s_on_an_unknown_chunk(client: TestClient, suffix: str) -> None:
+    resp = client.get(f"/api/fleet/chunks/ch_ghost/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
+    assert resp.status_code == 404
+    assert "ch_ghost" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
+def test_analytics_422s_without_since(client: TestClient, suffix: str) -> None:
+    spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"})
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}")
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
+def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient, suffix: str) -> None:
+    """The mock does not aggregate (blizzard#545 D5): the seeded row is served as-is,
+    regardless of the window named — proven here by naming only the required `since`,
+    ignored like `until` would be."""
+    key = (
+        f"counts_{suffix.split('/')[1].replace('-', '_')}"
+        if suffix.startswith("counts/")
+        else ("spend_nodes" if suffix == "spend/nodes" else "spend_graphs")
+    )
+    row = (
+        {"key": "k1", "count": 3}
+        if suffix.startswith("counts/")
+        else {
+            "key": "k1",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_tokens": 10,
+            "cache_create_tokens": 5,
+            "cost_usd": 0.1,
+            "cost_partial": False,
+        }
+    )
+    spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"}, analytics={key: [row]})
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
+    assert resp.status_code == 200, resp.text
+    envelope_key = "counts" if suffix.startswith("counts/") else "spend"
+    assert resp.json()[envelope_key] == [row]
+
+
 # --- answered findings (worker-scoped per-chunk read) -------------------------
 
 

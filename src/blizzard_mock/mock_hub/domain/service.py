@@ -21,6 +21,8 @@ from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.models import (
     TERMINAL,
+    AnalyticsCountRowSpec,
+    AnalyticsSpendRowSpec,
     ApplyOutcome,
     ChunkSpec,
     ChunkState,
@@ -43,6 +45,10 @@ from blizzard_mock.mock_hub.domain.state import (
     SubscriptionUsageMiss,
 )
 from blizzard_mock.mock_hub.domain.wire import (
+    AnalyticsCountsResponse,
+    AnalyticsCountView,
+    AnalyticsSpendResponse,
+    AnalyticsSpendView,
     ApplyResponse,
     BlockedView,
     ChunkDetail,
@@ -169,6 +175,27 @@ def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> Gar
     )
 
 
+def _counts_response(rows: list[AnalyticsCountRowSpec]) -> AnalyticsCountsResponse:
+    return AnalyticsCountsResponse(counts=[AnalyticsCountView(key=r.key, count=r.count) for r in rows])
+
+
+def _spend_response(rows: list[AnalyticsSpendRowSpec]) -> AnalyticsSpendResponse:
+    return AnalyticsSpendResponse(
+        spend=[
+            AnalyticsSpendView(
+                key=r.key,
+                input_tokens=r.input_tokens,
+                output_tokens=r.output_tokens,
+                cache_read_tokens=r.cache_read_tokens,
+                cache_create_tokens=r.cache_create_tokens,
+                cost_usd=r.cost_usd,
+                cost_partial=r.cost_partial,
+            )
+            for r in rows
+        ]
+    )
+
+
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
 
@@ -279,6 +306,7 @@ class MockHubService:
             garden_findings=spec.garden_findings,
             garden_answered_findings=spec.garden_answered_findings,
             garden_proposals=spec.garden_proposals,
+            analytics=spec.analytics,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -537,9 +565,8 @@ class MockHubService:
         ``GET /api/fleet/chunks/{id}/garden/findings``. Raises :class:`NoRunContext` for
         a chunk seeded with no ``garden_run`` — not a routine run — rather than
         answering an empty bucket."""
-        chunk = self._require(chunk_id)
-        if chunk.garden_run is None:
-            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        chunk = self._garden_run_or_404(chunk_id)
+        assert chunk.garden_run is not None  # narrowed by `_garden_run_or_404`
         run = chunk.garden_run
         return [
             _finding_view(f, routine_name=run.routine_name, scope_slug=run.scope_slug)
@@ -555,9 +582,8 @@ class MockHubService:
         a chunk seeded with no ``garden_run`` — not a routine run — rather than
         answering an empty bucket. A seeded proposal is open when it carries no
         ``closure``, closed when it does."""
-        chunk = self._require(chunk_id)
-        if chunk.garden_run is None:
-            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        chunk = self._garden_run_or_404(chunk_id)
+        assert chunk.garden_run is not None  # narrowed by `_garden_run_or_404`
         now = self._clock.now().isoformat()
         proposals = chunk.garden_proposals
         if state is RoutineProposalState.OPEN:
@@ -565,6 +591,41 @@ class MockHubService:
         elif state is RoutineProposalState.CLOSED:
             proposals = [p for p in proposals if p.closure is not None]
         return [_proposal_view(p, routine_name=chunk.garden_run.routine_name, now=now) for p in proposals]
+
+    def _garden_run_or_404(self, chunk_id: str) -> ChunkState:
+        """The chunk a worker's own routine-run-scoped read is confined to — shared by
+        the garden reads and the analytics reads (blizzard#545), all of which 404 a
+        chunk seeded with no ``garden_run`` rather than answering an empty bucket."""
+        chunk = self._require(chunk_id)
+        if chunk.garden_run is None:
+            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        return chunk
+
+    def analytics_counts_files(self, chunk_id: str) -> AnalyticsCountsResponse:
+        """Mirrors ``GET /api/fleet/chunks/{id}/analytics/counts/files`` — the chunk's
+        own seeded rows, served as-is (blizzard#545: the mock does not aggregate)."""
+        chunk = self._garden_run_or_404(chunk_id)
+        return _counts_response(chunk.analytics.counts_files)
+
+    def analytics_counts_skills(self, chunk_id: str) -> AnalyticsCountsResponse:
+        chunk = self._garden_run_or_404(chunk_id)
+        return _counts_response(chunk.analytics.counts_skills)
+
+    def analytics_counts_agent_types(self, chunk_id: str) -> AnalyticsCountsResponse:
+        chunk = self._garden_run_or_404(chunk_id)
+        return _counts_response(chunk.analytics.counts_agent_types)
+
+    def analytics_counts_nodes(self, chunk_id: str) -> AnalyticsCountsResponse:
+        chunk = self._garden_run_or_404(chunk_id)
+        return _counts_response(chunk.analytics.counts_nodes)
+
+    def analytics_spend_nodes(self, chunk_id: str) -> AnalyticsSpendResponse:
+        chunk = self._garden_run_or_404(chunk_id)
+        return _spend_response(chunk.analytics.spend_nodes)
+
+    def analytics_spend_graphs(self, chunk_id: str) -> AnalyticsSpendResponse:
+        chunk = self._garden_run_or_404(chunk_id)
+        return _spend_response(chunk.analytics.spend_graphs)
 
     def answered_findings(self, chunk_id: str) -> list[FindingView]:
         """The findings the chunk's own accepted, minted garden proposal answers —
