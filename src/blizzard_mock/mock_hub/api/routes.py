@@ -228,9 +228,13 @@ def get_garden_proposals(
 
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/files")
-def get_chunk_analytics_counts_files(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+def get_chunk_analytics_counts_files(
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
     """A worker-scoped read of the chunk's own seeded counts-by-file rows — mirrors the
-    real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/files`` (blizzard#545)."""
+    real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/files`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity with the real hub; the mock ignores
+    its value and serves the seeded rows regardless (``bzh:wire-change-extends-mock``)."""
     try:
         return service.analytics_counts_files(chunk_id)
     except ChunkNotFound as exc:
@@ -241,9 +245,10 @@ def get_chunk_analytics_counts_files(chunk_id: str, service: Annotated[MockHubSe
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/skills")
 def get_chunk_analytics_counts_skills(
-    chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/skills`` (blizzard#545)."""
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/skills`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_skills(chunk_id)
     except ChunkNotFound as exc:
@@ -254,9 +259,10 @@ def get_chunk_analytics_counts_skills(
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/agent-types")
 def get_chunk_analytics_counts_agent_types(
-    chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/agent-types`` (blizzard#545)."""
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/agent-types`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_agent_types(chunk_id)
     except ChunkNotFound as exc:
@@ -266,8 +272,11 @@ def get_chunk_analytics_counts_agent_types(
 
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/nodes")
-def get_chunk_analytics_counts_nodes(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/nodes`` (blizzard#545)."""
+def get_chunk_analytics_counts_nodes(
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/nodes`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_nodes(chunk_id)
     except ChunkNotFound as exc:
@@ -277,8 +286,11 @@ def get_chunk_analytics_counts_nodes(chunk_id: str, service: Annotated[MockHubSe
 
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/spend/nodes")
-def get_chunk_analytics_spend_nodes(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/nodes`` (blizzard#545)."""
+def get_chunk_analytics_spend_nodes(
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/nodes`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_spend_nodes(chunk_id)
     except ChunkNotFound as exc:
@@ -288,8 +300,11 @@ def get_chunk_analytics_spend_nodes(chunk_id: str, service: Annotated[MockHubSer
 
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/spend/graphs")
-def get_chunk_analytics_spend_graphs(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/graphs`` (blizzard#545)."""
+def get_chunk_analytics_spend_graphs(
+    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/graphs`` (blizzard#545).
+    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_spend_graphs(chunk_id)
     except ChunkNotFound as exc:
