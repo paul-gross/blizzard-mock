@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from blizzard_mock.mock_hub.domain.models import ApplyOutcome, Executor, JudgedBy, SessionMode
+from blizzard_mock.mock_hub.domain.models import (
+    ApplyOutcome,
+    Executor,
+    GardenProposalClosureKind,
+    GardenProposalItemOutcome,
+    JudgedBy,
+    SessionMode,
+)
 
 
 class EnvelopeChoice(BaseModel):
@@ -347,10 +354,22 @@ class ScopeView(BaseModel):
     retired: bool = False
 
 
+class GardenProposalClosureView(BaseModel):
+    """How a garden proposal closed — mirrors
+    ``blizzard.wire.garden_proposal.GardenProposalClosureView``."""
+
+    closure: GardenProposalClosureKind
+    reason: str | None
+    closed_by: str
+    closed_at: str
+    item_outcome: GardenProposalItemOutcome | None
+    source: str | None
+    ref: str | None
+
+
 class GardenProposalView(BaseModel):
-    """One open garden proposal — mirrors ``blizzard.wire.garden_proposal.GardenProposalView``,
-    minus ``closure``: every proposal this mock serves is treated as open, so there is
-    nothing to carry."""
+    """One garden proposal — mirrors ``blizzard.wire.garden_proposal.GardenProposalView``,
+    its closure carried alongside it once one exists."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -361,3 +380,4 @@ class GardenProposalView(BaseModel):
     body: str
     findings: list[str]
     created_at: str
+    closure: GardenProposalClosureView | None = None

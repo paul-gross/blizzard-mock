@@ -24,6 +24,7 @@ from blizzard_mock.mock_hub.api.deps import (
     TranscriptSegmentBatchBody,
     get_service,
 )
+from blizzard_mock.mock_hub.domain.models import RoutineProposalState
 from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
     ClaimConflict,
@@ -211,11 +212,15 @@ def get_garden_findings(chunk_id: str, service: Annotated[MockHubService, Depend
 
 
 @fleet_router.get("/chunks/{chunk_id}/garden/proposals")
-def get_garden_proposals(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """A worker-scoped read of the chunk's own routine's open proposal bucket — mirrors
-    the real hub's ``GET /api/fleet/chunks/{id}/garden/proposals``."""
+def get_garden_proposals(
+    chunk_id: str,
+    service: Annotated[MockHubService, Depends(get_service)],
+    state: RoutineProposalState = RoutineProposalState.OPEN,
+) -> object:
+    """A worker-scoped read of the chunk's own routine's proposal bucket, filtered by
+    ``state`` — mirrors the real hub's ``GET /api/fleet/chunks/{id}/garden/proposals``."""
     try:
-        return service.garden_proposals(chunk_id)
+        return service.garden_proposals(chunk_id, state=state)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except NoRunContext as exc:
