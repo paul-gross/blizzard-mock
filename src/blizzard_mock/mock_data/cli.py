@@ -28,6 +28,16 @@ from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     compose_escalation,
 )
 from blizzard_mock.mock_data.domain.hub.event_seed import SEVERITIES, EventCompositionError, compose_event
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    CLOSURES as GARDEN_PROPOSAL_CLOSURES,
+)
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    DEFAULT_CLOSED_BY as GARDEN_PROPOSAL_DEFAULT_CLOSED_BY,
+)
+from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
+    GardenProposalCompositionError,
+    compose_garden_proposal,
+)
 from blizzard_mock.mock_data.domain.hub.graph_seed import (
     DEFAULT_GRAPH_NAME,
     GraphCompositionError,
@@ -68,6 +78,7 @@ _USAGE_KIND_CHOICES = click.Choice(USAGE_KINDS)
 _ARTIFACT_KIND_CHOICES = click.Choice(ARTIFACT_KINDS)
 _SEVERITY_CHOICES = click.Choice(SEVERITIES)
 _CAUSE_CHOICES = click.Choice(CAUSES)
+_GARDEN_PROPOSAL_CLOSURE_CHOICES = click.Choice(GARDEN_PROPOSAL_CLOSURES)
 _COMPOSITION_ERRORS = (
     SchemaDriftError,
     SeedIntegrityError,
@@ -82,6 +93,7 @@ _COMPOSITION_ERRORS = (
     RunnerPauseCompositionError,
     ScenarioCompositionError,
     RunnerFleetCompositionError,
+    GardenProposalCompositionError,
 )
 
 #: Fallback ``event_log.runner_id`` when ``create event`` gets
@@ -932,6 +944,85 @@ def create_question(
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(seeded.question_id)
+
+
+@create.command("garden-proposal")
+@click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
+@click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
+@click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
+@click.option("--routine", "routine_name", required=True, help="The routine this proposal is against.")
+@click.option("--class", "class_", required=True, help="The gardening class this proposal is against.")
+@click.option("--title", "title", default=None, help="Defaults to boilerplate derived from --routine/--class.")
+@click.option("--body", "body", default=None, help="Defaults to boilerplate derived from --routine/--class.")
+@click.option(
+    "--created-at",
+    "created_at_raw",
+    default=None,
+    help="ISO-8601 instant to land instead of now — e.g. to seed a proposal outside a query window.",
+)
+@click.option(
+    "--closure",
+    "closure",
+    type=_GARDEN_PROPOSAL_CLOSURE_CHOICES,
+    default=None,
+    help="Also land a closure row of this kind. Left unset, the proposal lands open.",
+)
+@click.option(
+    "--closed-by",
+    "closed_by",
+    default=None,
+    help=f"Who closed it (requires --closure). Defaults to {GARDEN_PROPOSAL_DEFAULT_CLOSED_BY!r}.",
+)
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
+def create_garden_proposal(
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    routine_name: str,
+    class_: str,
+    title: str | None,
+    body: str | None,
+    created_at_raw: str | None,
+    closure: str | None,
+    closed_by: str | None,
+    seed: int | None,
+) -> None:
+    """Land one open-or-closed ``garden_proposals`` row — no already-seeded chunk or
+    routine required, since ``--routine`` is a plain string column, not a foreign key.
+
+    ``--closure`` also lands one ``garden_proposal_closures`` row.
+    """
+    _require_store("garden-proposal", store)
+    if closed_by is not None and closure is None:
+        raise click.UsageError("--closed-by requires --closure — there is no closure row to attribute it to")
+    created_at = None
+    if created_at_raw is not None:
+        try:
+            created_at = datetime.fromisoformat(created_at_raw)
+        except ValueError as exc:
+            raise click.UsageError(f"--created-at {created_at_raw!r} is not ISO-8601") from exc
+    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    clock = _seeded_clock(seed)
+    rng = seeded_rng(seed)
+    try:
+        seeded = compose_garden_proposal(
+            clock=clock,
+            rng=rng,
+            routine_name=routine_name,
+            class_=class_,
+            title=title,
+            body=body,
+            created_at=created_at,
+            closure=closure,
+            closed_by=closed_by if closed_by is not None else GARDEN_PROPOSAL_DEFAULT_CLOSED_BY,
+        )
+        service.seed(seeded.rows)
+    except _COMPOSITION_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    landed = f"also landed a {closure!r} closure" if closure is not None else "left open"
+    click.echo(f"created garden proposal {seeded.proposal_id!r} ({landed})")
 
 
 @create.command("event")

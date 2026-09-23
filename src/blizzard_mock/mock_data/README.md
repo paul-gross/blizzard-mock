@@ -141,6 +141,17 @@ its own entry below owns its flags.
   has no dedicated "resumed" row beyond the delivery. Each call mints its own
   question id, so a chunk can carry several independent trails. Prints the minted
   question id, alone, on stdout.
+- `create garden-proposal --store hub --routine NAME --class CLASS [--title T] [--body T] [--created-at ISO8601] [--closure {passed,accepted-minted,accepted-declined}] [--closed-by W] [--seed N]`
+  — **implemented**. Lands one open-or-closed `garden_proposals` row
+  (`domain/hub/garden_proposal_seed.py`); no already-seeded chunk or routine is
+  required — `--routine` is a plain string column, not a foreign key. `--title`/
+  `--body` default to boilerplate derived from `--routine`/`--class`. `--created-at`
+  defaults to now, but an explicit ISO-8601 instant is honored verbatim — useful for
+  seeding a proposal outside a verifier's query window. `--closure` also lands one
+  `garden_proposal_closures` row: `passed` carries no item outcome, `accepted-minted`/
+  `accepted-declined` each carry the matching `item_outcome`; `--closed-by` (requires
+  `--closure`) defaults to `"seed-operator"`. Prints the minted proposal id and
+  whether a closure also landed.
 - `create event --store hub --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
   — **implemented**. Lands one `event_log` row (`domain/hub/event_seed.py`), the
   operational event feed. `--runner-id` (NOT NULL on the real table) defaults to

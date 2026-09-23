@@ -24,6 +24,7 @@ STORE_TARGETS: dict[str, frozenset[str]] = {
     "event": frozenset({HUB}),
     "runner-pause": frozenset({HUB, RUNNER}),
     "transcript-segment": frozenset({RUNNER}),
+    "garden-proposal": frozenset({HUB}),
 }
 
 

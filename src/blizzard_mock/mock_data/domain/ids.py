@@ -33,6 +33,7 @@ SELFTEST_PREFIX = "self"
 HUB_EXEC_SLOT_PREFIX = "hes"
 MIGRATION_PREFIX = "mg"
 USER_PREFIX = "usr"
+GARDEN_PROPOSAL_PREFIX = "gprop"
 
 
 def seeded_rng(seed: int | None) -> random.Random:
