@@ -2783,22 +2783,32 @@ def _analytics_spec(*, garden_run: dict | None, analytics: dict | None = None) -
 def test_analytics_404s_on_a_chunk_with_no_run_context(client: TestClient, suffix: str) -> None:
     chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_run` at all
 
-    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}")
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 404
     assert "no run context" in resp.json()["detail"]
 
 
 @pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
 def test_analytics_404s_on_an_unknown_chunk(client: TestClient, suffix: str) -> None:
-    resp = client.get(f"/api/fleet/chunks/ch_ghost/analytics/{suffix}")
+    resp = client.get(f"/api/fleet/chunks/ch_ghost/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 404
     assert "ch_ghost" in resp.json()["detail"]
 
 
 @pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
+def test_analytics_422s_without_since(client: TestClient, suffix: str) -> None:
+    spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"})
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}")
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
 def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient, suffix: str) -> None:
     """The mock does not aggregate (blizzard#545 D5): the seeded row is served as-is,
-    regardless of the window named — proven here by naming none at all."""
+    regardless of the window named — proven here by naming only the required `since`,
+    ignored like `until` would be."""
     key = (
         f"counts_{suffix.split('/')[1].replace('-', '_')}"
         if suffix.startswith("counts/")
@@ -2820,7 +2830,7 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
     spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"}, analytics={key: [row]})
     chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
 
-    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}")
+    resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 200, resp.text
     envelope_key = "counts" if suffix.startswith("counts/") else "spend"
     assert resp.json()[envelope_key] == [row]

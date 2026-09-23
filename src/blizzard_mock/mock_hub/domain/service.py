@@ -565,9 +565,8 @@ class MockHubService:
         ``GET /api/fleet/chunks/{id}/garden/findings``. Raises :class:`NoRunContext` for
         a chunk seeded with no ``garden_run`` — not a routine run — rather than
         answering an empty bucket."""
-        chunk = self._require(chunk_id)
-        if chunk.garden_run is None:
-            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        chunk = self._garden_run_or_404(chunk_id)
+        assert chunk.garden_run is not None  # narrowed by `_garden_run_or_404`
         run = chunk.garden_run
         return [
             _finding_view(f, routine_name=run.routine_name, scope_slug=run.scope_slug)
@@ -583,9 +582,8 @@ class MockHubService:
         a chunk seeded with no ``garden_run`` — not a routine run — rather than
         answering an empty bucket. A seeded proposal is open when it carries no
         ``closure``, closed when it does."""
-        chunk = self._require(chunk_id)
-        if chunk.garden_run is None:
-            raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
+        chunk = self._garden_run_or_404(chunk_id)
+        assert chunk.garden_run is not None  # narrowed by `_garden_run_or_404`
         now = self._clock.now().isoformat()
         proposals = chunk.garden_proposals
         if state is RoutineProposalState.OPEN:
