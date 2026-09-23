@@ -163,3 +163,17 @@ def test_two_defaulted_minted_work_refs_do_not_collide() -> None:
         clock=FixedClock(_NOW), rng=random.Random(2), routine_name="triage", class_="hygiene", closure="accepted-minted"
     )
     assert a.rows[1].values["ref"] != b.rows[1].values["ref"]
+
+
+def test_mints_a_gprop_prefixed_id() -> None:
+    assert _compose().proposal_id.startswith("gprop_")
+
+
+def test_same_seed_mints_the_same_id() -> None:
+    first = compose_garden_proposal(
+        clock=FixedClock(_NOW), rng=random.Random(7), routine_name="triage", class_="hygiene"
+    )
+    second = compose_garden_proposal(
+        clock=FixedClock(_NOW), rng=random.Random(7), routine_name="triage", class_="hygiene"
+    )
+    assert first.proposal_id == second.proposal_id

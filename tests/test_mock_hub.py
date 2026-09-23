@@ -2690,6 +2690,22 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
     ]
 
 
+def test_garden_proposals_accepts_a_proposal_citing_no_findings(client: TestClient) -> None:
+    """``GardenProposalSpec.findings`` defaults to ``[]`` with no minimum — pins that the
+    mock hub already accepts the relaxed shape ``blizzard#543`` extends to the real hub."""
+    spec = _proposal_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_proposals=[{"proposal_id": "prop_1", "class": "mechanize", "title": "t", "body": "b"}],
+    )
+    resp = client.post("/_seed/chunk", json=spec)
+    assert resp.status_code == 201, resp.text
+    chunk_id = resp.json()["chunk_id"]
+
+    proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
+    assert proposals.status_code == 200, proposals.text
+    assert proposals.json()[0]["findings"] == []
+
+
 def test_garden_proposals_state_closed_returns_only_closed_ones_with_their_closure(client: TestClient) -> None:
     spec = _proposal_spec(
         garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},

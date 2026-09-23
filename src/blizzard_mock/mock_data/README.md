@@ -22,13 +22,13 @@ forge state (`blizzard_mock.forge`), and git state
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
 verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`,
-`artifact`, `usage`, `lease`, `escalation`, `question`, `event`,
-`runner-pause`, `transcript-segment`), `scenario` (a group of its own:
-`board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
+`artifact`, `usage`, `lease`, `escalation`, `question`, `garden-proposal`,
+`event`, `runner-pause`, `transcript-segment`), `scenario` (a group of its
+own: `board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Eleven `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
+**Twelve `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
 still stubbed.** The service tier needs to seed and clean the real hub/runner
 stores, so the workhorse verbs are implemented.
 
@@ -150,8 +150,8 @@ its own entry below owns its flags.
   seeding a proposal outside a verifier's query window. `--closure` also lands one
   `garden_proposal_closures` row: `passed` carries no item outcome, `accepted-minted`/
   `accepted-declined` each carry the matching `item_outcome`; `--closed-by` (requires
-  `--closure`) defaults to `"seed-operator"`. Prints the minted proposal id and
-  whether a closure also landed.
+  `--closure`) defaults to `"seed-operator"`. Prints the minted proposal id, alone,
+  on stdout.
 - `create event --store hub --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
   — **implemented**. Lands one `event_log` row (`domain/hub/event_seed.py`), the
   operational event feed. `--runner-id` (NOT NULL on the real table) defaults to

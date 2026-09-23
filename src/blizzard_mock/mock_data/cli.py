@@ -1035,8 +1035,7 @@ def create_garden_proposal(
         service.seed(seeded.rows)
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
-    landed = f"also landed a {closure!r} closure" if closure is not None else "left open"
-    click.echo(f"created garden proposal {seeded.proposal_id!r} ({landed})")
+    click.echo(seeded.proposal_id)
 
 
 @create.command("event")
