@@ -28,6 +28,7 @@ def _compose(
     created_at: datetime | None = None,
     closure: str | None = None,
     closed_by: str = "seed-operator",
+    work_ref: tuple[str, str] | None = None,
 ) -> GardenProposalSeed:
     return compose_garden_proposal(
         clock=FixedClock(_NOW),
@@ -39,6 +40,7 @@ def _compose(
         created_at=created_at,
         closure=closure,
         closed_by=closed_by,
+        work_ref=work_ref,
     )
 
 
@@ -97,11 +99,37 @@ def test_closure_accepted_minted_lands_the_minted_item_outcome() -> None:
     assert closure_row.values["item_outcome"] == "minted"
 
 
+def test_closure_accepted_minted_defaults_a_work_ref_pointer() -> None:
+    seed = _compose(closure="accepted-minted")
+    closure_row = seed.rows[1]
+    assert closure_row.values["source"]
+    assert closure_row.values["ref"] == seed.proposal_id
+
+
+def test_closure_accepted_minted_work_ref_is_overridable() -> None:
+    seed = _compose(closure="accepted-minted", work_ref=("github", "547"))
+    closure_row = seed.rows[1]
+    assert closure_row.values["source"] == "github"
+    assert closure_row.values["ref"] == "547"
+
+
 def test_closure_accepted_declined_lands_the_declined_item_outcome() -> None:
     seed = _compose(closure="accepted-declined")
     closure_row = seed.rows[1]
     assert closure_row.values["closure"] == "accepted"
     assert closure_row.values["item_outcome"] == "declined"
+
+
+def test_closure_accepted_declined_lands_no_work_ref() -> None:
+    closure_row = _compose(closure="accepted-declined").rows[1]
+    assert closure_row.values["source"] is None
+    assert closure_row.values["ref"] is None
+
+
+def test_closure_passed_lands_no_work_ref() -> None:
+    closure_row = _compose(closure="passed").rows[1]
+    assert closure_row.values["source"] is None
+    assert closure_row.values["ref"] is None
 
 
 def test_closed_at_follows_an_explicit_created_at_override() -> None:
@@ -125,3 +153,13 @@ def test_two_calls_mint_independent_non_colliding_proposal_ids() -> None:
     a = compose_garden_proposal(clock=FixedClock(_NOW), rng=random.Random(1), routine_name="triage", class_="hygiene")
     b = compose_garden_proposal(clock=FixedClock(_NOW), rng=random.Random(2), routine_name="triage", class_="hygiene")
     assert a.proposal_id != b.proposal_id
+
+
+def test_two_defaulted_minted_work_refs_do_not_collide() -> None:
+    a = compose_garden_proposal(
+        clock=FixedClock(_NOW), rng=random.Random(1), routine_name="triage", class_="hygiene", closure="accepted-minted"
+    )
+    b = compose_garden_proposal(
+        clock=FixedClock(_NOW), rng=random.Random(2), routine_name="triage", class_="hygiene", closure="accepted-minted"
+    )
+    assert a.rows[1].values["ref"] != b.rows[1].values["ref"]
