@@ -2685,8 +2685,63 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
             "body": "b",
             "findings": ["fin_1"],
             "created_at": "2026-07-13T00:00:00+00:00",
+            "closure": None,
         }
     ]
+
+
+def test_garden_proposals_state_closed_returns_only_closed_ones_with_their_closure(client: TestClient) -> None:
+    spec = _proposal_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_proposals=[
+            {"proposal_id": "prop_open", "class": "mechanize", "title": "t", "body": "b", "findings": ["fin_1"]},
+            {
+                "proposal_id": "prop_closed",
+                "class": "mechanize",
+                "title": "t",
+                "body": "b",
+                "findings": ["fin_1"],
+                "closure": {"closure": "passed", "reason": "not worth it"},
+            },
+        ],
+    )
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": "closed"})
+    assert proposals.status_code == 200, proposals.text
+    body = proposals.json()
+    assert [row["proposal_id"] for row in body] == ["prop_closed"]
+    assert body[0]["closure"] == {
+        "closure": "passed",
+        "reason": "not worth it",
+        "closed_by": "u_1",
+        "closed_at": "2026-07-13T00:00:00+00:00",
+        "item_outcome": None,
+        "source": None,
+        "ref": None,
+    }
+
+
+def test_garden_proposals_state_all_returns_open_and_closed(client: TestClient) -> None:
+    spec = _proposal_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_proposals=[
+            {"proposal_id": "prop_open", "class": "mechanize", "title": "t", "body": "b", "findings": ["fin_1"]},
+            {
+                "proposal_id": "prop_closed",
+                "class": "mechanize",
+                "title": "t",
+                "body": "b",
+                "findings": ["fin_1"],
+                "closure": {"closure": "passed", "reason": "not worth it"},
+            },
+        ],
+    )
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": "all"})
+    assert proposals.status_code == 200, proposals.text
+    assert [row["proposal_id"] for row in proposals.json()] == ["prop_open", "prop_closed"]
 
 
 def test_garden_proposals_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
