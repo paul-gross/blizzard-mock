@@ -1001,8 +1001,7 @@ def create_garden_proposal(
     """Land one open-or-closed ``garden_proposals`` row — no already-seeded chunk or
     routine required, since ``--routine`` is a plain string column, not a foreign key.
 
-    ``--closure`` also lands one ``garden_proposal_closures`` row. Prints the minted
-    proposal id, alone, on stdout.
+    ``--closure`` also lands one ``garden_proposal_closures`` row.
     """
     _require_store("garden-proposal", store)
     if closed_by is not None and closure is None:
