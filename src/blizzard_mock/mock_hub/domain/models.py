@@ -64,6 +64,32 @@ class ApplyOutcome(StrEnum):
     FAILURE = "failure"
 
 
+class GardenProposalClosureKind(StrEnum):
+    """Mirrors ``blizzard.hub.domain.garden_proposal_closure.GardenProposalClosureKind``
+    (value-identical)."""
+
+    PASSED = "passed"
+    ACCEPTED = "accepted"
+
+
+class GardenProposalItemOutcome(StrEnum):
+    """Mirrors ``blizzard.hub.domain.garden_proposal_closure.GardenProposalItemOutcome``
+    (value-identical)."""
+
+    MINTED = "minted"
+    DECLINED = "declined"
+
+
+class RoutineProposalState(StrEnum):
+    """Mirrors ``blizzard.hub.domain.garden_proposals.RoutineProposalState``
+    (value-identical) — the ``?state=`` selector on ``GET
+    /chunks/{id}/garden/proposals``."""
+
+    OPEN = "open"
+    CLOSED = "closed"
+    ALL = "all"
+
+
 # --- The seed vocabulary (the mock's own control surface) --------------------
 
 
@@ -223,12 +249,26 @@ class GardenAnsweredFindingSpec(GardenFindingSpec):
     scope_slug: str
 
 
+class GardenProposalClosureSpec(BaseModel):
+    """A seeded proposal's closure — mirrors the real hub's own
+    ``GardenProposalClosureView``. A proposal seeded with none is served open; one
+    seeded with a closure is served closed, under ``?state=closed`` or ``all``."""
+
+    closure: GardenProposalClosureKind
+    reason: str | None = None
+    closed_by: str = "u_1"
+    closed_at: str | None = None
+    item_outcome: GardenProposalItemOutcome | None = None
+    source: str | None = None
+    ref: str | None = None
+
+
 class GardenProposalSpec(BaseModel):
     """One seeded proposal on a chunk's garden run bucket — mirrors the fields the real
     hub's ``GardenProposalView`` carries, minus ``routine_name`` (supplied at the read
     from the chunk's own seeded :class:`GardenRunSpec`, exactly like
-    :class:`GardenFindingSpec` derives its ``routine_name``/``scope_slug`` there). Every
-    seeded proposal is treated as open — this mock carries no closure lever at all.
+    :class:`GardenFindingSpec` derives its ``routine_name``/``scope_slug`` there). A
+    proposal seeded with no ``closure`` is open; one seeded with one is closed.
     ``created_at`` defaults to mint time when omitted."""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -239,6 +279,7 @@ class GardenProposalSpec(BaseModel):
     body: str
     findings: list[str] = Field(default_factory=list)
     created_at: str | None = None
+    closure: GardenProposalClosureSpec | None = None
 
 
 class ChunkSpec(BaseModel):
