@@ -360,6 +360,31 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("message", Text, nullable=False),
         Column("detail", Text, nullable=True),
     )
+    Table(
+        "garden_proposals",
+        meta,
+        Column("proposal_id", String, primary_key=True),
+        Column("routine_name", String, nullable=False),
+        Column("class", String, key="class_", nullable=False),
+        Column("title", String, nullable=False),
+        Column("body", Text, nullable=False),
+        Column("created_at", DateTime, nullable=False),
+        Column("source_artifact_id", String, nullable=True),
+        Column("ref", String, nullable=True),
+    )
+    Table(
+        "garden_proposal_closures",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("proposal_id", String, ForeignKey("garden_proposals.proposal_id"), nullable=False),
+        Column("closure", String, nullable=False),
+        Column("reason", String, nullable=True),
+        Column("closed_by", String, nullable=False),
+        Column("closed_at", DateTime, nullable=False),
+        Column("item_outcome", String, nullable=True),
+        Column("source", String, nullable=True),
+        Column("ref", String, nullable=True),
+    )
     meta.create_all(engine)
     return url, meta
 
@@ -887,6 +912,87 @@ def test_create_chunk_ready_refuses_a_node(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "mints no transition" in result.output
+
+
+# --- create garden-proposal (implemented) -------------------------------------
+
+
+def test_create_garden_proposal_created_at_lands_as_utc_regardless_of_input_offset(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "garden-proposal",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--routine",
+            "triage",
+            "--class",
+            "hygiene",
+            "--created-at",
+            "2026-01-01T00:00:00+05:00",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        created_at = conn.execute(select(_table(meta, "garden_proposals").c.created_at)).scalar()
+    assert created_at == datetime(2025, 12, 31, 19, 0, 0, tzinfo=UTC).replace(tzinfo=None)
+
+
+def test_create_garden_proposal_accepted_minted_lands_a_work_ref(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "garden-proposal",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--routine",
+            "triage",
+            "--class",
+            "hygiene",
+            "--closure",
+            "accepted-minted",
+            "--work-ref",
+            "github#547",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        closures = _table(meta, "garden_proposal_closures")
+        row = conn.execute(select(closures.c.source, closures.c.ref)).one()
+    assert row == ("github", "547")
+
+
+def test_create_garden_proposal_work_ref_requires_accepted_minted(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "garden-proposal",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--routine",
+            "triage",
+            "--class",
+            "hygiene",
+            "--closure",
+            "passed",
+            "--work-ref",
+            "github#547",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "accepted-minted" in result.output
 
 
 # --- create artifact (implemented) --------------------------------------------
