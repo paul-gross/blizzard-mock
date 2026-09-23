@@ -1,10 +1,7 @@
-"""Composes one ``garden_proposals`` row, authored rather than delivered
-(``blizzard#390``): ``source_artifact_id``/``ref`` land ``NULL``, the shape a
-:class:`~blizzard.hub.domain.garden_proposals.GardenProposalAuthoring` mint produces.
-
-Lands no ``garden_proposal_findings`` link rows — this seam exists to compose a
-proposal with **no** findings, the case nothing else can seed (``blizzard#543``).
-"""
+"""Composes one ``garden_proposals`` row, authored rather than delivered:
+``source_artifact_id``/``ref`` land ``NULL``, the shape a real
+``GardenProposalAuthoring`` mint produces. Lands no ``garden_proposal_findings``
+link rows — the case nothing else can seed."""
 
 from __future__ import annotations
 
