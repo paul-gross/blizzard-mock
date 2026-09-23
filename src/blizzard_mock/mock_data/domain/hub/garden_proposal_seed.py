@@ -30,11 +30,7 @@ _CLOSURE_COLUMNS: dict[str, tuple[str, str | None]] = {
 #: ``closed_by``'s default when a seeded closure doesn't name an operator.
 DEFAULT_CLOSED_BY = "seed-operator"
 
-#: ``source``'s default for an ``accepted-minted`` closure that doesn't name one — the
-#: real hub's minted-closure writer always records a pointer (``work_item_store.py``'s
-#: ``accept_create``), so a seeded minted closure must too. ``ref`` defaults to the
-#: minted proposal id itself, so two defaulted closures never collide on
-#: ``ix_garden_proposal_closures_source_ref``.
+#: Default pointer ``source`` for minted closures; ``ref`` defaults to the proposal id, so none collide.
 DEFAULT_WORK_REF_SOURCE = "seed-source"
 
 
@@ -63,14 +59,11 @@ def compose_garden_proposal(
     closed_by: str = DEFAULT_CLOSED_BY,
     work_ref: tuple[str, str] | None = None,
 ) -> GardenProposalSeed:
-    """Compose one garden proposal, optionally already closed. ``title``/``body``
-    default to boilerplate; ``created_at`` defaults to now, but an explicit value seeds
-    outside the current instant. ``closure`` is one of :data:`CLOSURES`, or ``None`` for
-    an open proposal; an unknown value raises :class:`GardenProposalCompositionError`.
-    ``work_ref`` is the closure's ``(source, ref)`` pointer — only meaningful for
-    :data:`CLOSURE_ACCEPTED_MINTED`, which always lands one, defaulting to
-    :data:`DEFAULT_WORK_REF_SOURCE` paired with the minted proposal id when unset.
-    No already-seeded chunk or routine is required — ``routine_name`` is a plain string."""
+    """Compose one garden proposal, optionally already closed. ``title``/``body`` default
+    to boilerplate; ``created_at`` defaults to now. ``closure`` is one of :data:`CLOSURES`
+    or ``None`` (open); unknown raises :class:`GardenProposalCompositionError`. ``work_ref``
+    is a minted closure's ``(source, ref)``, defaulting to :data:`DEFAULT_WORK_REF_SOURCE`
+    and the proposal id. ``routine_name`` is a plain string — no seeded routine is needed."""
     if closure is not None and closure not in CLOSURES:
         raise GardenProposalCompositionError(f"unknown closure {closure!r} — one of {CLOSURES}")
 
