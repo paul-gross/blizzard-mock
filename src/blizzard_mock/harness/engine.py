@@ -569,9 +569,8 @@ def run_prompt(
             session_id=session_id, is_error=True, subtype="error_during_execution", text=str(exc), exit_code=1
         )
     except KeyboardInterrupt:
-        # A SIGINT mid-script (`hang()` included) ends the turn the way real Claude Code's
-        # does: an `error_during_execution` envelope carrying the usage so far, never a
-        # bare traceback with no envelope — only a SIGKILL leaves nothing behind.
+        # A SIGINT mid-script (`hang()` included) ends the turn as real Claude Code does: an
+        # `error_during_execution` envelope with the usage so far — only a SIGKILL leaves nothing.
         _log.warning("behavior script interrupted", session_id=session_id)
         result = RunResult(
             session_id=session_id, is_error=True, subtype="error_during_execution", text=_INTERRUPTED_TEXT, exit_code=1

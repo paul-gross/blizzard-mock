@@ -101,11 +101,9 @@ def verdict(choice: str, assessment: str = "") -> None:
 def hang() -> None:
     """Block until killed, so a caller's stall/heartbeat/reap handling can be exercised.
 
-    Never returns on its own and never emits. A SIGINT ends the turn as an
-    ``error_during_execution`` run carrying the usage so far, as real Claude Code's
-    does; only a SIGKILL leaves no envelope. Tests bound this with a subprocess
-    timeout and assert the timeout fired.
-    """
+    Never returns on its own and never emits. A SIGINT ends the turn as an ``error_during_execution``
+    run carrying the usage so far, as real Claude Code's does; only a SIGKILL leaves no envelope.
+    Tests bound this with a subprocess timeout and assert the timeout fired."""
     while True:
         time.sleep(3600)
 
