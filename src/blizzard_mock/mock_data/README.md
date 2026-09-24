@@ -99,12 +99,16 @@ its own entry below owns its flags.
   `recorded_at` decodes from it, never from `produced_at`), so several calls
   against one chunk land distinct rows under whatever `(node, epoch)` pairs
   they're given. Prints the minted artifact id, alone, on stdout.
-- `create usage --store {hub,runner} --chunk ID --kind {spawn,resume,judge,nudge} --model M --input-tokens N [--output-tokens N] [--cache-read-tokens N] [--cache-create-tokens N] (--cost-usd X | --no-cost) [--node ID] [--epoch N] [--runner-id R] [--lease-id ID] [--generation N]` —
+- `create usage --store {hub,runner} --chunk ID --kind {spawn,resume,judge,nudge} --model M --input-tokens N [--output-tokens N] [--cache-read-tokens N] [--cache-create-tokens N] (--cost-usd X | --no-cost) [--estimated-cost-usd X] [--node ID] [--epoch N] [--runner-id R] [--lease-id ID] [--generation N]` —
   **implemented, store-polymorphic**. `--store hub` lands one `usage_facts` row
   (`domain/hub/usage_seed.py`): `--no-cost` lands a genuine SQL `NULL`
   `cost_usd`, never a fabricated `0.0` — the hub's cost derivation reads a `NULL` row
-  as a lower bound (`cost_partial`) — and `--node`/`--epoch`/`--runner-id` default
-  from the chunk's own newest transition/lease when omitted. `--store runner` lands
+  carrying no estimate either as a lower bound (`cost_partial`; one paired with
+  `--estimated-cost-usd` reads `~$X.XX`, not `+`) — and `--node`/`--epoch`/`--runner-id` default
+  from the chunk's own newest transition/lease when omitted. `--estimated-cost-usd`
+  is hub-only and nullable the same way (omitted lands `NULL`, never `0.0`) — the
+  hub reads a non-`NULL` estimate as the `~`-marked share of the chunk's one cost
+  figure. `--store runner` lands
   one runner-store `usage_facts` row (`domain/runner/usage_seed.py`), keyed by
   `--lease-id`/`--generation` rather than `--runner-id` — the runner schema's own
   column set — so it requires `--node`/`--epoch`/`--lease-id` explicitly (no

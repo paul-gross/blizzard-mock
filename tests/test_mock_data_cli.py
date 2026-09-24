@@ -309,6 +309,7 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("cache_read_tokens", Integer, nullable=False),
         Column("cache_create_tokens", Integer, nullable=False),
         Column("cost_usd", Float, nullable=True),
+        Column("estimated_cost_usd", Float, nullable=True),
         Column("recorded_at", DateTime, nullable=False),
     )
     Table(
@@ -1466,6 +1467,83 @@ def test_create_usage_lands_a_cost_fact(tmp_path: Path) -> None:
     assert rows[0].output_tokens == 50
 
 
+def test_create_usage_lands_an_estimated_cost(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_result = runner.invoke(cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"])
+    assert chunk_result.exit_code == 0, chunk_result.output
+    chunk_id = chunk_result.output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "spawn",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "100",
+            "--no-cost",
+            "--estimated-cost-usd",
+            "0.07",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "estimated_cost_usd=0.07" in result.output
+    with create_engine(url).begin() as conn:
+        row = conn.execute(
+            select(_table(meta, "usage_facts")).where(_table(meta, "usage_facts").c.chunk_id == chunk_id)
+        ).one()
+    assert row.cost_usd is None
+    assert row.estimated_cost_usd == 0.07
+
+
+def test_create_usage_no_estimate_lands_a_genuine_null(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]
+    ).output.strip()
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--kind",
+            "spawn",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "100",
+            "--cost-usd",
+            "1.23",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        estimate = conn.execute(
+            select(_table(meta, "usage_facts").c.estimated_cost_usd).where(
+                _table(meta, "usage_facts").c.chunk_id == chunk_id
+            )
+        ).scalar_one()
+    assert estimate is None
+
+
 def test_create_usage_no_cost_lands_a_genuine_null(tmp_path: Path) -> None:
     url, meta = _full_hub_store(tmp_path)
     runner = _runner()
@@ -1890,6 +1968,40 @@ def test_create_usage_runner_store_refuses_runner_id(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "has no column on the runner store's usage_facts" in result.output
+
+
+def test_create_usage_runner_store_refuses_estimated_cost(tmp_path: Path) -> None:
+    url, _meta = _full_runner_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "usage",
+            "--store",
+            "runner",
+            "--url",
+            url,
+            "--chunk",
+            "ch_1",
+            "--node",
+            "build",
+            "--epoch",
+            "1",
+            "--lease-id",
+            "lease_1",
+            "--kind",
+            "spawn",
+            "--model",
+            "claude-x",
+            "--input-tokens",
+            "1",
+            "--no-cost",
+            "--estimated-cost-usd",
+            "0.07",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--estimated-cost-usd has no column on the runner store's usage_facts" in result.output
 
 
 def test_create_usage_refuses_runner_only_flags_against_the_hub_store(tmp_path: Path) -> None:

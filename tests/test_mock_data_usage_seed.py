@@ -59,6 +59,37 @@ def test_compose_usage_no_cost_lands_a_genuine_none_never_zero() -> None:
     assert row.values["cost_usd"] is None
 
 
+def test_compose_usage_lands_the_supplied_estimated_cost() -> None:
+    row = compose_usage(
+        chunk_id="ch_1",
+        node_id="nd_1",
+        epoch=2,
+        runner_id="r-1",
+        kind="spawn",
+        model="claude-x",
+        input_tokens=100,
+        cost_usd=None,
+        estimated_cost_usd=0.45,
+        recorded_at=_NOW,
+    )
+    assert row.values["estimated_cost_usd"] == 0.45
+
+
+def test_compose_usage_no_estimate_lands_a_genuine_none_never_zero() -> None:
+    row = compose_usage(
+        chunk_id="ch_1",
+        node_id="nd_1",
+        epoch=2,
+        runner_id="r-1",
+        kind="spawn",
+        model="claude-x",
+        input_tokens=100,
+        cost_usd=1.23,
+        recorded_at=_NOW,
+    )
+    assert row.values["estimated_cost_usd"] is None
+
+
 def test_compose_usage_defaults_optional_token_counts_to_zero() -> None:
     row = compose_usage(
         chunk_id="ch_1",
