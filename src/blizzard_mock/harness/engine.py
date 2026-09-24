@@ -59,6 +59,9 @@ CHOICE_CLOSE = "</Choice>"
 _TRANSCRIPT_SPAWN_TEXT = "(mock harness spawn — the behavior script it executed is not shown here)"
 _TRANSCRIPT_RESUME_TEXT = "(mock harness resume — the behavior script it executed is not shown here)"
 
+#: What an interrupted turn reports — the interruption itself, since the script never produced a result.
+_INTERRUPTED_TEXT = "interrupted by SIGINT before the behavior script finished"
+
 
 class FenceError(RuntimeError):
     """The engine refused to run because the environment is not test-marked."""
@@ -564,6 +567,14 @@ def run_prompt(
         _log.warning("behavior script crashed", session_id=session_id, error=str(exc))
         result = RunResult(
             session_id=session_id, is_error=True, subtype="error_during_execution", text=str(exc), exit_code=1
+        )
+    except KeyboardInterrupt:
+        # A SIGINT mid-script (`hang()` included) ends the turn the way real Claude Code's
+        # does: an `error_during_execution` envelope carrying the usage so far, never a
+        # bare traceback with no envelope — only a SIGKILL leaves nothing behind.
+        _log.warning("behavior script interrupted", session_id=session_id)
+        result = RunResult(
+            session_id=session_id, is_error=True, subtype="error_during_execution", text=_INTERRUPTED_TEXT, exit_code=1
         )
     except Exception as exc:  # a script blew up — the harness reports an error run
         _log.warning("behavior script raised", session_id=session_id, error=repr(exc))

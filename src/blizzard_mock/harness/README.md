@@ -289,11 +289,18 @@ it is the only facade the runner passes `--settings`, so `codex.py` and
 - **Which exits fire no `SessionEnd`** — by class, not by list. The tail is skipped
   when **no session ever started** (a fence refusal; a pre-session argument error)
   and when **the process never reached its tail** (`crash(hard=True)`, which is
-  `os._exit`; `hang()`, which blocks until it is killed; and a script raising
+  `os._exit`; `hang()` until it is `SIGKILL`ed; and a script raising
   `SystemExit`, which the engine's `except Exception` does not catch). The first
   two of those are deliberate and meaningful: they leave exactly the
   no-`SessionEnd` signal a `SIGKILL`ed real Claude Code leaves, which is the case
   an observer needs to tell apart from a clean exit.
+- **A `SIGINT` mid-script reaches the tail.** The engine catches the interrupt
+  wherever the script was — inside `hang()` included — and ends the turn as an
+  `error_during_execution` run, the way real Claude Code does: the Claude Code
+  facade writes its crash envelope with the usage and cost accumulated so far, the
+  OpenCode facade keeps every event it already streamed and closes with its error
+  event, and `SessionEnd` fires for the turn. This is what lets a runner's
+  interrupt-then-record path be exercised against the mock.
 - **`cwd` is fixed at construction and does not follow a script's repointing.** The
   hook's working directory and the payload's `cwd` are the acquired worktree
   resolved when the run started — matching real Claude Code, whose hooks also run
@@ -417,7 +424,7 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 | `tool_call(name, tool_input=None, output="ok")` | Record a tool call that does nothing else — the transcript pair and the `PostToolUse` fire, no git. For choreographing a deterministic tool timeline. |
 | `verdict(choice, assessment="")` | Emit `<Choice>{choice}</Choice>` + assessment as the turn's result. |
 | `ask(question, options=None)` | Record the ask, optionally shell out to `$BLIZZARD_RUNNER_ASK_CMD`, emit the tagged `<Ask …>` result, and **exit the turn**. |
-| `hang()` | Block forever (stall/heartbeat/REAP testing). |
+| `hang()` | Block until killed (stall/heartbeat/REAP testing). A `SIGINT` ends the turn as `error_during_execution` with the usage so far; only a `SIGKILL` leaves no envelope. |
 | `crash(hard=False)` | Die without a verdict — soft (error run, exit 1) or `hard` (`os._exit`). |
 | `state()` | The `SessionState` — `state().last_ask`, `state().last_answer`. |
 | `answer()` | The resume message this turn was resumed with — a tagged resume's **prose**, so a script never reads its own source back; an untagged one's raw message, as always. |

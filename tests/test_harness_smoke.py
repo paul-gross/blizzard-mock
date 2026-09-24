@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -233,6 +234,50 @@ def test_hang_blocks_until_killed(fenced_repo) -> None:
         proc.communicate(timeout=1.5)
     proc.kill()
     proc.wait(timeout=5)
+
+
+def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usage(fenced_repo) -> None:
+    """A SIGINT inside ``hang()`` reaches the engine's tail the way real Claude Code's
+    does: the crash envelope lands on stdout, carrying the usage and cost so far —
+    never a bare ``KeyboardInterrupt`` traceback with no envelope at all."""
+    cwd, env = fenced_repo
+    started = cwd / "started"
+    script = f"tool_call('Read')\nopen({str(started)!r}, 'w').close()\nhang()"
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            "sigint-1",
+            script,
+        ],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 10
+    while not started.exists():
+        assert proc.poll() is None, "the worker exited before it ever reached hang()"
+        assert time.monotonic() < deadline, "the worker never reached hang()"
+        time.sleep(0.05)
+    proc.send_signal(signal.SIGINT)
+    stdout, stderr = proc.communicate(timeout=10)
+
+    assert proc.returncode == 1, stderr
+    envelope = json.loads(stdout)
+    assert envelope["subtype"] == "error_during_execution"
+    assert envelope["is_error"] is True
+    assert envelope["session_id"] == "sigint-1"
+    assert "result" not in envelope
+    assert envelope["usage"]["input_tokens"] > 0
+    assert envelope["usage"]["output_tokens"] > 0
+    assert envelope["total_cost_usd"] > 0
 
 
 # --------------------------------------------------------------------------- #
