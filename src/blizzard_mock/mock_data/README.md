@@ -103,7 +103,8 @@ its own entry below owns its flags.
   **implemented, store-polymorphic**. `--store hub` lands one `usage_facts` row
   (`domain/hub/usage_seed.py`): `--no-cost` lands a genuine SQL `NULL`
   `cost_usd`, never a fabricated `0.0` — the hub's cost derivation reads a `NULL` row
-  as a lower bound (`cost_partial`) — and `--node`/`--epoch`/`--runner-id` default
+  carrying no estimate either as a lower bound (`cost_partial`; one paired with
+  `--estimated-cost-usd` reads `~$X.XX`, not `+`) — and `--node`/`--epoch`/`--runner-id` default
   from the chunk's own newest transition/lease when omitted. `--estimated-cost-usd`
   is hub-only and nullable the same way (omitted lands `NULL`, never `0.0`) — the
   hub reads a non-`NULL` estimate as the `~`-marked share of the chunk's one cost

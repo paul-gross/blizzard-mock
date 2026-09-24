@@ -663,9 +663,7 @@ def create_usage(
 ) -> None:
     """Land one ``usage_facts`` row against an already-seeded chunk (hub) or lease
     (runner) — store-polymorphic. Exactly one of ``--cost-usd``/``--no-cost`` is
-    required; ``--no-cost`` lands a genuine SQL NULL, never a fabricated ``0.0``.
-    ``--estimated-cost-usd`` is hub-only and nullable the same way — the runner's
-    ``usage_facts`` carries no estimate column."""
+    required; ``--no-cost`` lands a genuine SQL NULL, never a fabricated ``0.0``."""
     _require_store("usage", store)
     if cost_usd is not None and no_cost:
         raise click.UsageError("--cost-usd and --no-cost are mutually exclusive")
