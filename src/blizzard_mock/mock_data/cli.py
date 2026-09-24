@@ -608,6 +608,14 @@ def create_artifact(
     help="No cost envelope for this invocation — lands a genuine SQL NULL cost_usd, never 0.0.",
 )
 @click.option(
+    "--estimated-cost-usd",
+    "estimated_cost_usd",
+    type=float,
+    default=None,
+    help="The invocation's estimated cost, in USD (--store hub only). Omitted, lands a genuine SQL "
+    "NULL estimated_cost_usd, never 0.0.",
+)
+@click.option(
     "--node", "node_name", default=None, help="The node id attributed (default: the chunk's newest transition target)."
 )
 @click.option(
@@ -646,6 +654,7 @@ def create_usage(
     cache_create_tokens: int,
     cost_usd: float | None,
     no_cost: bool,
+    estimated_cost_usd: float | None,
     node_name: str | None,
     epoch: int | None,
     runner_id: str | None,
@@ -654,7 +663,9 @@ def create_usage(
 ) -> None:
     """Land one ``usage_facts`` row against an already-seeded chunk (hub) or lease
     (runner) — store-polymorphic. Exactly one of ``--cost-usd``/``--no-cost`` is
-    required; ``--no-cost`` lands a genuine SQL NULL, never a fabricated ``0.0``."""
+    required; ``--no-cost`` lands a genuine SQL NULL, never a fabricated ``0.0``.
+    ``--estimated-cost-usd`` is hub-only and nullable the same way — the runner's
+    ``usage_facts`` carries no estimate column."""
     _require_store("usage", store)
     if cost_usd is not None and no_cost:
         raise click.UsageError("--cost-usd and --no-cost are mutually exclusive")
@@ -674,6 +685,10 @@ def create_usage(
             raise click.UsageError("--epoch is required for --store runner — no defaulting source exists there")
         if lease_id is None:
             raise click.UsageError("--lease-id is required for --store runner")
+        if estimated_cost_usd is not None:
+            raise click.UsageError(
+                "--estimated-cost-usd has no column on the runner store's usage_facts (--store runner)"
+            )
         try:
             row = compose_runner_usage(
                 lease_id=lease_id,
@@ -719,12 +734,16 @@ def create_usage(
             cache_read_tokens=cache_read_tokens,
             cache_create_tokens=cache_create_tokens,
             cost_usd=None if no_cost else cost_usd,
+            estimated_cost_usd=estimated_cost_usd,
             recorded_at=SystemClock().now(),
         )
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"created usage fact for chunk {chunk_id!r} (kind={kind}, cost_usd={row.values['cost_usd']!r})")
+    click.echo(
+        f"created usage fact for chunk {chunk_id!r} (kind={kind}, cost_usd={row.values['cost_usd']!r}, "
+        f"estimated_cost_usd={row.values['estimated_cost_usd']!r})"
+    )
 
 
 @create.command("lease")

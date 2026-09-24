@@ -1,8 +1,8 @@
 """Composes one ``usage_facts`` row — one harness invocation's usage/cost
 telemetry (issue #59).
 
-``cost_usd`` is genuinely nullable; ``compose_usage`` never substitutes ``0.0``
-(pinned by tests/test_mock_data_usage_seed.py).
+``cost_usd`` and ``estimated_cost_usd`` are genuinely nullable; ``compose_usage``
+never substitutes ``0.0`` for either (pinned by tests/test_mock_data_usage_seed.py).
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ def compose_usage(
     cache_read_tokens: int = 0,
     cache_create_tokens: int = 0,
     cost_usd: float | None,
+    estimated_cost_usd: float | None = None,
     recorded_at: datetime,
 ) -> FactRow:
     """One ``usage_facts`` row. Raises :class:`UsageCompositionError` for an unknown ``kind``."""
@@ -57,6 +58,7 @@ def compose_usage(
             "cache_read_tokens": cache_read_tokens,
             "cache_create_tokens": cache_create_tokens,
             "cost_usd": cost_usd,
+            "estimated_cost_usd": estimated_cost_usd,
             "recorded_at": recorded_at,
         },
     )
