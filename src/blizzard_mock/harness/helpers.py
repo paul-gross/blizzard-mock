@@ -102,7 +102,8 @@ def hang() -> None:
     """Block until killed, so a caller's stall/heartbeat/reap handling can be exercised.
 
     Never returns on its own and never emits. A SIGINT ends the turn as an ``error_during_execution``
-    run carrying the usage so far, as real Claude Code's does; only a SIGKILL leaves no envelope.
+    run carrying a synthesized envelope, as real Claude Code's does; a SIGTERM or SIGHUP kills the
+    process outright and, like a SIGKILL, leaves no envelope at all.
     Tests bound this with a subprocess timeout and assert the timeout fired."""
     while True:
         time.sleep(3600)

@@ -238,7 +238,7 @@ def test_hang_blocks_until_killed(fenced_repo) -> None:
 
 def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usage(fenced_repo) -> None:
     """A SIGINT inside ``hang()`` reaches the engine's tail the way real Claude Code's
-    does: the crash envelope lands on stdout, carrying the usage and cost so far —
+    does: the crash envelope lands on stdout, carrying a synthesized envelope —
     never a bare ``KeyboardInterrupt`` traceback with no envelope at all."""
     cwd, env = fenced_repo
     started = cwd / "started"
@@ -275,9 +275,15 @@ def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usag
     assert envelope["is_error"] is True
     assert envelope["session_id"] == "sigint-1"
     assert "result" not in envelope
-    assert envelope["usage"]["input_tokens"] > 0
-    assert envelope["usage"]["output_tokens"] > 0
-    assert envelope["total_cost_usd"] > 0
+    # The usage/cost figures are synthesized off the fixed interrupted-turn text
+    # (`engine._INTERRUPTED_TEXT`), not accumulated from anything the script did
+    # before the signal — asserting the exact synthesized value (rather than just
+    # `> 0`) is what actually proves that provenance.
+    from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
+
+    expected_usage = synthesize_usage_tokens(engine._INTERRUPTED_TEXT)
+    assert envelope["usage"] == expected_usage
+    assert envelope["total_cost_usd"] == synthesize_cost_usd(expected_usage)
 
 
 # --------------------------------------------------------------------------- #

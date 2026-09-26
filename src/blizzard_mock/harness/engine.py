@@ -570,7 +570,10 @@ def run_prompt(
         )
     except KeyboardInterrupt:
         # A SIGINT mid-script (`hang()` included) ends the turn as real Claude Code does: an
-        # `error_during_execution` envelope with the usage so far — only a SIGKILL leaves nothing.
+        # `error_during_execution` envelope, its usage synthesized from `_INTERRUPTED_TEXT`
+        # below (not accumulated from anything the script did) — a SIGTERM or SIGHUP, with no
+        # handler installed for either, kills the process outright and leaves no envelope at
+        # all, the same as a SIGKILL.
         _log.warning("behavior script interrupted", session_id=session_id)
         result = RunResult(
             session_id=session_id, is_error=True, subtype="error_during_execution", text=_INTERRUPTED_TEXT, exit_code=1
