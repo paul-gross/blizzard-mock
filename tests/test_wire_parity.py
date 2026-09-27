@@ -374,6 +374,7 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "QueuePeekBody": ("QueuePeekRequest", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
+    "RunnerSubscriptionDeclarationBody": ("RunnerSubscriptionDeclaration", frozenset()),
     "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
     "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),
     "TranscriptSegmentBatchBody": ("TranscriptSegmentBatch", frozenset()),

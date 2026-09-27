@@ -30,6 +30,18 @@ class RunnerCapability:
 
 
 @dataclass(frozen=True, kw_only=True)
+class DeclaredSubscription:
+    """One provider subscription a registered runner declared — the mock's own
+    domain-core mirror of the wire shape. Its slug is the roster's own membership key: a
+    declared slug is a member whatever its sample's age, a dropped one is not, even
+    though its reported rows persist. Keyword-only against a silent positional swap."""
+
+    slug: str
+    name: str
+    provider: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class SubscriptionUsageMiss:
     """One declared subscription's newest reported miss (blizzard#504 D7) — a sibling to
     :class:`SubscriptionUsageView`, held per slug and never overwriting the sample it is unioned
@@ -91,6 +103,7 @@ class RunnerRow:
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
+        declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
     ) -> None:
         self.runner_id = runner_id
         self.workspace_id = workspace_id
@@ -104,6 +117,9 @@ class RunnerRow:
         # The runner's capability snapshot (blizzard#433) — reported on every
         # (re-)registration, replacing the prior snapshot whole.
         self.capabilities = capabilities
+        # The runner's declared subscription roster, kept distinct from an absent one;
+        # replaced whole on every (re-)registration, the same way `capabilities` is.
+        self.declared_subscriptions = declared_subscriptions
         self.paused = False
 
 
@@ -124,12 +140,13 @@ class IHubState(Protocol):
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
+        declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
     ) -> bool:
         """Register/heartbeat a runner; return ``True`` on first registration.
 
-        ``url``/``redirect_uris`` (issue #95), ``env_capacity``, and ``capabilities``
-        (blizzard#433) are overwritten unconditionally on every call, like
-        ``workspace_id``."""
+        ``url``/``redirect_uris`` (issue #95), ``env_capacity``, ``capabilities``
+        (blizzard#433), and ``declared_subscriptions`` are overwritten unconditionally on
+        every call, like ``workspace_id``."""
         ...
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...

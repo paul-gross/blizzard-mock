@@ -38,7 +38,7 @@ from blizzard_mock.mock_hub.domain.service import (
     SystemArtifactNotFound,
     UnresolvableRunner,
 )
-from blizzard_mock.mock_hub.domain.state import RunnerCapability
+from blizzard_mock.mock_hub.domain.state import DeclaredSubscription, RunnerCapability
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub.
@@ -393,6 +393,11 @@ def get_lease_transcript_segments(
 
 @fleet_router.post("/runners", status_code=201)
 def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    subscriptions = (
+        tuple(DeclaredSubscription(slug=d.slug, name=d.name, provider=d.provider) for d in body.subscriptions)
+        if body.subscriptions is not None
+        else None
+    )
     first = service.register(
         body.runner_id,
         workspace_id=body.workspace_id,
@@ -409,6 +414,7 @@ def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubServ
             )
             for c in body.capabilities
         ),
+        subscriptions=subscriptions,
     )
     return {"runner_id": body.runner_id, "first_registration": first}
 

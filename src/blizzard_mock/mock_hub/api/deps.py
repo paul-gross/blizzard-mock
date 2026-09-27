@@ -44,6 +44,16 @@ class RunnerCapabilityBody(MirroredWireBody):
     available: bool = True
 
 
+class RunnerSubscriptionDeclarationBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerSubscriptionDeclaration`` field-for-field —
+    the roster element inside ``RunnerRegistrationBody``, promoted to a checked mirror
+    the same way :class:`RunnerCapabilityBody` is."""
+
+    slug: str
+    name: str
+    provider: str
+
+
 class QueuePeekBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field. ``capabilities``
     reuses :class:`RunnerCapabilityBody` for its element shape. Carries no ``runner_id``
@@ -88,6 +98,8 @@ class RunnerRegistrationBody(BaseModel):
     redirect_uris: list[str] = Field(default_factory=list)
     # The runner's capability snapshot — every harness/tier it can execute right now.
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
+    # The runner's declared subscription roster — kept distinct from an absent one.
+    subscriptions: list[RunnerSubscriptionDeclarationBody] | None = None
 
 
 class RunnerFactBody(BaseModel):

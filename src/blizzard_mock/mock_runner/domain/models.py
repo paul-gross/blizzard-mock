@@ -35,6 +35,8 @@ class RegisterBody(BaseModel):
     real harness adapter behind it."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    #: The runner's declared subscription roster, settable directly, mirroring ``capabilities``.
+    subscriptions: list[dict[str, Any]] | None = None
 
 
 class PeekMatchedBody(BaseModel):

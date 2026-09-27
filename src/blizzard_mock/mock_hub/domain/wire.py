@@ -222,6 +222,8 @@ class SubscriptionUsageView(BaseModel):
     sampled_at: str | None = None
     windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
     condition: str | None = None
+    miss_reason: str | None = None
+    missed_at: str | None = None
 
 
 class RunnerCapabilityView(BaseModel):

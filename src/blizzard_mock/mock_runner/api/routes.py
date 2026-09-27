@@ -78,7 +78,7 @@ _NO_CAPABILITIES = RegisterBody()
 def drive_register(
     service: Annotated[MockRunnerService, Depends(get_service)], body: RegisterBody = _NO_CAPABILITIES
 ) -> dict[str, Any]:
-    return service.register(capabilities=body.capabilities)
+    return service.register(capabilities=body.capabilities, subscriptions=body.subscriptions)
 
 
 @drive_router.post("/peek")
