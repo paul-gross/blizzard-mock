@@ -74,7 +74,9 @@ def compose_garden_proposal(
             table="garden_proposals",
             values={
                 "proposal_id": minted_proposal_id,
+                "origin": "routine-run",
                 "routine_name": routine_name,
+                "created_by": None,
                 "class": class_,
                 "title": title if title is not None else f"{routine_name}: {class_}",
                 "body": body if body is not None else f"Garden proposal for {routine_name!r}, class {class_!r}.",

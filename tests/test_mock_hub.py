@@ -2679,7 +2679,9 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
     assert proposals.json() == [
         {
             "proposal_id": "prop_1",
+            "origin": "routine-run",
             "routine_name": "nightly",
+            "created_by": None,
             "class": "mechanize",
             "title": "t",
             "body": "b",

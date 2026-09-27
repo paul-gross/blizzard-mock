@@ -14,6 +14,7 @@ from blizzard_mock.mock_hub.domain.models import (
     Executor,
     GardenProposalClosureKind,
     GardenProposalItemOutcome,
+    GardenProposalOrigin,
     JudgedBy,
     SessionMode,
 )
@@ -407,7 +408,9 @@ class GardenProposalView(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     proposal_id: str
-    routine_name: str
+    origin: GardenProposalOrigin
+    routine_name: str | None
+    created_by: str | None = None
     class_: str = Field(alias="class")
     title: str
     body: str

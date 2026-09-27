@@ -80,6 +80,14 @@ class GardenProposalItemOutcome(StrEnum):
     DECLINED = "declined"
 
 
+class GardenProposalOrigin(StrEnum):
+    """Mirrors ``blizzard.hub.domain.garden_proposals.GardenProposalOrigin``
+    (value-identical, blizzard#631)."""
+
+    ROUTINE_RUN = "routine-run"
+    OPERATOR = "operator"
+
+
 class RoutineProposalState(StrEnum):
     """Mirrors ``blizzard.hub.domain.garden_proposals.RoutineProposalState``
     (value-identical) — the ``?state=`` selector on ``GET
