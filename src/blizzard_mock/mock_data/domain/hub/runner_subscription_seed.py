@@ -1,10 +1,8 @@
-"""Composes per-slug external-usage sample/miss rows for a declared subscription
-(blizzard#636) — siblings of the ``subscriptions`` roster column ``create runner``
-writes directly onto ``runner_registrations`` itself.
+"""Composes per-slug external-usage sample/miss rows for a declared subscription —
+siblings of the ``subscriptions`` roster column ``create runner`` writes directly.
 
-No FK: neither ``runner_external_usage`` nor ``runner_external_usage_misses``
-(``blizzard/hub/store/schema.py``) carries a ``ForeignKey`` to
-``runner_registrations``, so these rows compose independently of the roster.
+No FK: neither ``runner_external_usage`` nor ``runner_external_usage_misses`` carries
+one to ``runner_registrations``, so these rows compose independently of the roster.
 """
 
 from __future__ import annotations

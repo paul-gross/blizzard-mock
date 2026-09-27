@@ -426,9 +426,8 @@ def create_runner(
 ) -> None:
     """Seed one registered runner into the hub's fleet registry.
 
-    With ``--paused``, also lands a pause fact. ``--subscription`` declares the
-    roster (blizzard#636) on the same row; ``--sample``/``--miss`` land per-slug
-    external-usage rows at a chosen age, independent of the roster.
+    With ``--paused``, also lands a pause fact. ``--subscription`` declares the roster
+    on the same row; ``--sample``/``--miss`` land per-slug usage rows at a chosen age.
     """
     _require_store("runner", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
