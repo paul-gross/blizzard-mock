@@ -1863,7 +1863,7 @@ def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client
 
 
 def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_collection(client: TestClient) -> None:
-    """A runner declaring more than one subscription (phase 3) — each slug's
+    """A runner declaring more than one subscription — each slug's
     sample lands and renders as its own entry in ``subscriptions``, distinct by slug and name."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     for seq, slug, name, pct in ((1, "anthropic", "Anthropic", 42.0), (2, "openai", "OpenAI", 17.0)):
@@ -1905,7 +1905,7 @@ def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_colle
 
 def test_each_subscription_advances_on_its_own_cadence_independently(client: TestClient) -> None:
     """A later sample for one slug must not touch a sibling slug's stored view (independent
-    cadence, phase 3) — each upsert is keyed on its own slug."""
+    cadence) — each upsert is keyed on its own slug."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     client.post(
         "/api/fleet/events",

@@ -3,7 +3,7 @@
 Real Claude Code executes the hook commands its ``--settings`` document declares;
 `engine.IHookRunner` is the seam that lets the mock do the same. These tests pin
 *where* the engine fires — the lifecycle points, and the exits that deliberately
-fire nothing — against a recording fake, and (phase 3) the real subprocess
+fire nothing — against a recording fake, and the real subprocess
 execution against stub shell commands. Nothing here depends on `blizzard`: the
 mock executes whatever command string a settings document names.
 

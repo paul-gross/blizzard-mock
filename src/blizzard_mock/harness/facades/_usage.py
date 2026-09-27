@@ -1,4 +1,4 @@
-"""Deterministic mock usage/cost synthesis (epic #57, phase 1 of #58).
+"""Deterministic mock usage/cost synthesis (epics #57, #58).
 
 Emits illustrative ``usage``/``total_cost_usd`` figures, tied to no real
 Claude pricing, as a pure deterministic function of the rendered text's

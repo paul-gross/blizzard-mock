@@ -1205,7 +1205,7 @@ def test_codex_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Deterministic usage/cost synthesis (blizzard epic #57, phase 1 of #58)
+# Deterministic usage/cost synthesis (blizzard epics #57, #58)
 # --------------------------------------------------------------------------- #
 
 
