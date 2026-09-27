@@ -43,7 +43,7 @@ def _runner() -> CliRunner:
 def _hub_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
     """A sqlite store mirroring the hub's ``runner_registrations`` + ``runner_pause_facts``,
     plus the per-slug ``runner_external_usage``/``runner_external_usage_misses`` siblings
-    ``create runner``'s ``--sample``/``--miss`` write into (blizzard#636)."""
+    ``create runner``'s ``--sample``/``--miss`` write into."""
     url = f"sqlite:///{tmp_path / 'hub.db'}"
     engine = create_engine(url)
     meta = MetaData()
@@ -831,6 +831,42 @@ def test_create_runner_declares_a_roster_in_the_stores_own_json_shape(tmp_path: 
         {"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"},
         {"slug": "probe", "name": "Probe", "provider": "none-such"},
     ]
+
+
+def test_create_runner_declare_empty_roster_stores_empty_not_null(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-5", "--declare-empty-roster"],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(registrations.c.subscriptions)).all()
+    assert [r[0] for r in rows] == ["[]"]
+
+
+def test_create_runner_declare_empty_roster_is_refused_alongside_a_subscription(tmp_path: Path) -> None:
+    url, _meta, _reg, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-6",
+            "--subscription",
+            "anthropic",
+            "Anthropic",
+            "anthropic",
+            "--declare-empty-roster",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--declare-empty-roster" in result.output
 
 
 def test_create_runner_sample_lands_a_runner_external_usage_row_at_the_chosen_age(tmp_path: Path) -> None:

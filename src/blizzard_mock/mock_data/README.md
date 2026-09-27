@@ -57,16 +57,15 @@ its own entry below owns its flags.
   exists. Store-agnostic: it never imports `blizzard`, so it works against
   whatever the daemon's Alembic tree migrated. The workhorse — every service
   scenario starts from a clean store.
-- `create runner --store hub --runner-id R [--paused] [--workspace-id W] [--subscription SLUG NAME PROVIDER]... [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
+- `create runner --store hub --runner-id R [--paused] [--workspace-id W] [--subscription SLUG NAME PROVIDER]... [--declare-empty-roster] [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
   **implemented**. Seeds one registered runner into the hub fleet registry
   (`runner_registrations`), and with `--paused` also lands a pause fact
   (`runner_pause_facts`) the runner reads back on its pull. Reflection-based.
-  `--subscription` (blizzard#636, repeatable) declares the roster on the same
+  `--subscription` (repeatable) declares the roster on the same
   row, in the exact JSON shape the hub store reads. Omitting `--subscription`
-  entirely stores `NULL`, matching an unregistered-roster runner — there is no
-  flag for an empty (`[]`) roster, since that distinction is already covered
-  at the wire/store layer (Phase 1) and this verb's own callers always
-  declare at least one slug when they care about the roster at all. `--sample`
+  entirely stores `NULL`, matching an unregistered-roster runner; `--declare-empty-roster`
+  stores `[]` instead — a declared roster of zero subscriptions, distinct from `NULL` —
+  and is refused alongside `--subscription`, which already declares one. `--sample`
   (repeatable) lands one `runner_external_usage` row per slug, `sampled_at`
   `AGE_SECONDS` before now, with a synthetic single-window `windows` payload.
   `--miss` (repeatable) lands one `runner_external_usage_misses` row per
@@ -74,8 +73,8 @@ its own entry below owns its flags.
   Both share `--subscription`'s `NAME` for a slug they name in common, and
   default an undeclared slug's `name` to the slug itself; both land
   independently of the roster — a sample or miss for a slug outside
-  `--subscription` is accepted, seeding the "reported but not declared" shape
-  D4 reads as absent when a roster exists.
+  `--subscription` is accepted, seeding the "reported but not declared" shape a
+  declared roster reads as absent.
 - `create graph --store hub [--name NAME] [--seed N]` — **implemented**. Mints a
   synthetic workflow graph (`domain/hub/graph_seed.py`): a `build` (`executor: runner`)
   node into a `deliver` (`executor: hub`) node into the reserved terminal. A

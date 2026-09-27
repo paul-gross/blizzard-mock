@@ -1,5 +1,5 @@
-"""Composes per-slug external-usage sample/miss rows for a declared subscription —
-siblings of the ``subscriptions`` roster column ``create runner`` writes directly.
+"""Composes a declared roster's JSON encoding, and the per-slug external-usage
+sample/miss rows that sit beside it.
 
 No FK: neither ``runner_external_usage`` nor ``runner_external_usage_misses`` carries
 one to ``runner_registrations``, so these rows compose independently of the roster.
@@ -8,11 +8,19 @@ one to ``runner_registrations``, so these rows compose independently of the rost
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 
 _DEFAULT_WINDOW_SECONDS = 18000
+
+
+def compose_declared_roster(subscriptions: Sequence[tuple[str, str, str]]) -> str:
+    """The ``runner_registrations.subscriptions`` column's JSON encoding — one
+    ``{slug, name, provider}`` object per declared ``(slug, name, provider)`` entry, in
+    the exact shape the hub store reads back."""
+    return json.dumps([{"slug": slug, "name": name, "provider": provider} for slug, name, provider in subscriptions])
 
 
 def _default_windows(sampled_at: datetime) -> list[dict[str, object]]:

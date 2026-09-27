@@ -7,7 +7,6 @@ the live store's schema at runtime rather than importing ``blizzard``.
 
 from __future__ import annotations
 
-import json
 import random
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -51,6 +50,7 @@ from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
 from blizzard_mock.mock_data.domain.hub.question_seed import QuestionCompositionError, compose_question
 from blizzard_mock.mock_data.domain.hub.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
 from blizzard_mock.mock_data.domain.hub.runner_subscription_seed import (
+    compose_declared_roster,
     compose_subscription_miss,
     compose_subscription_sample,
 )
@@ -395,7 +395,7 @@ def create() -> None:
     type=(str, str, str),
     multiple=True,
     metavar="SLUG NAME PROVIDER",
-    help="Declare one subscription in the roster (blizzard#636); repeatable. Omitted, the roster stores NULL.",
+    help="Declare one subscription in the roster; repeatable. Omitted, the roster stores NULL.",
 )
 @click.option(
     "--sample",
@@ -413,6 +413,12 @@ def create() -> None:
     metavar="SLUG AGE_SECONDS REASON",
     help="Land a runner_external_usage_misses row for SLUG, missed AGE_SECONDS ago, with REASON; repeatable.",
 )
+@click.option(
+    "--declare-empty-roster",
+    is_flag=True,
+    default=False,
+    help="Declare a roster of zero subscriptions ('[]'), distinct from omitting --subscription entirely (NULL).",
+)
 def create_runner(
     store: str,
     url: str | None,
@@ -423,12 +429,15 @@ def create_runner(
     subscriptions: tuple[tuple[str, str, str], ...],
     samples: tuple[tuple[str, int], ...],
     misses: tuple[tuple[str, int, str], ...],
+    declare_empty_roster: bool,
 ) -> None:
     """Seed one registered runner into the hub's fleet registry.
 
     With ``--paused``, also lands a pause fact. ``--subscription`` declares the roster
     on the same row; ``--sample``/``--miss`` land per-slug usage rows at a chosen age.
     """
+    if subscriptions and declare_empty_roster:
+        raise click.UsageError("--declare-empty-roster is redundant with --subscription, which already declares one")
     _require_store("runner", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     now = SystemClock().now()
@@ -439,10 +448,8 @@ def create_runner(
         "registered_at": now,
         "last_seen_at": now,
     }
-    if subscriptions:
-        registration_values["subscriptions"] = json.dumps(
-            [{"slug": slug, "name": name, "provider": provider} for slug, name, provider in subscriptions]
-        )
+    if subscriptions or declare_empty_roster:
+        registration_values["subscriptions"] = compose_declared_roster(subscriptions)
     rows = [FactRow(table="runner_registrations", values=registration_values)]
     if paused:
         rows.append(
