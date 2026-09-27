@@ -5,8 +5,8 @@ These tests wire it to an **in-process mock hub** (over ``httpx.ASGITransport`` 
 network) and drive it through the driver's own control API (a ``TestClient`` over the mock
 runner app), asserting the happy path and **each of the nine runner-side levers** — the
 misbehaviours a hub-under-test must reject or absorb. The mock hub does not itself
-validate the route capability token (``stale_route_token``/``omit_route_token``, issue
-#84b) — that check belongs to the real hub, exercised in ``blizzard``'s own
+validate the route capability token (``stale_route_token``/``omit_route_token``)
+— that check belongs to the real hub, exercised in ``blizzard``'s own
 ``tests/service/`` tier — so those two levers are asserted here at the driver level
 (``held(...).last_submission``), proving what the mock runner *presents* rather than how
 a hub reacts to it.
@@ -358,7 +358,7 @@ def test_lever_drop_ack_does_not_advance_the_driver_but_the_hub_applied(stack: t
 
 
 def test_default_completion_presents_the_claims_own_route_token(stack: tuple[TestClient, TestClient]) -> None:
-    """Present-valid is the unlevered default (issue #84b): stamped from the claim
+    """Present-valid is the unlevered default: stamped from the claim
     response, mirroring the real runner's stash-and-stamp — no lever needed."""
     hub, runner = stack
     chunk_id = _seed(hub)

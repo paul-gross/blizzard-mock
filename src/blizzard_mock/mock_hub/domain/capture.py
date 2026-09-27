@@ -1,4 +1,4 @@
-"""Received-request capture — the header-inspection lever (issue #86b).
+"""Received-request capture — the header-inspection lever.
 
 The mirror image of the edge-state levers: capturing what a request
 presented (e.g. an ``Authorization`` header), read back via ``GET

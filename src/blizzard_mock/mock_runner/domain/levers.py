@@ -30,7 +30,7 @@ class RunnerLever(StrEnum):
     #: Submit a completion carrying a **stale** (held-epoch minus 1) fence — the zombie the
     #: hub fences out over the wire (D-007).
     STALE_EPOCH = "stale_epoch"
-    #: Submit the completion with a wrong route capability token (issue #84b) —
+    #: Submit the completion with a wrong route capability token —
     #: neither the held claim's token nor any token the hub minted.
     STALE_ROUTE_TOKEN = "stale_route_token"
     #: Submit the completion with no route capability token at all (issue

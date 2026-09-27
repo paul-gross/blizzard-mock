@@ -857,7 +857,7 @@ def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> N
     assert "stale" in rejected.json()["detail"]
 
 
-# --- request capture (issue #86b) --------------------------------------------
+# --- request capture ------------------------------------------------------
 
 
 def test_captured_records_the_authorization_header_on_an_api_call(client: TestClient) -> None:

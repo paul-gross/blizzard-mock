@@ -278,9 +278,8 @@ def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> 
 
 def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
     """The misbehaviour-injection plane (``permission_denial``, ``interrupt_tool``,
-    ``malformed_record``, ``usage_limit_error``) is OpenCode-only — calling it from a
-    facade whose wire has no JSONL stream to carry it fails the turn clearly rather
-    than silently no-op'ing."""
+    ``malformed_record``, ``usage_limit_error``) is OpenCode-only — a facade whose wire
+    has no JSONL stream to carry it fails the turn clearly, not silently no-op's."""
     cwd, env = fenced_repo
     proc = subprocess.run(
         [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "permission_denial('bash')"],

@@ -1,5 +1,5 @@
 """The mock hub's control plane — ``/_seed`` (state), ``/_levers`` (edge states), and
-``/_captured`` (received-request capture, issue #86b).
+``/_captured`` (received-request capture).
 
 Namespaced outside ``/api`` and exempt from the transport-edge levers, so a
 test can always seed, arm/clear a lever, or read a capture.

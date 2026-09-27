@@ -77,7 +77,7 @@ _CAPTURE_EXEMPT_PREFIXES = ("/api/health", "/api/ready")
 
 
 class RequestCaptureMiddleware(BaseHTTPMiddleware):
-    """Records every hub-mirror ``/api/*`` request's method, path, headers (issue #86b).
+    """Records every hub-mirror ``/api/*`` request's method, path, headers.
 
     Excludes the control plane and liveness routes.
     """

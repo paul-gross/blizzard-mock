@@ -25,6 +25,6 @@ step "pytest -m \"not needs_blizzard\" (mise run test)"
 mise run test -- -m "not needs_blizzard"
 
 step "process-reference prose lint: vale --output=line ."
-vale --output=line .
+mise exec -- vale --output=line .
 
 step "Gate passed."

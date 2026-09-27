@@ -384,8 +384,8 @@ class ChunkState(BaseModel):
     route_runner_id: str | None = None
     route_workspace_id: str | None = None
     route_environment_ids: list[str] = Field(default_factory=list)
-    #: How many times the live route's capability token has been re-keyed
-    #: (issue #84b); folded into the token string so a re-key never repeats.
+    #: How many times the live route's capability token has been re-keyed,
+    #: folded into the token string so a re-key never repeats.
     route_token_rekey_count: int = 0
     #: ``(from_node_id, epoch)`` -> the apply-response already produced, for idempotent
     #: re-apply (D-090): a replayed completion returns its original outcome, no re-advance.

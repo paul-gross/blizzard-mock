@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 class Held:
     """A claimed chunk the driver is working: the fence epoch and the current node.
 
-    ``route_token`` (issue #84b) is the plaintext the claim response returned once.
+    ``route_token`` is the plaintext the claim response returned once.
     """
 
     chunk_id: str

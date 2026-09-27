@@ -192,7 +192,7 @@ class MockRunnerService:
         if self._pull(RunnerLever.CONFLICTING_FACT, chunk_id):
             from_node = "conflicting-node"  # a fact that does not match the hub's current node
 
-        # Route capability token (issue #84b): stamp the held claim's own
+        # Route capability token: stamp the held claim's own
         # plaintext by default, unless a lever overrides it for this call.
         route_token = held.route_token
         if self._pull(RunnerLever.OMIT_ROUTE_TOKEN, chunk_id):
@@ -521,7 +521,7 @@ class MockRunnerService:
             if held is not None:
                 held.seq = seq
             payload: dict[str, Any] = {"chunk_id": chunk_id, "epoch": epoch}
-            # Stamp the held claim's own route token (issue #84b) — always,
+            # Stamp the held claim's own route token — always,
             # never lever-controlled (pinned by tests/test_pin_mock.py).
             if held is not None and held.route_token is not None:
                 payload["route_token"] = held.route_token

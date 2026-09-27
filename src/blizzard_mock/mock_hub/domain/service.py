@@ -451,13 +451,13 @@ class MockHubService:
             workspace_id=workspace_id,
             environment_ids=list(environment_ids),
             envelope=self._envelope(chunk, chunk.entry, epoch=chunk.latest_epoch),
-            # A per-claim capability token (issue #84a). Deterministic on
+            # A per-claim capability token. Deterministic on
             # purpose, so a scenario can predict it.
             route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}",
         )
 
     def rekey_route_token(self, chunk_id: str) -> RouteTokenRekeyResponse:
-        """Rotate the chunk's live route capability token (issue paul-gross/blizzard#84b) —
+        """Rotate the chunk's live route capability token —
         mirrors the real hub's ``POST /api/fleet/chunks/{id}/route-token``. Why it exists:
         `blizzard/src/blizzard/hub/domain/claim.py`'s ``ClaimService.rekey``. Deterministic,
         like the claim's own token, but a counter folded in so a re-key never echoes it back."""

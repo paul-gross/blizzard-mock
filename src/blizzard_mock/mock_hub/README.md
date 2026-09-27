@@ -50,7 +50,7 @@ body), mirroring the real hub's own always-raising demand on this one route.
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
 | `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
 | `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
-| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token (issue #84b) |
+| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
 | `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |
