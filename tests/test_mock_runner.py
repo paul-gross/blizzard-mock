@@ -5,8 +5,8 @@ These tests wire it to an **in-process mock hub** (over ``httpx.ASGITransport`` 
 network) and drive it through the driver's own control API (a ``TestClient`` over the mock
 runner app), asserting the happy path and **each of the nine runner-side levers** — the
 misbehaviours a hub-under-test must reject or absorb. The mock hub does not itself
-validate the route capability token (``stale_route_token``/``omit_route_token``, issue
-#84b) — that check belongs to the real hub, exercised in ``blizzard``'s own
+validate the route capability token (``stale_route_token``/``omit_route_token``)
+— that check belongs to the real hub, exercised in ``blizzard``'s own
 ``tests/service/`` tier — so those two levers are asserted here at the driver level
 (``held(...).last_submission``), proving what the mock runner *presents* rather than how
 a hub reacts to it.
@@ -97,7 +97,7 @@ def test_driver_claims_and_completes_over_the_wire(stack: tuple[TestClient, Test
 
 
 def test_driver_can_assert_a_capability_snapshot_on_registration(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#433 — the driver can drive a registration asserting an arbitrary capability
+    """The driver can drive a registration asserting an arbitrary capability
     snapshot, with no real harness adapter behind it, and the hub reads it back stored."""
     hub, runner = stack
     reg = runner.post(
@@ -145,7 +145,7 @@ _DEFAULT_CAPABILITY = [{"harness_id": "claude_code", "default": True}]
 
 
 def test_drive_peek_matched_returns_the_capability_matched_entry(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#433 Phase 3 — the driver's own capabilities/policy are sent on the
+    """The driver's own capabilities/policy are sent on the
     matched verb, and the first workable entry (skipping an ineligible head) comes back."""
     hub, runner = stack
     _seed_harness_chunk(hub, "special_harness")
@@ -201,7 +201,7 @@ def test_drive_peek_matched_falls_back_to_the_legacy_peek_for_an_unregistered_ru
 
 
 def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#458: the hub's ``dependency_unmet`` lever denies the claim with a 409
+    """The hub's ``dependency_unmet`` lever denies the claim with a 409
     the driver has no special case for — it reports the denial back like any other
     non-201 claim response rather than raising."""
     hub, runner = stack
@@ -219,7 +219,7 @@ def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient,
 
 
 def test_driver_absorbs_a_claim_incompatible_denial(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#433 D9: a claim the hub denies for capability incompatibility is reported
+    """A claim the hub denies for capability incompatibility is reported
     back like any other non-201 claim response — the driver has no special case for this
     denial either."""
     hub, runner = stack
@@ -234,7 +234,7 @@ def test_driver_absorbs_a_claim_incompatible_denial(stack: tuple[TestClient, Tes
 
 
 def test_drive_claim_next_reaches_past_a_marked_head_by_default(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#459: ``/_drive/claim-next`` peeks, then reach-ahead (the default) claims
+    """``/_drive/claim-next`` peeks, then reach-ahead (the default) claims
     the first unmarked entry rather than the marked head."""
     hub, runner = stack
     blocked_id = _seed(hub)
@@ -271,7 +271,7 @@ def test_drive_claim_next_strict_holds_at_a_marked_head(stack: tuple[TestClient,
 def test_drive_claim_next_finds_nothing_when_every_peeked_chunk_is_marked(
     stack: tuple[TestClient, TestClient], strict: bool
 ) -> None:
-    """The exhaustion boundary (blizzard#459): every peeked entry marked claims nothing
+    """The exhaustion boundary: every peeked entry marked claims nothing
     under either policy, pinned explicitly rather than left to converge by accident."""
     hub, runner = stack
     for chunk_id in (_seed(hub), _seed(hub)):
@@ -358,7 +358,7 @@ def test_lever_drop_ack_does_not_advance_the_driver_but_the_hub_applied(stack: t
 
 
 def test_default_completion_presents_the_claims_own_route_token(stack: tuple[TestClient, TestClient]) -> None:
-    """Present-valid is the unlevered default (issue #84b): stamped from the claim
+    """Present-valid is the unlevered default: stamped from the claim
     response, mirroring the real runner's stash-and-stamp — no lever needed."""
     hub, runner = stack
     chunk_id = _seed(hub)
@@ -457,7 +457,7 @@ def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
     stack: tuple[TestClient, TestClient],
 ) -> None:
     """``/_drive/escalate`` forwards ``wrapped_takeover_command`` through
-    ``MockRunnerService.escalate`` to the hub gateway (issue #251) — a positional
+    ``MockRunnerService.escalate`` to the hub gateway — a positional
     forward at ``drive_escalate`` that drops the field would leave this empty even
     though the request body carried it."""
     hub, runner = stack
@@ -519,7 +519,7 @@ def test_drive_ask_mints_a_question_and_poll_answer_reads_it_unanswered(
 def test_drive_ask_forwards_an_explicit_harness_id(stack: tuple[TestClient, TestClient]) -> None:
     """An explicit ``harness_id`` supplied through ``/_drive/ask`` reaches the pushed
     ``question.asked`` fact's own field, rather than always stamping the Claude Code
-    compatibility default (D8's caller-supplied ``harness_id``)."""
+    compatibility default."""
     hub, runner = stack
     chunk_id = _seed(hub)
     _claim(runner, chunk_id)
@@ -540,7 +540,7 @@ def test_drive_ask_forwards_an_explicit_harness_id(stack: tuple[TestClient, Test
 def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
     stack: tuple[TestClient, TestClient],
 ) -> None:
-    """review round 8 F7: no service test previously drove a transcript push from a mock
+    """No service test previously drove a transcript push from a mock
     runner — ``IHubGateway`` stopped at ``push_facts``. ``push_transcripts`` closes that
     gap, proving the transcript lane's own route (``/transcripts``, distinct from
     ``/events``) is reachable end to end through the mock runner's driver, not just via a
@@ -657,7 +657,7 @@ def test_drive_report_external_usage_raw_slug_lever_pushes_an_unnarrowed_slug(
 
 
 def test_drive_report_external_usage_miss_lands_a_lapsed_condition(stack: tuple[TestClient, TestClient]) -> None:
-    """The miss-half sibling drive verb (blizzard#504 D7) — a miss with no prior sample
+    """The miss-half sibling drive verb — a miss with no prior sample
     renders as a miss-only, ``credential_lapsed`` row."""
     hub, runner = stack
     runner.post("/_drive/register")
@@ -697,7 +697,7 @@ def test_drive_report_external_usage_miss_raw_slug_lever_pushes_an_unnarrowed_sl
 
 
 def test_driver_reads_a_batch_of_chunk_statuses_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
-    """blizzard#521: the runner tick's slim batch read — a repeatable ``chunk_id`` query
+    """The runner tick's slim batch read — a repeatable ``chunk_id`` query
     param that omits an unknown id rather than 404ing."""
     hub, runner = stack
     chunk_id = _seed(hub)
@@ -724,7 +724,7 @@ def test_lever_delay_slows_a_drive_call(stack: tuple[TestClient, TestClient]) ->
 
 
 # --------------------------------------------------------------------------------- #
-# Git-commit declaration channel (issue #143, Phase 3) — the served route + its
+# Git-commit declaration channel — the served route + its
 # drive-plane lever, both landing in the same local store, no hub call.
 # --------------------------------------------------------------------------------- #
 

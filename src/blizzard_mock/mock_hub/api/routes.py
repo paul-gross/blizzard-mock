@@ -44,7 +44,7 @@ from blizzard_mock.mock_hub.domain.state import DeclaredSubscription, RunnerCapa
 #: hub.
 router = APIRouter(prefix="/api", tags=["hub"])
 
-#: The runner-facing hub mirror (issue #87) — every route below is
+#: The runner-facing hub mirror — every route below is
 #: runner-originating traffic, moved under ``/api/fleet`` as a block.
 fleet_router = APIRouter(prefix="/api/fleet", tags=["hub"])
 
@@ -110,7 +110,7 @@ def get_system_artifact(name: str, service: Annotated[MockHubService, Depends(ge
 
 @fleet_router.get("/scopes")
 def list_scopes(service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """The deployment's scope vocabulary, worker-facing (blizzard#582 D2)."""
+    """The deployment's scope vocabulary, worker-facing."""
     return service.scopes()
 
 
@@ -189,7 +189,7 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
 
 
 @fleet_router.get("/chunks/{chunk_id}/work-items")
-# Both the route and its deprecated `/pm-items` alias are served (issue #55),
+# Both the route and its deprecated `/pm-items` alias are served,
 # pinned by tests/test_pin_mock.py.
 @fleet_router.get("/chunks/{chunk_id}/pm-items")
 def get_work_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
@@ -232,7 +232,7 @@ def get_chunk_analytics_counts_files(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
     """A worker-scoped read of the chunk's own seeded counts-by-file rows — mirrors the
-    real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/files`` (blizzard#545).
+    real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/files``.
     ``since`` is required for wire-contract fidelity with the real hub; the mock ignores
     its value and serves the seeded rows regardless (``bzh:wire-change-extends-mock``)."""
     try:
@@ -247,7 +247,7 @@ def get_chunk_analytics_counts_files(
 def get_chunk_analytics_counts_skills(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/skills`` (blizzard#545).
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/skills``.
     ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_skills(chunk_id)
@@ -261,7 +261,7 @@ def get_chunk_analytics_counts_skills(
 def get_chunk_analytics_counts_agent_types(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/agent-types`` (blizzard#545).
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/agent-types``.
     ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_agent_types(chunk_id)
@@ -275,7 +275,7 @@ def get_chunk_analytics_counts_agent_types(
 def get_chunk_analytics_counts_nodes(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/nodes`` (blizzard#545).
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/nodes``.
     ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_counts_nodes(chunk_id)
@@ -289,7 +289,7 @@ def get_chunk_analytics_counts_nodes(
 def get_chunk_analytics_spend_nodes(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/nodes`` (blizzard#545).
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/nodes``.
     ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_spend_nodes(chunk_id)
@@ -303,7 +303,7 @@ def get_chunk_analytics_spend_nodes(
 def get_chunk_analytics_spend_graphs(
     chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/graphs`` (blizzard#545).
+    """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/graphs``.
     ``since`` is required for wire-contract fidelity; the mock ignores its value."""
     try:
         return service.analytics_spend_graphs(chunk_id)
@@ -376,7 +376,7 @@ def push_facts(body: RunnerFactBatchBody, service: Annotated[MockHubService, Dep
 def push_transcripts(
     body: TranscriptSegmentBatchBody, service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """The transcript lane's own push (blizzard#247) — distinct from :func:`push_facts`,
+    """The transcript lane's own push — distinct from :func:`push_facts`,
     mirroring the real hub's ``POST /api/fleet/transcripts``."""
     return service.ingest_transcripts(body.runner_id, [r.model_dump() for r in body.records])
 
@@ -385,7 +385,7 @@ def push_transcripts(
 def get_lease_transcript_segments(
     chunk_id: str, node_id: str, epoch: int, service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
-    """A lease's retained transcript (blizzard#249) — mirrors the real hub's runner-scoped
+    """A lease's retained transcript — mirrors the real hub's runner-scoped
     ``GET /api/fleet/chunks/{chunk_id}/transcript-segments``; the mock enforces no
     bearer-token confinement."""
     return service.lease_transcript(chunk_id, node_id=node_id, epoch=epoch)

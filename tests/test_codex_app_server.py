@@ -1,4 +1,4 @@
-"""``mock-codex app-server`` (blizzard#504) — the JSON-RPC-over-stdio double for ``codex
+"""``mock-codex app-server`` — the JSON-RPC-over-stdio double for ``codex
 app-server``'s ``initialize``/``account/read`` exchange, driven the way blizzard's renewer seam
 drives it: both requests written to stdin, then closed. Not the exec-engine's "prompt is the
 program" mode (``test_harness_smoke.py``): this verb answers a fixed protocol against
@@ -108,7 +108,7 @@ def test_a_missing_auth_file_reports_a_null_account_without_crashing(tmp_path: P
 
 
 def test_two_concurrent_refreshes_never_corrupt_the_file_and_both_are_audited(tmp_path: Path) -> None:
-    """The concurrent-writer proof (blizzard#504 Phase 2): two rotations racing the same lock
+    """The concurrent-writer proof: two rotations racing the same lock
     never leave the file unparseable, and each lands its own audit line — proof the lock
     serializes the two read-modify-write cycles rather than merely looking like it does."""
     auth_path = tmp_path / "auth.json"

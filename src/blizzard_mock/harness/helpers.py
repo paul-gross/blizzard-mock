@@ -123,7 +123,7 @@ def crash(*, hard: bool = False) -> None:
 
 
 def usage_limited(*, resets_at: str = "5:40pm (America/Chicago)") -> None:
-    """Simulate a Claude Code subscription usage-limit exit (blizzard#594) — the real
+    """Simulate a Claude Code subscription usage-limit exit — the real
     2026-09-05 shape: a synthetic assistant transcript record (``isApiErrorMessage:
     true``, ``error: "rate_limit"``) in place of a turn's own reply. The runner's
     classifier reads this record alone, never the ordinary envelope this call still
@@ -152,7 +152,7 @@ def usage_limited(*, resets_at: str = "5:40pm (America/Chicago)") -> None:
 
 
 def usage_limit_error(*, message: str | None = None) -> None:
-    """Stage OpenCode's own captured usage-limit ``error`` event (blizzard#594 D6) — the
+    """Stage OpenCode's own captured usage-limit ``error`` event — the
     ``AI_APICallError``/429 shape confirmed against the installed ``opencode-ai`` binary
     (see ``tests/opencode_usage_limit_fixture.py`` in the sibling ``blizzard`` checkout for
     its full provenance). OpenCode-only; :func:`usage_limited` is Claude Code's own."""
@@ -194,7 +194,7 @@ def answer() -> str | None:
     return current_context().session.last_answer
 
 
-# -- The misbehaviour plane (D7) — OpenCode-only wire shapes ----------------- #
+# -- The misbehaviour plane — OpenCode-only wire shapes ----------------- #
 # Each stages a raw JSONL line on the active wire's own ``wire_events`` list.
 
 

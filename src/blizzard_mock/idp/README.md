@@ -3,7 +3,7 @@
 ## Contract
 
 A standalone HTTP service that stands in for a **real OAuth/OIDC provider** so the
-hub's `hub/auth/oauth/` provider seam (issue #92) can be service/e2e-tested against a
+hub's `hub/auth/oauth/` provider seam can be service/e2e-tested against a
 real HTTP counterpart — no tokens, no network beyond this one local process. It serves
 **both shapes the seam supports at one origin**:
 

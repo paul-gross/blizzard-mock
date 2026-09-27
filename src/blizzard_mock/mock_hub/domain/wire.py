@@ -23,11 +23,11 @@ from blizzard_mock.mock_hub.domain.models import (
 class EnvelopeChoice(BaseModel):
     name: str
     description: str
-    requires_checks: bool = False  # gate this edge on green checks (issue #114)
+    requires_checks: bool = False  # gate this edge on green checks
 
 
 class RotatePolicyView(BaseModel):
-    """A declared session's rotation bounds (issue #144) — mirrors
+    """A declared session's rotation bounds — mirrors
     ``blizzard.wire.envelope.RotatePolicyView``."""
 
     max_context_tokens: int | None = None
@@ -40,10 +40,10 @@ class NodeConfig(BaseModel):
     node_name: str
     executor: Executor
     session: SessionMode
-    # The session reference target (issue #115) — the parsed `<name>` of a
+    # The session reference target — the parsed `<name>` of a
     # `resume:<name>`/`fresh:<name>` form; null for the bare forms.
     session_source: str | None = None
-    # The **effective** session declaration for this node-step (issue #144), already
+    # The **effective** session declaration for this node-step, already
     # merged hub-side (declaration over chunk default, field by field).
     session_name: str | None = None
     session_model: list[str] = Field(default_factory=list)
@@ -53,8 +53,8 @@ class NodeConfig(BaseModel):
     session_rotate: RotatePolicyView | None = None
     judged_by: JudgedBy
     checks: list[str] = Field(default_factory=list)
-    checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
-    checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
+    checks_cwd: str | None = None  # where the runner runs `checks:`
+    checks_timeout: int | None = None  # per-check timeout in seconds
     produces: list[str] = Field(default_factory=list)
     retries_max: int | None = None
     choices: list[EnvelopeChoice] = Field(default_factory=list)
@@ -144,7 +144,7 @@ class QuestionView(BaseModel):
     answer: str | None = None
     answered_by: str | None = None
     answered_at: str | None = None
-    # The return leg (blizzard#165): the ``answer.delivered`` fact landed.
+    # The return leg: the ``answer.delivered`` fact landed.
     delivered: bool = False
     delivered_at: str | None = None
 
@@ -165,7 +165,7 @@ class ChunkDetail(BaseModel):
     current_node_id: str | None
     latest_epoch: int | None
     work_refs: list[dict[str, str]] = Field(default_factory=list)
-    # The chunk's default model preference and effort (issue #144), mirrored
+    # The chunk's default model preference and effort, mirrored
     # so a real runner's wire model deserializes the mock's replies unchanged.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
@@ -212,9 +212,9 @@ class ExternalSubscriptionUsageWindowView(BaseModel):
 
 
 class SubscriptionUsageView(BaseModel):
-    """One reported subscription's newest sampled usage, carrying its identity
-    (blizzard#436 phase 3) — mirrors ``blizzard.wire.runner.SubscriptionUsageView``.
-    ``sampled_at`` is ``None`` for a miss-only row (blizzard#504 D7) — ``condition``
+    """One reported subscription's newest sampled usage, carrying its identity —
+    mirrors ``blizzard.wire.runner.SubscriptionUsageView``.
+    ``sampled_at`` is ``None`` for a miss-only row — ``condition``
     carries the reason in that case, and ``windows`` is empty."""
 
     slug: str
@@ -227,7 +227,7 @@ class SubscriptionUsageView(BaseModel):
 
 
 class RunnerCapabilityView(BaseModel):
-    """One harness binding a registered runner reported it can execute (blizzard#433) —
+    """One harness binding a registered runner reported it can execute —
     mirrors ``blizzard.wire.runner.RunnerCapability``, the output counterpart to
     ``deps.RunnerCapabilityBody``."""
 
@@ -244,7 +244,7 @@ class RunnerView(BaseModel):
     registered_at: str
     last_seen_at: str
     online: bool
-    # Two brakes (issue #43): the fleet's, and the runner's own reported-up
+    # Two brakes: the fleet's, and the runner's own reported-up
     # one. The mock only models the first.
     hub_paused: bool
     locally_paused: bool = False
@@ -266,8 +266,8 @@ class RunnerFactAck(BaseModel):
 
 
 class TranscriptSegmentAck(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck`` (blizzard#247) —
-    the transcript lane's own ack, distinct from :class:`RunnerFactAck`. ``capped`` is D6's
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck`` —
+    the transcript lane's own ack, distinct from :class:`RunnerFactAck`. ``capped`` is the
     cap-rejection class: a record over the per-record or per-chunk cap is capped but
     still acknowledged, so the mark still advances past it."""
 
@@ -279,7 +279,7 @@ class TranscriptSegmentAck(BaseModel):
 
 
 class LeaseTranscriptView(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView`` (blizzard#249) —
+    """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView`` —
     a lease's retained turns, concatenated. No cap policy, so ``truncated`` stays
     ``False``; no bearer-token confinement either, unlike the real route."""
 
@@ -291,7 +291,7 @@ class LeaseTranscriptView(BaseModel):
 
 
 class WorkItemAuthorView(BaseModel):
-    """Mirrors ``blizzard.wire.work_source.WorkItemAuthorView`` (blizzard#362) — who filed
+    """Mirrors ``blizzard.wire.work_source.WorkItemAuthorView`` — who filed
     a hub-owned work item, legible for display."""
 
     kind: str
@@ -382,7 +382,7 @@ class AnalyticsSpendResponse(BaseModel):
 
 class ScopeView(BaseModel):
     """A scope in the deployment's vocabulary — mirrors ``blizzard.wire.scope.ScopeView``,
-    served worker-facing by ``GET /api/fleet/scopes`` (blizzard#582 D2)."""
+    served worker-facing by ``GET /api/fleet/scopes``."""
 
     slug: str
     description: str

@@ -1,7 +1,7 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
 Resolves refs to commits and supports an atomic compare-and-swap ref update
-(``PATCH .../git/refs/{ref}``). ``.../check-runs`` (issue #232) derives runs
+(``PATCH .../git/refs/{ref}``). ``.../check-runs`` derives runs
 live from the active lever set.
 """
 

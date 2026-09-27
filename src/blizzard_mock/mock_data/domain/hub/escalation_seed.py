@@ -25,7 +25,7 @@ _RETRIES_TAKEOVER_TEMPLATE = "cd <workdir> && <resume {chunk_id}>"
 #: the generic resume-command placeholder.
 _CAP_TAKEOVER_TEMPLATE = "spend cap <cap> reached (spend <spend>) — cd <workdir> && <resume {chunk_id}>"
 
-#: The wrapped entry point's placeholder (issue #251), mirroring the real runner's own
+#: The wrapped entry point's placeholder, mirroring the real runner's own
 #: composition. Both causes' defaults reach this (see module docstring).
 _WRAPPED_TAKEOVER_TEMPLATE = "blizzard runner takeover {chunk_id} --dir <runner-dir>"
 

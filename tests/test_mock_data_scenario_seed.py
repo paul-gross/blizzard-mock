@@ -2,7 +2,7 @@
 
 Pure, no store: :func:`compose_board_scenario` is a plain function over an
 injected ``clock``/``rng`` (``bzh:domain-takes-objects``), composing purely on
-top of Phase 2/3's own composers. Exercises the deterministic status
+top of the chunk, artifact, event, and graph composers. Exercises the deterministic status
 distribution, the cost spread, the ceiling-pause choice, the ``--stress``
 extremes, and ``--seed`` reproducibility.
 """

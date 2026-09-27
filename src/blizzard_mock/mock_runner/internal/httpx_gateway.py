@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-#: Every mock-runner->hub call (issue #87) mounts under the fleet partition,
+#: Every mock-runner->hub call mounts under the fleet partition,
 #: mirroring the real hub's own router split.
 _API = "/api/fleet"
 

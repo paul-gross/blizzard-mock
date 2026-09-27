@@ -1,6 +1,6 @@
 """End-to-end acceptance proof for the blizzard-mock fleet (the P4 exit criterion).
 
-The bootstrap plan's Phase 4 exit criterion
+The bootstrap plan's exit criterion
 (``blizzard-discovery:/implementation/bootstrap.md``):
 
     a scripted prompt, run through the mock harness in a fixture-workspace env,

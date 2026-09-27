@@ -27,7 +27,7 @@ def get_captured(request: Request) -> ICaptureStore:
 class MirroredWireBody(BaseModel):
     """Marker base for a request body meant to mirror a real wire schema field-for-field
     (`bzh:wire-change-extends-mock`) — lets ``test_wire_parity.py`` discover the full set
-    of intended mirrors mechanically (F10), the request-body counterpart to the
+    of intended mirrors mechanically, the request-body counterpart to the
     response-model mirror module's own module-membership scan."""
 
 
@@ -92,7 +92,7 @@ class RunnerRegistrationBody(BaseModel):
     workspace_id: str = "workspace-mock"
     # The runner's configured environment-pool size — None when it reports none.
     env_capacity: int | None = None
-    # The runner's optional federation identity (issue #95) — round-tripped
+    # The runner's optional federation identity — round-tripped
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list)
@@ -160,7 +160,7 @@ SidechainSegmentBody.model_rebuild()
 
 
 class TranscriptSegmentRecordBody(MirroredWireBody):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord`` (blizzard#247)
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentRecord``
     field-for-field, including required-ness — as exposed to a silent rename as the turn
     bodies above, bar ``record_truncated``, which the real model defaults too."""
 

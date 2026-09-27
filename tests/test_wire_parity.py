@@ -3,9 +3,9 @@
 The mock hub's response models and its runner-fact vocabulary mirror a wire surface this
 repo cannot import. Both are compared here against the committed hub OpenAPI and the
 committed fact-kind constants, so a real-side wire change that outruns the mirror fails a
-mock-side gate (issue #277). ``mock-opencode``'s facade wire is checked the same way, but
+mock-side gate. ``mock-opencode``'s facade wire is checked the same way, but
 against code rather than a schema document: its actual stdout is fed through blizzard's own
-production ``opencode_shapes.parse_run_jsonl`` (D10), since a facade whose event stream the
+production ``opencode_shapes.parse_run_jsonl``, since a facade whose event stream the
 real parser rejects is a mock nothing downstream can trust.
 
 The sibling worktree is a hard requirement for every test here that reads it, not a skip: an
@@ -94,7 +94,7 @@ def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subproc
 
 
 def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
-    """D10: a fresh mint's actual stdout must parse cleanly through blizzard's own
+    """A fresh mint's actual stdout must parse cleanly through blizzard's own
     production parser, and its root session id must be server-assigned — the caller
     supplied no ``--session`` at all, exactly as the real fresh-session handshake
     requires (execution spec, "Fresh-session handshake")."""
@@ -145,7 +145,7 @@ def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fence
 
 
 def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
-    """D7: ``permission_denial()`` stages a ``permission`` event whose stdout still parses
+    """``permission_denial()`` stages a ``permission`` event whose stdout still parses
     cleanly through the real parser, carrying the denied permission's name and patterns."""
     shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
@@ -166,7 +166,7 @@ def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parse
 
 
 def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
-    """D7: ``interrupt_tool()`` stages a ``tool_use`` event whose part's ``state.status`` is
+    """``interrupt_tool()`` stages a ``tool_use`` event whose part's ``state.status`` is
     ``"error"`` — an interruption reads on OpenCode's wire exactly as a tool failure does,
     since there is no separate "interrupted" discriminator — and it still parses cleanly."""
     shapes = _load_opencode_shapes()
@@ -192,7 +192,7 @@ def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser
 
 
 def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_repo) -> None:
-    """D7: ``malformed_record()`` stages a line the real parser genuinely rejects — proving
+    """``malformed_record()`` stages a line the real parser genuinely rejects — proving
     the production rejection path is exercised against this mock, not only against
     blizzard's own hand-built fixtures."""
     shapes = _load_opencode_shapes()
@@ -205,7 +205,7 @@ def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_r
 
 
 def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
-    """blizzard#594 D6: ``usage_limit_error()`` stages the captured OpenCode limit shape —
+    """``usage_limit_error()`` stages the captured OpenCode limit shape —
     still parseable by the real parser, carrying the 429 status and usage-limit phrasing
     the real runner adapter's own ``classify_usage_limit`` reads (proven directly by that
     adapter's own unit tests in the sibling ``blizzard`` checkout)."""
@@ -277,8 +277,9 @@ def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> 
 
 
 def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
-    """D7's misbehaviour plane is OpenCode-only — calling it from a facade whose wire has
-    no JSONL stream to carry it fails the turn clearly rather than silently no-op'ing."""
+    """The misbehaviour-injection plane (``permission_denial``, ``interrupt_tool``,
+    ``malformed_record``, ``usage_limit_error``) is OpenCode-only — a facade whose wire
+    has no JSONL stream to carry it fails the turn clearly, not silently no-op's."""
     cwd, env = fenced_repo
     proc = subprocess.run(
         [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", "permission_denial('bash')"],
@@ -392,7 +393,7 @@ def _mirror_models() -> dict[str, type[BaseModel]]:
 
 
 def _deps_mirror_bodies() -> dict[str, type[BaseModel]]:
-    """Every ``deps`` request body marked ``MirroredWireBody`` (F10) — the request-body
+    """Every ``deps`` request body marked ``MirroredWireBody`` — the request-body
     counterpart to ``_mirror_models``'s module-membership scan, since ``deps`` also holds
     bodies that are deliberately NOT field-for-field mirrors."""
     return {
@@ -419,7 +420,7 @@ def test_every_mirror_model_is_mapped_to_a_real_schema() -> None:
 
 
 def test_every_mirrored_wire_body_is_mapped_to_a_real_schema() -> None:
-    """F10 (review round 8): ``_MIRRORED_BODIES`` used to be checked only from below —
+    """``_MIRRORED_BODIES`` used to be checked only from below —
     every KEY in it was field-diffed, but nothing asserted the map was complete, so a new
     ``MirroredWireBody`` added to ``deps`` without a matching entry shipped silently
     unchecked. Mirrors ``test_every_mirror_model_is_mapped_to_a_real_schema`` above."""

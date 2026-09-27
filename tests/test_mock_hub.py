@@ -3,7 +3,7 @@
 Drives the hub-mirror surface over a ``TestClient`` (in-process, no network): the happy
 path — seed → peek → claim → fence → complete → a hub node derives ``done`` — plus **each
 of the ten levers**, asserting the named edge state a runner-under-test would then have
-to survive, and the full ``/events`` fact vocabulary (blizzard-mock#4). No ``blizzard``
+to survive, and the full ``/events`` fact vocabulary. No ``blizzard``
 import: the mock stands alone.
 """
 
@@ -116,7 +116,7 @@ def test_second_claim_conflicts(client: TestClient) -> None:
 
 
 def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: TestClient) -> None:
-    """blizzard#521: the slim batch projection — de-dupes preserving order, silently
+    """The slim batch projection — de-dupes preserving order, silently
     omits an unknown id, never a 404."""
     claimed_id = _seed(client)
     assert client.post("/api/fleet/routes", json={"chunk_id": claimed_id, "runner_id": "r1"}).status_code == 201
@@ -139,7 +139,7 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
 
 
 def test_chunk_statuses_conflicting_fact_reports_a_foreign_holder(client: TestClient) -> None:
-    """blizzard#521: the runner tick now reads routes only through this endpoint, so the
+    """The runner tick now reads routes only through this endpoint, so the
     ``conflicting_fact`` lever must drive its detach/abandon path here too, exactly as it
     already does through ``GET /chunks/{id}``."""
     chunk_id = _seed(client)
@@ -190,7 +190,7 @@ def test_registry_register_and_pause_readback(client: TestClient) -> None:
 
 
 def test_registration_accepts_optional_federation_identity(client: TestClient) -> None:
-    """``url``/``redirect_uris`` (issue #95) — a wire-shape extension the mock hub round
+    """``url``/``redirect_uris`` — a wire-shape extension the mock hub round
     -trips, mirroring the real hub's own optional registration fields."""
     reg = client.post(
         "/api/fleet/runners",
@@ -214,7 +214,7 @@ def _registered_capabilities(client: TestClient, runner_id: str) -> tuple:
 
 
 def test_registration_accepts_and_stores_capabilities(client: TestClient) -> None:
-    """blizzard#433 — the runner's capability snapshot round-trips into the stored
+    """The runner's capability snapshot round-trips into the stored
     registry row, mirroring the real hub's own registration write."""
     reg = client.post(
         "/api/fleet/runners",
@@ -238,7 +238,7 @@ def test_registration_accepts_and_stores_capabilities(client: TestClient) -> Non
 
 
 def test_runner_view_carries_the_registered_capability_snapshot(client: TestClient) -> None:
-    """blizzard#441 — ``RunnerView`` mirrors the real hub's ``capabilities`` field, so the
+    """``RunnerView`` mirrors the real hub's ``capabilities`` field, so the
     board can read it back the same way it reads liveness or the pause brakes."""
     client.post(
         "/api/fleet/runners",
@@ -272,14 +272,14 @@ def test_runner_view_has_no_capabilities_when_none_were_registered(client: TestC
 
 
 def test_registration_without_capabilities_leaves_it_empty(client: TestClient) -> None:
-    """A request predating blizzard#433 parses unchanged — the empty-default convention
+    """A registration request with no ``capabilities`` field parses unchanged — the empty-default convention
     every earlier optional registration field already uses."""
     assert client.post("/api/fleet/runners", json={"runner_id": "r-no-cap", "workspace_id": "ws"}).status_code == 201
     assert _registered_capabilities(client, "r-no-cap") == ()
 
 
 def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClient) -> None:
-    """Unconditional overwrite (blizzard#433), like ``redirect_uris``: a re-registration
+    """Unconditional overwrite, like ``redirect_uris``: a re-registration
     dropping a binding leaves no trace of it."""
     client.post(
         "/api/fleet/runners",
@@ -532,7 +532,7 @@ def test_runner_view_a_declared_lapsed_miss_has_no_age_gate(client: TestClient) 
     ]
 
 
-# --- matched fleet peek (blizzard#433 Phase 3) -------------------------------
+# --- matched fleet peek -------------------------------
 
 
 def _seed_harness_chunk(client: TestClient, harness_id: str) -> str:
@@ -649,7 +649,7 @@ def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capabil
     hold = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
     assert hold.json()["entries"] == []
 
-    # the peek's own read never consumes the lever (mirrors GET /queue/peek, blizzard#459).
+    # the peek's own read never consumes the lever (mirrors GET /queue/peek).
     still_blocked = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
     assert still_blocked.json()["entries"] == []
 
@@ -679,7 +679,7 @@ def test_matched_peek_leaves_the_legacy_verb_unfiltered(client: TestClient) -> N
     assert [e["chunk_id"] for e in legacy] == [ineligible, workable]
 
 
-# --- claim revalidation (blizzard#433 Phase 4) -------------------------------
+# --- claim revalidation -------------------------------
 
 
 def _register_with_capabilities(client: TestClient, capabilities: list[dict], *, runner_id: str = "r1") -> None:
@@ -690,7 +690,7 @@ def _register_with_capabilities(client: TestClient, capabilities: list[dict], *,
 
 
 def test_claim_denied_when_stored_capabilities_no_longer_satisfy_the_chunk(client: TestClient) -> None:
-    """blizzard#433 D9: a claim is refused with a 409 distinct from ``ClaimConflict`` and
+    """A claim is refused with a 409 distinct from ``ClaimConflict`` and
     ``DependencyUnmet`` when the runner's *stored* registration cannot run the chunk's
     reachable lineage — the route is never minted."""
     chunk_id = _seed_harness_chunk(client, "special_harness")
@@ -770,7 +770,7 @@ def test_lever_unreachable_heals_mid_lease(client: TestClient) -> None:
 
 
 def test_lever_unreachable_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
-    """D6: a wedged transcript flush never blocks the fact lane — the lever fails
+    """A wedged transcript flush never blocks the fact lane — the lever fails
     ``/transcripts`` alone, and ``/events`` (and everything else) stays healthy."""
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
@@ -785,7 +785,7 @@ def test_lever_unreachable_transcripts_is_scoped_to_its_own_route(client: TestCl
 
 
 def test_lever_delay_transcripts_is_scoped_to_its_own_route(client: TestClient) -> None:
-    """review F18: D6's lane-independence claim is "a wedged OR SLOW transcript flush
+    """The lane-independence claim above is "a wedged OR SLOW transcript flush
     never blocks the fact lane" — ``unreachable_transcripts`` above only ever proves the
     hard-down half. This lever proves the slow half: ``/transcripts`` alone sleeps,
     ``/events`` (and everything else) stays fast."""
@@ -811,7 +811,7 @@ def test_lever_delay_transcripts_is_scoped_to_its_own_route(client: TestClient) 
 
 @pytest.mark.asyncio
 async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> None:
-    """review F12: a synchronous sleep in the middleware would hold the whole event loop —
+    """A synchronous sleep in the middleware would hold the whole event loop —
     a concurrent, undelayed request would then wait out the delay too, not just the one
     lever-targeted route."""
     import asyncio
@@ -857,7 +857,7 @@ def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> N
     assert "stale" in rejected.json()["detail"]
 
 
-# --- request capture (issue #86b) --------------------------------------------
+# --- request capture ------------------------------------------------------
 
 
 def test_captured_records_the_authorization_header_on_an_api_call(client: TestClient) -> None:
@@ -977,7 +977,7 @@ def test_lever_chunk_unknown_404s_mid_lease_then_self_expires(client: TestClient
 
 
 def test_lever_dependency_unmet_denies_the_claim_naming_the_prerequisite(client: TestClient) -> None:
-    """blizzard#458: a claim on a chunk the lever names as depending on an unmet
+    """A claim on a chunk the lever names as depending on an unmet
     prerequisite is refused with a 409 shape distinct from ``ClaimConflict`` — no
     ``held_by_runner_id``, a ``prerequisite_chunk_id`` instead."""
     chunk_id = _seed(client)
@@ -1012,7 +1012,7 @@ def test_lever_dependency_unmet_is_sticky_until_cleared(client: TestClient) -> N
     assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
 
 
-# --- new fleet routes (blizzard-mock#4) --------------------------------------
+# --- new fleet routes --------------------------------------
 
 
 def test_get_question_returns_the_question_view(client: TestClient) -> None:
@@ -1084,7 +1084,7 @@ def test_report_escalation_is_readable_on_chunk_detail_and_404s_on_unknown_chunk
 
 
 def test_report_escalation_direct_route_carries_the_wrapped_takeover_command(client: TestClient) -> None:
-    """The DIRECT, non-buffered ``POST .../escalations`` route (issue #251) — the
+    """The DIRECT, non-buffered ``POST .../escalations`` route — the
     counterpart to the batched ``/events`` case below."""
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
@@ -1202,7 +1202,7 @@ def test_events_answer_delivered_marks_the_question_answered(client: TestClient)
     assert ack.json()["applied"] == [3]
     polled = client.get("/api/fleet/questions/q1").json()
     assert polled["answered"] is True
-    # The delivery is readable in its own right (blizzard#165), not folded into
+    # The delivery is readable in its own right, not folded into
     # `answered` — the real hub's view carries the same pair off `answer_deliveries`.
     assert polled["delivered"] is True
     assert polled["delivered_at"] is not None
@@ -1463,7 +1463,7 @@ def test_non_finite_or_out_of_range_utilization_windows_are_omitted_at_ingest(
 
 
 def test_events_event_recorded_is_accepted(client: TestClient) -> None:
-    """An operational event (issue #125) is never token-gated and needs no chunk — it
+    """An operational event is never token-gated and needs no chunk — it
     lands off a runner-scoped batch with no claim in play."""
     ack = client.post(
         "/api/fleet/events",
@@ -1527,7 +1527,7 @@ def test_registration_round_trips_env_capacity_onto_the_runner_view(client: Test
 
 
 def test_events_external_subscription_usage_sampled_is_accepted(client: TestClient) -> None:
-    """A sampled external-subscription-usage snapshot (issue #218) is runner-scoped and
+    """A sampled external-subscription-usage snapshot is runner-scoped and
     advisory-only: applied for a runner the registry has never seen. That it survives to be
     read is pinned by ``test_a_report_that_outruns_its_registration_is_readable_once_it_lands``."""
     ack = client.post(
@@ -1590,12 +1590,12 @@ def test_events_invalid_external_usage_sample_is_rejected_without_a_subscription
     assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
 
 
-# blizzard#504 D7 — the `missed` fact and its `condition` derivation.
+# The `missed` fact and its `condition` derivation.
 # --------------------------------------------------------------------------- #
 
 
 def test_events_external_subscription_usage_missed_is_accepted(client: TestClient) -> None:
-    """A missed-fact report (blizzard#504 D7) is runner-scoped and advisory-only, mirroring
+    """A missed-fact report is runner-scoped and advisory-only, mirroring
     its sampled sibling — applied for a runner the registry has never seen."""
     ack = client.post(
         "/api/fleet/events",
@@ -1789,7 +1789,7 @@ def test_a_sample_newer_than_the_miss_clears_the_condition(client: TestClient) -
 
 
 def test_a_non_lapsed_miss_reason_never_surfaces_as_a_condition(client: TestClient) -> None:
-    """Only `credential_lapsed` ever surfaces as `condition` (D7) — every other reason is
+    """Only `credential_lapsed` ever surfaces as `condition` — every other reason is
     silent, whether or not a sample exists for the same slug."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     ack = client.post(
@@ -1817,7 +1817,7 @@ def test_a_non_lapsed_miss_reason_never_surfaces_as_a_condition(client: TestClie
 
 
 def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client: TestClient) -> None:
-    """The sample and miss are sibling records (D7) — a later sample after a miss reads
+    """The sample and miss are sibling records — a later sample after a miss reads
     back the sample's own report, not a value carried over from the miss."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     client.post(
@@ -1863,7 +1863,7 @@ def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client
 
 
 def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_collection(client: TestClient) -> None:
-    """A runner declaring more than one subscription (blizzard#436 phase 3) — each slug's
+    """A runner declaring more than one subscription — each slug's
     sample lands and renders as its own entry in ``subscriptions``, distinct by slug and name."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     for seq, slug, name, pct in ((1, "anthropic", "Anthropic", 42.0), (2, "openai", "OpenAI", 17.0)):
@@ -1905,7 +1905,7 @@ def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_colle
 
 def test_each_subscription_advances_on_its_own_cadence_independently(client: TestClient) -> None:
     """A later sample for one slug must not touch a sibling slug's stored view (independent
-    cadence, blizzard#436 phase 3) — each upsert is keyed on its own slug."""
+    cadence) — each upsert is keyed on its own slug."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     client.post(
         "/api/fleet/events",
@@ -2025,7 +2025,7 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
 
 
-# --- transcript segments (blizzard#247) ---------------------------------------
+# --- transcript segments ---------------------------------------
 
 
 def _transcript_record(
@@ -2061,7 +2061,7 @@ def _transcript_record(
 
 
 def _turn_with_text(text: str, *, index: int = 0) -> dict:
-    """A full, validation-passing turn (review F9 — every field is now required)
+    """A full, validation-passing turn (every field is now required)
     carrying just the given oversized ``text``, for cap tests that don't care about
     turn shape."""
     return {
@@ -2077,7 +2077,7 @@ def _turn_with_text(text: str, *, index: int = 0) -> dict:
 
 
 def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClient) -> None:
-    """review F11: ``turns`` used to be a freeform ``list[dict]`` here — a real field
+    """``turns`` used to be a freeform ``list[dict]`` here — a real field
     rename on the wire (e.g. a turn's ``text`` renamed) would have shipped green through
     every `service-test` scenario, since nothing driving the mock ever validated turn
     shape. Now typed field-for-field against ``blizzard.wire.transcript_segment
@@ -2094,9 +2094,9 @@ def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClien
 
 
 def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestClient) -> None:
-    """review round 6 F4: ``input_truncated`` is the one deliberate default in
+    """``input_truncated`` is the one deliberate default in
     ``ToolCallSegmentBody`` — mirroring the real hub's own ``ToolCallSegmentView``
-    default (round 5's F1 field, made forward-compat in round 6). A record whose tool
+    default. A record whose tool
     call omits it entirely must still 200, not 422 like a genuine field rename would."""
     chunk_id = _seed(client)
     turn = {
@@ -2127,7 +2127,7 @@ def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestCli
 
 
 def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient) -> None:
-    """review F9: the nested-``tool`` case above is caught by ``ToolCallSegmentBody``'s
+    """The nested-``tool`` case above is caught by ``ToolCallSegmentBody``'s
     genuinely-required fields alone — every ``TurnSegmentBody`` field used to default,
     so a top-level rename (e.g. ``text``) validated here while the real hub 422s. Now
     every field mirrors ``TurnSegmentView``'s own required-ness."""
@@ -2150,7 +2150,7 @@ def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient)
 
 
 def test_transcripts_rejects_a_record_field_renamed_around_the_turns(client: TestClient) -> None:
-    """review F9, the enclosing level: tightening only the turn bodies leaves
+    """Tightening only the turn bodies leaves
     ``TranscriptSegmentRecordBody``'s own ``final``/``normalizer_version``/
     ``harness_version``/``turns`` defaulted, so a rename of one of THOSE still validates
     here while the real hub 422s — the same silent-drift hole one frame out."""
@@ -2164,7 +2164,7 @@ def test_transcripts_rejects_a_record_field_renamed_around_the_turns(client: Tes
 
 
 def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
-    """The transcript lane's high-water is independent of the fact lane's (D7): a
+    """The transcript lane's high-water is independent of the fact lane's: a
     transcript push does not disturb a fact-lane seq already applied, and vice versa."""
     chunk_id = _seed(client)
     client.post(
@@ -2200,9 +2200,9 @@ def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestC
 def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_advances_past_it(
     client: TestClient,
 ) -> None:
-    """review F8, blizzard#246: mirrors the real hub's ``TranscriptIngestService._apply``
-    (blizzard#247) — an over-cap record is capped (never applied, never stored), but the
-    high-water mark still advances past it (D6), unlike an unseen seq. Without this, no mock
+    """Mirrors the real hub's ``TranscriptIngestService._apply``
+    — an over-cap record is capped (never applied, never stored), but the
+    high-water mark still advances past it, unlike an unseen seq. Without this, no mock
     or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
     regression in the runner drain's own cap-handling."""
     chunk_id = _seed(client)
@@ -2213,10 +2213,10 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
     assert first.json()["capped"] == [1]
-    assert first.json()["high_water"] == 1  # advances past a capped record too (D6)
+    assert first.json()["high_water"] == 1  # advances past a capped record too
 
     # A replay of the same now-behind-the-mark seq still reports its cap outcome, mirroring
-    # the real hub's natural-key (D8) lookup on the already-applied path: a runner that
+    # the real hub's natural-key lookup on the already-applied path: a runner that
     # crashed in its own after-submit.before-ack window must still learn the record was
     # capped, or the segment-field/warning marking is permanently skipped on retry.
     replay = client.post(
@@ -2256,7 +2256,7 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
 
 
 def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(client: TestClient) -> None:
-    """blizzard#247's second, independent cap: bytes accumulate per chunk, and a record that
+    """The chunk-budget cap is the second, independent cap: bytes accumulate per chunk, and a record that
     is well within the per-record cap can still be capped once the chunk's own 64 MB budget
     is spent — mirrors the real hub's ``_reject_reason`` checking both caps. Loops until the
     budget actually tips rather than hardcoding a record count against JSON-overhead math."""
@@ -2278,7 +2278,7 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
             },
         )
         body = ack.json()
-        assert body["high_water"] == seq  # every record advances the mark, applied or capped (D6)
+        assert body["high_water"] == seq  # every record advances the mark, applied or capped
         if body["capped"]:
             capped_seq = seq
         else:
@@ -2287,7 +2287,7 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
 
 
 def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped(client: TestClient) -> None:
-    """review round 6 F10: the real hub's `update_to_accepted` clears a natural key's
+    """The real hub's `update_to_accepted` clears a natural key's
     `rejected` state when it is re-offered and accepted — the mock's own decision tracking
     must not be add-only. A key capped once, then later re-offered under a fresh seq and
     accepted, must stop reporting `capped` on a later replay of the ORIGINAL seq too, not
@@ -2331,7 +2331,7 @@ def _turns_of_size(target_bytes: int) -> list[dict]:
 def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recredit_the_chunk_budget(
     client: TestClient,
 ) -> None:
-    """review round 6 F10: the real hub's ``TranscriptIngestService._apply`` returns early,
+    """The real hub's ``TranscriptIngestService._apply`` returns early,
     with no re-crediting, once a natural key is already ``"accepted"`` — a re-offer under a
     fresh seq must not double-count its bytes against the chunk budget. 31 records at
     exactly 2 MiB each leave exactly 2 MiB of the 64 MiB budget free; re-offering an
@@ -2393,7 +2393,7 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
     assert fresh.json()["capped"] == []
 
 
-# --- lease-transcript read (blizzard#249) --------------------------------------
+# --- lease-transcript read --------------------------------------
 
 
 def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestClient) -> None:
@@ -2473,7 +2473,7 @@ def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> N
 
 def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: TestClient) -> None:
     """The real hub dedupes on the natural key ``(segment_id, turn_range_start)``
-    regardless of the offered ``seq`` (D8) — a re-offer (e.g. after an ack the runner
+    regardless of the offered ``seq`` — a re-offer (e.g. after an ack the runner
     missed) must not double the retained turns."""
     chunk_id = _seed(client)
     client.post(
@@ -2616,7 +2616,7 @@ def test_seed_stop_leaves_levers_unchanged(client: TestClient) -> None:
     assert client.get("/_levers").json() == before
 
 
-# --- the session declaration on the envelope (issues #115, #144) -------------
+# --- the session declaration on the envelope -------------
 #
 # `bzh:wire-change-extends-mock`: the mock's `NodeConfig` mirrors the real hub's, so a
 # real runner deserializes its replies unchanged. It never picked up `session_source`
@@ -2781,7 +2781,7 @@ def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
     assert resp.json() == []
 
 
-# --- scopes (global vocabulary, blizzard#582 D2) ------------------------------
+# --- scopes (global vocabulary) ------------------------------
 
 
 def test_scopes_start_empty(client: TestClient) -> None:
@@ -2954,7 +2954,7 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
 
 def test_garden_proposals_accepts_a_proposal_citing_no_findings(client: TestClient) -> None:
     """``GardenProposalSpec.findings`` defaults to ``[]`` with no minimum — pins that the
-    mock hub already accepts the relaxed shape ``blizzard#543`` extends to the real hub."""
+    mock hub already accepts the relaxed shape the real hub will later adopt."""
     spec = _proposal_spec(
         garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
         garden_proposals=[{"proposal_id": "prop_1", "class": "mechanize", "title": "t", "body": "b"}],
@@ -3036,7 +3036,7 @@ def test_garden_proposals_404s_on_an_unknown_chunk(client: TestClient) -> None:
     assert "ch_ghost" in resp.json()["detail"]
 
 
-# --- fleet analytics (worker-scoped counts/spend read, blizzard#545) ----------
+# --- fleet analytics (worker-scoped counts/spend read) ----------
 
 _ANALYTICS_ROUTES = [
     "counts/files",
@@ -3084,7 +3084,7 @@ def test_analytics_422s_without_since(client: TestClient, suffix: str) -> None:
 
 @pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
 def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient, suffix: str) -> None:
-    """The mock does not aggregate (blizzard#545 D5): the seeded row is served as-is,
+    """The mock does not aggregate: the seeded row is served as-is,
     regardless of the window named — proven here by naming only the required `since`,
     ignored like `until` would be."""
     key = (

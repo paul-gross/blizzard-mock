@@ -63,6 +63,6 @@ class IHubGateway(Protocol):
     #: leases (``question.asked``, ``runner.locally_paused``/``_resumed``).
     def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
 
-    #: The dedicated ``POST /transcripts`` route (blizzard#246/#247) — the transcript
+    #: The dedicated ``POST /transcripts`` route — the transcript
     #: lane's own push, structurally independent of ``push_facts``'s ``/events``.
     def push_transcripts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...

@@ -22,7 +22,7 @@ _EXEMPT_PREFIXES = ("/_levers", "/_seed", "/_captured", "/api/health", "/api/rea
 
 def _chunk_from_path(path: str) -> str | None:
     """The ``chunk_id`` a ``.../chunks/{id}/...`` path names, if any — matches both
-    ``.../api/chunks/{id}`` and ``.../api/fleet/chunks/{id}`` (issue #87). Either shape's
+    ``.../api/chunks/{id}`` and ``.../api/fleet/chunks/{id}``. Either shape's
     ``chunks/{id}`` tail resolves the same way, so a per-chunk lever (``unreachable``,
     ``delay``) still targets the right chunk."""
     parts = [p for p in path.split("/") if p]
@@ -77,7 +77,7 @@ _CAPTURE_EXEMPT_PREFIXES = ("/api/health", "/api/ready")
 
 
 class RequestCaptureMiddleware(BaseHTTPMiddleware):
-    """Records every hub-mirror ``/api/*`` request's method, path, headers (issue #86b).
+    """Records every hub-mirror ``/api/*`` request's method, path, headers.
 
     Excludes the control plane and liveness routes.
     """

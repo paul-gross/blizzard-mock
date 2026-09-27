@@ -1,4 +1,4 @@
-"""The ``mock-codex app-server`` verb (blizzard#504) — a JSON-RPC-over-stdio double for ``codex
+"""The ``mock-codex app-server`` verb — a JSON-RPC-over-stdio double for ``codex
 app-server``, answering ``initialize`` and ``account/read`` in the real binary's own shape
 (confirmed live against Codex 0.149.0): an id-matched response with an unsolicited notification
 interleaved. A refreshing ``account/read`` takes the same lock a vendor-style writer would

@@ -24,7 +24,7 @@ class Ask:
 
 @dataclass
 class Invocation:
-    """One turn's observed model/effort/compaction-window/permission flags (issue #144).
+    """One turn's observed model/effort/compaction-window/permission flags.
 
     ``None`` means the flag was absent from argv, not unknown.
     """
@@ -40,7 +40,7 @@ class Invocation:
 class SessionState:
     """The durable state of one mock-harness session, keyed by ``session_id``.
 
-    ``invocations`` records the observed model/effort flag per turn (issue #144).
+    ``invocations`` records the observed model/effort flag per turn.
     """
 
     session_id: str

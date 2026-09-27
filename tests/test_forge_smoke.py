@@ -482,7 +482,7 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
 def test_lever_catalog_covers_every_declared_kind(client: TestClient) -> None:
     """The advertised catalog (not just ``state_levers``/``action_levers``) must
     describe every ``LeverKind`` — a lever advertised as active but undocumented
-    in the catalog is a gap (blizzard#232)."""
+    in the catalog is a gap."""
     body = client.get("/_levers").json()
     assert set(body["catalog"]) == {kind.value for kind in LeverKind}
 
@@ -522,7 +522,7 @@ def test_checks_pending_lever_reads_blocked(client: TestClient) -> None:
     assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "clean"
 
 
-# -- levers: check runs (blizzard#232) --------------------------------------
+# -- levers: check runs --------------------------------------
 
 
 def test_check_runs_read_green_when_no_lever(client: TestClient) -> None:

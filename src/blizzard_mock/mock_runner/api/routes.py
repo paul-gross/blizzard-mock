@@ -62,7 +62,7 @@ def record_git_commit_declaration(
     lease_id: str, body: GitCommitDeclarationBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
     """The mock's served counterpart to the real runner's ``POST /api/leases/{lease_id}/
-    git-commits`` (issue #143, Phase 3) — no lease-token auth here (the mock runner holds
+    git-commits`` — no lease-token auth here (the mock runner holds
     no lease-token store), a lease-scoped local write only, exactly wire-shape-compatible
     with the real route."""
     return service.declare_git_commit(
@@ -130,8 +130,8 @@ def drive_chunk_statuses(
 def drive_declare_git_commit(
     body: DeclareGitCommitBody, service: Annotated[MockRunnerService, Depends(get_service)]
 ) -> dict[str, Any]:
-    """Drive a git-commit declaration directly against the mock's local store (issue #143,
-    Phase 3) — the produces-kind analogue of ``CompleteBody.artifacts``, so a service test
+    """Drive a git-commit declaration directly against the mock's local store — the
+    produces-kind analogue of ``CompleteBody.artifacts``, so a service test
     can set declaration state without a raw client to the served lease-scoped route."""
     return service.declare_git_commit(
         body.lease_id, forge=body.forge, repo=body.repo, branch=body.branch, commit=body.commit
