@@ -31,12 +31,24 @@ class HttpxHubGateway:
         self._client = client
 
     def register(
-        self, runner_id: str, *, workspace_id: str, capabilities: list[dict[str, Any]] | None = None
+        self,
+        runner_id: str,
+        *,
+        workspace_id: str,
+        capabilities: list[dict[str, Any]] | None = None,
+        subscriptions: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        return self._post(
-            f"{_API}/runners",
-            {"runner_id": runner_id, "workspace_id": workspace_id, "capabilities": capabilities or []},
-        )
+        body: dict[str, Any] = {
+            "runner_id": runner_id,
+            "workspace_id": workspace_id,
+            "capabilities": capabilities or [],
+        }
+        # `subscriptions` rides only when supplied (blizzard#636 D12) — an absent key lets
+        # the receiving hub default it to `None` itself, driving the rosterless fallback
+        # exactly as an older runner would, rather than defaulting it to `[]` here.
+        if subscriptions is not None:
+            body["subscriptions"] = subscriptions
+        return self._post(f"{_API}/runners", body)
 
     def peek(self) -> tuple[int, dict[str, Any]]:
         return self._get(f"{_API}/queue/peek")

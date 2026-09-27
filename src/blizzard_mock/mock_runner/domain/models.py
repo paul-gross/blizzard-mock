@@ -35,6 +35,11 @@ class RegisterBody(BaseModel):
     real harness adapter behind it."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    #: The runner's declared subscription roster (blizzard#636), each entry the raw
+    #: ``{slug, name, provider}`` shape — settable directly, mirroring ``capabilities``.
+    #: ``None`` (the default) forwards no ``subscriptions`` key at all, driving the hub's
+    #: rosterless fallback exactly as an older runner would; ``[]`` declares an empty roster.
+    subscriptions: list[dict[str, Any]] | None = None
 
 
 class PeekMatchedBody(BaseModel):

@@ -9,7 +9,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
-from blizzard_mock.mock_hub.domain.state import ReportedRunnerFacts, RunnerCapability, RunnerRow, ScopeRow
+from blizzard_mock.mock_hub.domain.state import (
+    DeclaredSubscription,
+    ReportedRunnerFacts,
+    RunnerCapability,
+    RunnerRow,
+    ScopeRow,
+)
 
 
 class InMemoryHubState:
@@ -42,6 +48,7 @@ class InMemoryHubState:
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
+        declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
     ) -> bool:
         existing = self._runners.get(runner_id)
         if existing is None:
@@ -53,6 +60,7 @@ class InMemoryHubState:
                 redirect_uris=redirect_uris,
                 env_capacity=env_capacity,
                 capabilities=capabilities,
+                declared_subscriptions=declared_subscriptions,
             )
             return True
         existing.last_seen_at = at
@@ -61,6 +69,7 @@ class InMemoryHubState:
         existing.redirect_uris = redirect_uris
         existing.env_capacity = env_capacity
         existing.capabilities = capabilities
+        existing.declared_subscriptions = declared_subscriptions
         return False
 
     def reported_facts(self, runner_id: str) -> ReportedRunnerFacts:

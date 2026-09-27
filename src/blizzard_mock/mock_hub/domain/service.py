@@ -38,6 +38,7 @@ from blizzard_mock.mock_hub.domain.models import (
     SystemArtifactSpec,
 )
 from blizzard_mock.mock_hub.domain.state import (
+    DeclaredSubscription,
     IHubState,
     ReportedRunnerFacts,
     RunnerCapability,
@@ -977,6 +978,7 @@ class MockHubService:
         redirect_uris: tuple[str, ...] = (),
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
+        subscriptions: tuple[DeclaredSubscription, ...] | None = None,
     ) -> bool:
         return self._state.upsert_runner(
             runner_id,
@@ -986,6 +988,7 @@ class MockHubService:
             redirect_uris=redirect_uris,
             env_capacity=env_capacity,
             capabilities=capabilities,
+            declared_subscriptions=subscriptions,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
@@ -1006,7 +1009,7 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
-            subscriptions=self._usage_condition_views(reported),
+            subscriptions=self._usage_condition_views(reported, declared_subscriptions=row.declared_subscriptions),
             capabilities=[
                 RunnerCapabilityView(
                     harness_id=c.harness_id,
@@ -1076,34 +1079,89 @@ class MockHubService:
         )
 
     @staticmethod
-    def _usage_condition_views(reported: ReportedRunnerFacts) -> list[SubscriptionUsageView]:
-        """Every declared subscription's rendered view, unioned across samples and misses
-        by slug (blizzard#504 D7) — a slug whose newest miss is a ``credential_lapsed``
-        newer than its newest (or absent) sample renders as a miss-only, lapsed row; every
-        other slug with a sample renders it unchanged. No staleness gate: unlike the real
-        hub, this mock never ages a report out on its own."""
+    def _usage_condition_views(
+        reported: ReportedRunnerFacts, *, declared_subscriptions: tuple[DeclaredSubscription, ...] | None
+    ) -> list[SubscriptionUsageView]:
+        """Every subscription's rendered view (blizzard#636). With a roster declared, this
+        is one view per declared slug, whatever the age of its sample — the roster, not
+        reporting, now decides membership (D4); a slug reported but no longer declared is
+        simply absent, its rows untouched. With no roster declared, this is the
+        reported-slug union it has always been (blizzard#504 D7). No staleness gate on
+        either path: unlike the real hub, this mock never ages a report out on its own."""
+        if declared_subscriptions is not None:
+            return MockHubService._roster_views(declared_subscriptions, reported)
+        return MockHubService._reported_views(reported)
+
+    @staticmethod
+    def _roster_views(
+        roster: tuple[DeclaredSubscription, ...], reported: ReportedRunnerFacts
+    ) -> list[SubscriptionUsageView]:
+        """D4's roster-gated membership — one view per declared slug; a duplicate declared
+        slug collapses, first wins."""
+        declared: dict[str, DeclaredSubscription] = {}
+        for declaration in roster:
+            declared.setdefault(declaration.slug, declaration)
+        views: list[SubscriptionUsageView] = []
+        for slug in sorted(declared):
+            declaration = declared[slug]
+            sample = reported.subscription_usage.get(slug)
+            miss = reported.subscription_usage_misses.get(slug)
+            views.append(
+                SubscriptionUsageView(
+                    slug=slug,
+                    name=declaration.name,
+                    sampled_at=sample.sampled_at if sample is not None else None,
+                    windows=sample.windows if sample is not None else [],
+                    condition=_CREDENTIAL_LAPSED_CONDITION if MockHubService._lapsed(sample, miss) else None,
+                    miss_reason=miss.reason if miss is not None else None,
+                    missed_at=miss.missed_at.isoformat() if miss is not None else None,
+                )
+            )
+        return views
+
+    @staticmethod
+    def _reported_views(reported: ReportedRunnerFacts) -> list[SubscriptionUsageView]:
+        """The rosterless fallback — unioned across samples and misses by slug (blizzard#504
+        D7): a slug whose newest miss is a ``credential_lapsed`` newer than its newest (or
+        absent) sample renders as a miss-only, lapsed row; every other slug with a sample
+        renders it unchanged."""
         slugs = sorted(set(reported.subscription_usage) | set(reported.subscription_usage_misses))
         views: list[SubscriptionUsageView] = []
         for slug in slugs:
             sample = reported.subscription_usage.get(slug)
             miss = reported.subscription_usage_misses.get(slug)
-            lapsed = False
-            if miss is not None and miss.reason == _CREDENTIAL_LAPSED_CONDITION:
-                lapsed = (
-                    sample is None
-                    or sample.sampled_at is None
-                    or miss.missed_at > datetime.fromisoformat(sample.sampled_at)
-                )
-            if lapsed:
-                assert miss is not None  # narrowed by `lapsed`'s own condition above
+            if MockHubService._lapsed(sample, miss):
+                assert miss is not None  # narrowed by `_lapsed`'s own condition
                 views.append(
                     SubscriptionUsageView(
-                        slug=slug, name=miss.name, sampled_at=None, windows=[], condition=_CREDENTIAL_LAPSED_CONDITION
+                        slug=slug,
+                        name=miss.name,
+                        sampled_at=None,
+                        windows=[],
+                        condition=_CREDENTIAL_LAPSED_CONDITION,
+                        miss_reason=miss.reason,
+                        missed_at=miss.missed_at.isoformat(),
                     )
                 )
             elif sample is not None:
-                views.append(sample)
+                views.append(
+                    sample.model_copy(
+                        update={
+                            "miss_reason": miss.reason if miss is not None else None,
+                            "missed_at": miss.missed_at.isoformat() if miss is not None else None,
+                        }
+                    )
+                )
         return views
+
+    @staticmethod
+    def _lapsed(sample: SubscriptionUsageView | None, miss: SubscriptionUsageMiss | None) -> bool:
+        """``True`` iff this slug's newest miss is a ``credential_lapsed`` newer than its
+        newest (or absent) sample. No staleness gate on either path: this mock never ages a
+        report out on its own."""
+        if miss is None or miss.reason != _CREDENTIAL_LAPSED_CONDITION:
+            return False
+        return sample is None or sample.sampled_at is None or miss.missed_at > datetime.fromisoformat(sample.sampled_at)
 
     def set_paused(self, runner_id: str, paused: bool) -> None:
         row = self._state.get_runner(runner_id)

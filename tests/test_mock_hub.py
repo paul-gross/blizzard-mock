@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES, MockHubService
+from blizzard_mock.mock_hub.domain.state import DeclaredSubscription
 
 _SPEC = {
     "entry": "build",
@@ -292,6 +293,243 @@ def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClien
 
     client.post("/api/fleet/runners", json={"runner_id": "r-cap-2", "workspace_id": "ws"})
     assert _registered_capabilities(client, "r-cap-2") == ()
+
+
+# --- declared subscription roster (blizzard#636) -----------------------------
+
+
+def _declared_subscriptions(client: TestClient, runner_id: str) -> tuple[DeclaredSubscription, ...] | None:
+    """A registered runner's stored declared roster, read from the composition root's own
+    service directly — mirrors ``_registered_capabilities``."""
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    row = service._state.get_runner(runner_id)
+    assert row is not None
+    return row.declared_subscriptions
+
+
+def test_registration_without_a_roster_stores_none(client: TestClient) -> None:
+    """A registration carrying no ``subscriptions`` key stores ``None`` — the rosterless
+    fallback, kept distinct from a declared-but-empty roster (D1)."""
+    assert client.post("/api/fleet/runners", json={"runner_id": "r-no-roster", "workspace_id": "ws"}).status_code == 201
+    assert _declared_subscriptions(client, "r-no-roster") is None
+
+
+def test_registration_with_an_empty_roster_stores_empty_not_none(client: TestClient) -> None:
+    """A declared-but-empty roster (``subscriptions: []``) is kept distinct from an absent
+    one (D1) — both round-trip through the store rather than collapsing together."""
+    reg = client.post(
+        "/api/fleet/runners", json={"runner_id": "r-empty-roster", "workspace_id": "ws", "subscriptions": []}
+    )
+    assert reg.status_code == 201, reg.text
+    assert _declared_subscriptions(client, "r-empty-roster") == ()
+
+
+def test_registration_accepts_and_stores_a_subscription_roster(client: TestClient) -> None:
+    """blizzard#636 — the runner's declared roster round-trips into the stored registry
+    row, mirroring the real hub's own registration write."""
+    reg = client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-roster",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    assert reg.status_code == 201, reg.text
+    roster = _declared_subscriptions(client, "r-roster")
+    assert roster is not None
+    assert len(roster) == 1
+    assert roster[0].slug == "anthropic"
+    assert roster[0].name == "Anthropic"
+    assert roster[0].provider == "anthropic"
+
+
+def test_reregistration_replaces_the_roster_whole_including_dropping_to_empty(client: TestClient) -> None:
+    """Unconditional overwrite (blizzard#636), like ``capabilities``: a re-registration
+    dropping a slug leaves no trace of it, and one omitting the field entirely reverts to
+    the rosterless ``None``."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-roster-2",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    first_roster = _declared_subscriptions(client, "r-roster-2")
+    assert first_roster is not None
+    assert len(first_roster) == 1
+
+    client.post("/api/fleet/runners", json={"runner_id": "r-roster-2", "workspace_id": "ws", "subscriptions": []})
+    assert _declared_subscriptions(client, "r-roster-2") == ()
+
+    client.post("/api/fleet/runners", json={"runner_id": "r-roster-2", "workspace_id": "ws"})
+    assert _declared_subscriptions(client, "r-roster-2") is None
+
+
+def test_runner_view_lists_a_never_sampled_declared_slug_as_a_member(client: TestClient) -> None:
+    """D4 — a declared slug is a member whatever the age of its sample, including one
+    that has never sampled or missed at all."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-never",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "probe", "name": "Probe", "provider": "none-such"}],
+        },
+    )
+    view = client.get("/api/fleet/runners/r-never").json()
+    assert view["subscriptions"] == [
+        {
+            "slug": "probe",
+            "name": "Probe",
+            "sampled_at": None,
+            "windows": [],
+            "condition": None,
+            "miss_reason": None,
+            "missed_at": None,
+        }
+    ]
+
+
+def test_runner_view_drops_a_slug_no_longer_declared_while_its_sample_persists(client: TestClient) -> None:
+    """D4 — a slug removed from the roster is no longer a member, even though its sampled
+    report persists and resumes the moment it is redeclared."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-drop",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r-drop",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "anthropic",
+                        "name": "Anthropic",
+                        "sampled_at": "2026-08-01T12:00:00+00:00",
+                        "windows": [],
+                    },
+                }
+            ],
+        },
+    )
+    assert len(client.get("/api/fleet/runners/r-drop").json()["subscriptions"]) == 1
+
+    client.post("/api/fleet/runners", json={"runner_id": "r-drop", "workspace_id": "ws", "subscriptions": []})
+    assert client.get("/api/fleet/runners/r-drop").json()["subscriptions"] == []
+
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-drop",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    redeclared = client.get("/api/fleet/runners/r-drop").json()["subscriptions"]
+    assert len(redeclared) == 1
+    assert redeclared[0]["sampled_at"] == "2026-08-01T12:00:00+00:00"
+
+
+def test_runner_view_a_reported_slug_never_declared_is_absent_with_a_roster(client: TestClient) -> None:
+    """D4 — with a roster declared, a reported slug outside it is simply absent, unlike
+    the rosterless union path."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-undeclared",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r-undeclared",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.sampled",
+                    "payload": {
+                        "slug": "openai",
+                        "name": "OpenAI",
+                        "sampled_at": "2026-08-01T12:00:00+00:00",
+                        "windows": [],
+                    },
+                }
+            ],
+        },
+    )
+    view = client.get("/api/fleet/runners/r-undeclared").json()["subscriptions"]
+    assert [s["slug"] for s in view] == ["anthropic"]
+
+
+def test_runner_view_a_duplicate_declared_slug_collapses_first_wins(client: TestClient) -> None:
+    """D4 — a duplicate declared slug collapses to one member, the first one wins."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-dup",
+            "workspace_id": "ws",
+            "subscriptions": [
+                {"slug": "anthropic", "name": "First", "provider": "anthropic"},
+                {"slug": "anthropic", "name": "Second", "provider": "anthropic"},
+            ],
+        },
+    )
+    view = client.get("/api/fleet/runners/r-dup").json()["subscriptions"]
+    assert [s["name"] for s in view] == ["First"]
+
+
+def test_runner_view_a_declared_lapsed_miss_has_no_age_gate(client: TestClient) -> None:
+    """D4 — on the roster path, a lapsed miss outranks an absent sample with no staleness
+    gate on either operand."""
+    client.post(
+        "/api/fleet/runners",
+        json={
+            "runner_id": "r-roster-lapsed",
+            "workspace_id": "ws",
+            "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
+        },
+    )
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r-roster-lapsed",
+            "facts": [
+                {
+                    "seq": 1,
+                    "kind": "external_subscription_usage.missed",
+                    "payload": {
+                        "slug": "anthropic",
+                        "name": "Anthropic",
+                        "missed_at": "2026-08-01T12:00:00+00:00",
+                        "reason": "credential_lapsed",
+                    },
+                }
+            ],
+        },
+    )
+    view = client.get("/api/fleet/runners/r-roster-lapsed").json()["subscriptions"]
+    assert view == [
+        {
+            "slug": "anthropic",
+            "name": "Anthropic",
+            "sampled_at": None,
+            "windows": [],
+            "condition": "credential_lapsed",
+            "miss_reason": "credential_lapsed",
+            "missed_at": "2026-08-01T12:00:00+00:00",
+        }
+    ]
 
 
 # --- matched fleet peek (blizzard#433 Phase 3) -------------------------------
@@ -1055,6 +1293,8 @@ def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client
             "sampled_at": "2026-08-01T12:00:00+00:00",
             "windows": [],
             "condition": None,
+            "miss_reason": None,
+            "missed_at": None,
         }
     ]
 
@@ -1140,6 +1380,8 @@ def test_malformed_usage_windows_are_omitted_and_a_later_valid_empty_sample_rend
             "sampled_at": "2026-08-01T12:01:00+00:00",
             "windows": [],
             "condition": None,
+            "miss_reason": None,
+            "missed_at": None,
         }
     ]
 
@@ -1426,7 +1668,15 @@ def test_a_miss_with_no_prior_sample_renders_a_miss_only_lapsed_row(client: Test
     assert ack.json()["applied"] == [1]
 
     assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == [
-        {"slug": "openai", "name": "OpenAI", "sampled_at": None, "windows": [], "condition": "credential_lapsed"}
+        {
+            "slug": "openai",
+            "name": "OpenAI",
+            "sampled_at": None,
+            "windows": [],
+            "condition": "credential_lapsed",
+            "miss_reason": "credential_lapsed",
+            "missed_at": "2026-08-01T12:00:00+00:00",
+        }
     ]
 
 
@@ -1472,7 +1722,15 @@ def test_a_miss_newer_than_the_sample_supersedes_it_as_a_lapsed_row(client: Test
 
     view = client.get("/api/fleet/runners/r1").json()["subscriptions"]
     assert view == [
-        {"slug": "openai", "name": "OpenAI", "sampled_at": None, "windows": [], "condition": "credential_lapsed"}
+        {
+            "slug": "openai",
+            "name": "OpenAI",
+            "sampled_at": None,
+            "windows": [],
+            "condition": "credential_lapsed",
+            "miss_reason": "credential_lapsed",
+            "missed_at": "2026-08-01T12:05:00+00:00",
+        }
     ]
 
 
@@ -1524,6 +1782,8 @@ def test_a_sample_newer_than_the_miss_clears_the_condition(client: TestClient) -
             "sampled_at": "2026-08-01T12:05:00+00:00",
             "windows": [],
             "condition": None,
+            "miss_reason": "credential_lapsed",
+            "missed_at": "2026-08-01T12:00:00+00:00",
         }
     ]
 

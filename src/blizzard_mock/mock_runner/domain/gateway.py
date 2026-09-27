@@ -14,8 +14,17 @@ class IHubGateway(Protocol):
     """The mock runner's client of a hub API. Outbound-only, raw responses."""
 
     def register(
-        self, runner_id: str, *, workspace_id: str, capabilities: list[dict[str, Any]] | None = None
-    ) -> tuple[int, dict[str, Any]]: ...
+        self,
+        runner_id: str,
+        *,
+        workspace_id: str,
+        capabilities: list[dict[str, Any]] | None = None,
+        subscriptions: list[dict[str, Any]] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        """``subscriptions`` (blizzard#636) is forwarded only when supplied — ``None``
+        omits the key entirely, driving the hub's rosterless fallback."""
+        ...
+
     def peek(self) -> tuple[int, dict[str, Any]]: ...
 
     #: The matched fleet peek — ``POST /queue/peek``, identified by ``runner_id`` (``None``
