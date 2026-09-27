@@ -96,15 +96,21 @@ registration lands. A usage sample or miss must carry a non-empty `slug`; its pa
 coerced at ingest (defaulted `sampled_at`/`missed_at`, unusable windows dropped), so an
 accepted fact can never make a later read raise. Held per `(runner_id, slug)`, one
 subscription's sample never overwrites a sibling's (nor does a miss overwrite a sample,
-or vice versa), and `RunnerView.subscriptions` carries every reported slug's own view.
+or vice versa).
 
-A slug's view is the union of its sample and its miss (D7): when the newest miss carries
-`credential_lapsed` and postdates the newest (or absent) sample, that slug renders as a
-miss-only row — `sampled_at: null`, `windows: []`, `condition: "credential_lapsed"` — in
-place of its sample, or in place of nothing at all if it was never sampled. A miss with
-any other reason, or one that predates the newest sample, never surfaces as a
-`condition` — `RunnerView.subscriptions[].condition` is `null` for every other slug.
-Unlike the real hub, this mock applies no staleness gate to either a sample or a miss.
+A registration's own declared roster (`RunnerRegistration.declared_subscriptions`,
+blizzard#636 D4) decides `RunnerView.subscriptions`' membership when one is declared:
+one view per declared slug, whatever the age of its sample — a slug reported but no
+longer declared is simply absent, its rows untouched. With no roster declared,
+membership falls back to the reported-slug union it has always been (blizzard#504 D7).
+On both paths a slug's view is the union of its sample and its miss: when the newest
+miss carries `credential_lapsed` and postdates the newest (or absent) sample, that slug
+renders as a miss-only row — `sampled_at: null`, `windows: []`, `condition:
+"credential_lapsed"` — in place of its sample, or in place of nothing at all if it was
+never sampled. A miss with any other reason, or one that predates the newest sample,
+never surfaces as a `condition` — `RunnerView.subscriptions[].condition` is `null` for
+every other slug. Unlike the real hub, this mock applies no staleness gate to either a
+sample or a miss.
 
 ## Control plane
 
