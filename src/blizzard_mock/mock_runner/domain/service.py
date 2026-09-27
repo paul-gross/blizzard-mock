@@ -88,8 +88,8 @@ class MockRunnerService:
         """Register with the hub. ``capabilities`` (blizzard#433) is the raw
         ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
         settable directly, with no real harness adapter behind it. ``subscriptions``
-        (blizzard#636) is forwarded only when supplied, driving the hub's rosterless
-        fallback when it is left out (D12)."""
+        is forwarded only when supplied, driving the hub's rosterless fallback when it
+        is left out."""
         self._apply_delay(None)
         status, body = self._gw.register(
             self._runner_id,

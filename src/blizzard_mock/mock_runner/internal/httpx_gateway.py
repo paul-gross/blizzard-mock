@@ -43,9 +43,8 @@ class HttpxHubGateway:
             "workspace_id": workspace_id,
             "capabilities": capabilities or [],
         }
-        # `subscriptions` rides only when supplied (blizzard#636 D12) — an absent key lets
-        # the receiving hub default it to `None` itself, driving the rosterless fallback
-        # exactly as an older runner would, rather than defaulting it to `[]` here.
+        # `subscriptions` rides only when supplied, letting the hub default it to `None`
+        # itself rather than defaulting it to `[]` here.
         if subscriptions is not None:
             body["subscriptions"] = subscriptions
         return self._post(f"{_API}/runners", body)

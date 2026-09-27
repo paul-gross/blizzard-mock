@@ -45,9 +45,9 @@ class RunnerCapabilityBody(MirroredWireBody):
 
 
 class RunnerSubscriptionDeclarationBody(MirroredWireBody):
-    """Mirrors ``blizzard.wire.runner.RunnerSubscriptionDeclaration`` field-for-field
-    (blizzard#636) — the roster element inside ``RunnerRegistrationBody``, promoted to a
-    checked mirror the same way :class:`RunnerCapabilityBody` is."""
+    """Mirrors ``blizzard.wire.runner.RunnerSubscriptionDeclaration`` field-for-field —
+    the roster element inside ``RunnerRegistrationBody``, promoted to a checked mirror
+    the same way :class:`RunnerCapabilityBody` is."""
 
     slug: str
     name: str
@@ -98,9 +98,7 @@ class RunnerRegistrationBody(BaseModel):
     redirect_uris: list[str] = Field(default_factory=list)
     # The runner's capability snapshot — every harness/tier it can execute right now.
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
-    # The runner's declared subscription roster (blizzard#636) — `None` means no roster
-    # reported (the rosterless fallback applies), `[]` means it declared none; kept
-    # distinct all the way to `MockHubService.register`.
+    # The runner's declared subscription roster — kept distinct from an absent one.
     subscriptions: list[RunnerSubscriptionDeclarationBody] | None = None
 
 

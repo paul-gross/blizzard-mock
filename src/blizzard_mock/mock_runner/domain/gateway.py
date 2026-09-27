@@ -21,8 +21,8 @@ class IHubGateway(Protocol):
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        """``subscriptions`` (blizzard#636) is forwarded only when supplied — ``None``
-        omits the key entirely, driving the hub's rosterless fallback."""
+        """``subscriptions`` is forwarded only when supplied — ``None`` omits the key
+        entirely, driving the hub's rosterless fallback."""
         ...
 
     def peek(self) -> tuple[int, dict[str, Any]]: ...
