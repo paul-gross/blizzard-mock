@@ -114,7 +114,7 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     assert len(runners) == 1, f"expected exactly one registered runner, got {runners!r}"
     row = runners[0]
 
-    # `known_harnesses` now binds two adapters (blizzard#436's OpenCode binding joined
+    # `known_harnesses` now binds two adapters (the OpenCode binding joined
     # Claude Code's), so the snapshot carries one capability per bound harness.
     assert len(row.capabilities) == 2, f"expected exactly two capabilities, got {row.capabilities!r}"
     by_harness = {c.harness_id: c for c in row.capabilities}
@@ -129,6 +129,6 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     opencode = by_harness["opencode"]
     assert opencode.default is False
     assert opencode.version is None or isinstance(opencode.version, str)
-    # OpenCode ships no built-in tier table (D6): with no operator `[opencode.models.aliases]`
+    # OpenCode ships no built-in tier table: with no operator `[opencode.models.aliases]`
     # configured, it resolves nothing yet, still registering with an empty tier set.
     assert opencode.tiers == ()

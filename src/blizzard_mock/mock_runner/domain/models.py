@@ -58,7 +58,7 @@ class ClaimBody(BaseModel):
 
 
 class ClaimNextBody(BaseModel):
-    """POST /_drive/claim-next — peek, select, and claim in one call (blizzard#459).
+    """POST /_drive/claim-next — peek, select, and claim in one call.
 
     ``strict`` mirrors the real runner's ``[queue] strict``: off (the default) reaches
     past a marked head for the first unmarked entry, ``True`` holds at a marked head."""
@@ -92,8 +92,8 @@ class ChunkStatusesQueryBody(BaseModel):
 
 
 class GitCommitDeclarationBody(BaseModel):
-    """POST /api/leases/{lease_id}/git-commits — the served route's wire body (issue #143,
-    Phase 3), mirroring the real runner's ``wire.git_commits.GitCommitDeclarationRequest``.
+    """POST /api/leases/{lease_id}/git-commits — the served route's wire body, mirroring
+    the real runner's ``wire.git_commits.GitCommitDeclarationRequest``.
     ``forge`` is worker-declared (decision R7) — carried verbatim, no hub interaction: the
     declaration is purely local to the (mock) runner, exactly as it is on the real one."""
 
@@ -105,7 +105,7 @@ class GitCommitDeclarationBody(BaseModel):
 
 class DeclareGitCommitBody(BaseModel):
     """POST /_drive/declare-git-commit — drive a git-commit declaration directly
-    against the mock runner's own local store (issue #143), without a raw
+    against the mock runner's own local store, without a raw
     client to the lease-scoped served route.
     """
 
@@ -128,7 +128,7 @@ class EscalateBody(BaseModel):
 
     chunk_id: str
     takeover_command: str = ""
-    #: The ``blizzard runner takeover`` wrapped entry point (issue #251),
+    #: The ``blizzard runner takeover`` wrapped entry point,
     #: carried alongside the raw ``takeover_command``.
     wrapped_takeover_command: str = ""
 
@@ -145,7 +145,7 @@ class DecideBody(BaseModel):
 
 class AskBody(BaseModel):
     """POST /_drive/ask — push a ``question.asked`` fact, minting a pollable question
-    hub-side. ``harness_id`` (D8) rides through unresolved — ``MockRunnerService.ask``
+    hub-side. ``harness_id`` rides through unresolved — ``MockRunnerService.ask``
     is the one place ``None`` resolves to the Claude Code compatibility value."""
 
     chunk_id: str
@@ -162,9 +162,9 @@ class PollAnswerBody(BaseModel):
 
 class PushTranscriptBody(BaseModel):
     """POST /_drive/push-transcript — push one transcript segment record via
-    ``POST /transcripts`` (blizzard#246/#247), the transcript lane's counterpart to
+    ``POST /transcripts``, the transcript lane's counterpart to
     ``AskBody``'s ``/events`` push. ``turns`` defaults to one placeholder turn when
-    empty; ``harness_id`` (D8) rides through unresolved, same as ``AskBody``'s."""
+    empty; ``harness_id`` rides through unresolved, same as ``AskBody``'s."""
 
     chunk_id: str
     segment_id: str = "sg_mock"
@@ -188,8 +188,8 @@ class ResumeBody(BaseModel):
 
 
 class ReportEventBody(BaseModel):
-    """POST /_drive/report-event — push one ``event.recorded`` operational-event fact
-    (issue #125). ``chunk_id`` is optional: a runner-scoped event names none."""
+    """POST /_drive/report-event — push one ``event.recorded`` operational-event fact.
+    ``chunk_id`` is optional: a runner-scoped event names none."""
 
     severity: str
     kind: str
@@ -202,7 +202,7 @@ class ReportEventBody(BaseModel):
 
 class ReportExternalUsageBody(BaseModel):
     """POST /_drive/report-external-usage — push one
-    ``external_subscription_usage.sampled`` fact naming an arbitrary ``slug`` (issue #218),
+    ``external_subscription_usage.sampled`` fact naming an arbitrary ``slug``,
     without waiting on a real runner's sampling cadence. ``name`` is optional — additive on
     the real wire, omitted defaults to ``slug`` at the hub."""
 
@@ -225,7 +225,7 @@ class ReportExternalUsageBody(BaseModel):
 
 class ReportExternalUsageMissBody(BaseModel):
     """POST /_drive/report-external-usage-miss — push one ``external_subscription_usage.missed``
-    fact naming an arbitrary ``slug`` (blizzard#504 D7), the miss-half sibling of
+    fact naming an arbitrary ``slug``, the miss-half sibling of
     :class:`ReportExternalUsageBody`. ``name`` is optional (the hub defaults it to ``slug``);
     ``reason`` is the sampler's closed-set miss reason — never a token, refresh token, or path."""
 

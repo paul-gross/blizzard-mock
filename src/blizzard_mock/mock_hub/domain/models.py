@@ -82,7 +82,7 @@ class GardenProposalItemOutcome(StrEnum):
 
 class GardenProposalOrigin(StrEnum):
     """Mirrors ``blizzard.hub.domain.garden_proposals.GardenProposalOrigin``
-    (value-identical, blizzard#631)."""
+    (value-identical)."""
 
     ROUTINE_RUN = "routine-run"
     OPERATOR = "operator"
@@ -107,11 +107,11 @@ class ChoiceSpec(BaseModel):
     name: str
     description: str = ""
     to: str  # a node id in the same chunk, or ``TERMINAL``
-    requires_checks: bool = False  # gate this edge on green checks (issue #114)
+    requires_checks: bool = False  # gate this edge on green checks
 
 
 class RotatePolicySpec(BaseModel):
-    """A declared session's rotation bounds (issue #144) — mirrors the hub's own."""
+    """A declared session's rotation bounds — mirrors the hub's own."""
 
     max_context_tokens: int | None = None
     max_transcript_bytes: int | None = None
@@ -123,7 +123,7 @@ class NodeSpec(BaseModel):
 
     executor: Executor = Executor.RUNNER
     session: SessionMode = SessionMode.RESUME
-    # The session reference target and effective declaration (issues #115, #144),
+    # The session reference target and effective declaration,
     # seeded per node (pinned by tests/test_mock_hub.py).
     session_source: str | None = None
     session_name: str | None = None
@@ -138,8 +138,8 @@ class NodeSpec(BaseModel):
     choices: list[ChoiceSpec] = Field(default_factory=list)
     produces: list[str] = Field(default_factory=list)
     checks: list[str] = Field(default_factory=list)
-    checks_cwd: str | None = None  # where the runner runs `checks:` (issue #114)
-    checks_timeout: int | None = None  # per-check timeout in seconds (issue #114)
+    checks_cwd: str | None = None  # where the runner runs `checks:`
+    checks_timeout: int | None = None  # per-check timeout in seconds
     retries_max: int | None = None
 
 
@@ -248,9 +248,9 @@ class GardenFindingSpec(BaseModel):
 
 class GardenAnsweredFindingSpec(GardenFindingSpec):
     """One seeded finding within a chunk's own answered-proposal set
-    (``GET /chunks/{id}/findings``, blizzard#397 Phase 1) — :class:`GardenFindingSpec`
+    (``GET /chunks/{id}/findings``) — :class:`GardenFindingSpec`
     plus its own ``routine_name``/``scope_slug`` rather than deriving them from a seeded
-    :class:`GardenRunSpec`: a minted chunk carries no run context at all (D6), so the two
+    :class:`GardenRunSpec`: a minted chunk carries no run context at all, so the two
     reads' seeding levers stay independent."""
 
     routine_name: str
@@ -291,8 +291,8 @@ class GardenProposalSpec(BaseModel):
 
 
 class AnalyticsCountRowSpec(BaseModel):
-    """One seeded counts row — mirrors the real hub's ``AnalyticsCountView``
-    (blizzard#545). The mock does not aggregate: this row is served as-is, whatever
+    """One seeded counts row — mirrors the real hub's ``AnalyticsCountView``.
+    The mock does not aggregate: this row is served as-is, whatever
     window the caller names."""
 
     key: str
@@ -300,8 +300,8 @@ class AnalyticsCountRowSpec(BaseModel):
 
 
 class AnalyticsSpendRowSpec(BaseModel):
-    """One seeded spend row — mirrors the real hub's ``AnalyticsSpendView``
-    (blizzard#545). Served as-is, whatever window the caller names."""
+    """One seeded spend row — mirrors the real hub's ``AnalyticsSpendView``.
+    Served as-is, whatever window the caller names."""
 
     key: str
     input_tokens: int
@@ -313,7 +313,7 @@ class AnalyticsSpendRowSpec(BaseModel):
 
 
 class AnalyticsSpec(BaseModel):
-    """A seeded chunk's canned analytics rows (blizzard#545) — one list per fleet
+    """A seeded chunk's canned analytics rows — one list per fleet
     counts/spend route, served whatever the caller's window, gated the same as
     ``garden_findings``/``garden_proposals`` on the chunk's own seeded
     :class:`GardenRunSpec` rather than a flag of its own."""
@@ -331,7 +331,7 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
-    # Both default to express no preference (issue #144), pinned by
+    # Both default to express no preference, pinned by
     # tests/test_pin_mock.py.
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
@@ -345,12 +345,12 @@ class ChunkSpec(BaseModel):
     garden_run: GardenRunSpec | None = None
     garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
     #: The findings the chunk's own accepted, minted garden proposal answers
-    #: (blizzard#397 Phase 1) — ``None`` for a chunk answering no such proposal.
+    #: — ``None`` for a chunk answering no such proposal.
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
     #: The chunk's own routine's open proposal bucket, seeded per chunk exactly like
     #: ``garden_findings`` — the real ``GardenProposal`` carries no chunk at all.
     garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
-    #: The chunk's own canned counts/spend rows (blizzard#545) — served as-is, gated on
+    #: The chunk's own canned counts/spend rows — served as-is, gated on
     #: ``garden_run`` exactly like the garden reads above.
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
 

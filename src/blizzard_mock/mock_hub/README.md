@@ -38,7 +38,7 @@ whole hub mirror sits under the fleet prefix. The mock stays warn-tolerant by
 construction — no `require_runner_principal` check, a tokenless call is served exactly
 like an enrolled one — but every received header is still recorded (`GET /_captured`)
 so a test can assert a real runner presented its bearer token. `POST
-/api/fleet/queue/peek` (blizzard#433 Phase 3) is the one exception: it demands a
+/api/fleet/queue/peek` is the one exception: it demands a
 `runner_id` naming an already-registered runner and refuses `401` without one — the
 mock carries no bearer-token registry to resolve a principal from a header, so it takes
 this identity as a query parameter instead (never inside the parity-checked request
@@ -48,7 +48,7 @@ body), mirroring the real hub's own always-raising demand on this one route.
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
-| `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek (blizzard#433 Phase 3) — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
+| `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
 | `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token (issue #84b) |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
@@ -63,11 +63,11 @@ body), mirroring the real hub's own always-raising demand on this one route.
 | `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}` |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
-| `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy (blizzard#247) |
-| `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record (blizzard#249) |
+| `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy |
+| `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and its reported per-slug usage collection |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
-| `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first (blizzard#582 D2) |
+| `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first |
 
 ## Batched fact push (`POST /api/fleet/events`)
 
@@ -85,9 +85,9 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `runner.locally_paused` | Sets the runner's `locally_paused`/`_by`/`_reason` (runner-scoped) |
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
-| `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled (issue #125) |
-| `external_subscription_usage.sampled` | Upserts the runner's newest sample for its `slug` — readable via `GET /runners/{id}` (issue #218) |
-| `external_subscription_usage.missed` | Upserts the runner's newest reported miss for its `slug`, in its own store, never touching the sample row (blizzard#504 D7) |
+| `event.recorded` | Accepted (no fence, no gate) — no operational event log modeled |
+| `external_subscription_usage.sampled` | Upserts the runner's newest sample for its `slug` — readable via `GET /runners/{id}` |
+| `external_subscription_usage.missed` | Upserts the runner's newest reported miss for its `slug`, in its own store, never touching the sample row |
 
 The four runner-scoped kinds — both `runner.locally_*` and the usage sample/miss pair —
 are held per `runner_id` and applied whether or not that runner has registered, so a
@@ -127,7 +127,7 @@ to either a sample or a miss.
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
   chunk answers no such proposal. `POST /_seed/reset` clears all state.
 - `POST /_seed/scopes {slug, description?, retired?, created_at?}` — upsert one scope
-  in the global vocabulary (blizzard#582 D2); a scenario seeds the end state it wants
+  in the global vocabulary; a scenario seeds the end state it wants
   directly rather than replaying create/retire. Seeding the same `slug` twice replaces
   it.
 - `POST /_seed/answer {question_id, answer, answered_by?}` — test-control only, plays
@@ -157,12 +157,12 @@ to either a sample or a miss.
 | `drop_ack` | — | Apply the completion's write, then answer 503 — the ack is dropped though the transition landed; the re-flush is idempotent (D-090) |
 | `conflicting_fact` | `{runner_id}` | `GET /chunks/{id}` reports a route held by a *different* runner — a conflicting locator fact |
 | `unreachable` | `remaining?` | All requests → 503; `remaining=N` heals after N calls (go unreachable *mid-lease*) |
-| `unreachable_transcripts` | `remaining?` | `POST /transcripts` alone → 503; every other route (incl. `/events`) stays healthy (D6) |
-| `delay_transcripts` | `{ms}` | `POST /transcripts` alone sleeps `ms`; every other route (incl. `/events`) stays fast (D6) |
+| `unreachable_transcripts` | `remaining?` | `POST /transcripts` alone → 503; every other route (incl. `/events`) stays healthy |
+| `delay_transcripts` | `{ms}` | `POST /transcripts` alone sleeps `ms`; every other route (incl. `/events`) stays fast |
 | `replay` | — | The next completion returns the *previous* apply-response replayed — a duplicate delivery, no re-advance |
 | `stale_envelope` | — | `GET /chunks/{id}/envelope` stamps a stale (`latest_epoch-1`) fence, so a completion from it is fenced out (D-007) |
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
-| `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency (blizzard#458); `GET /queue/peek` marks the same chunk `blocked` (blizzard#459), read without consuming — sticky until cleared |
+| `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency; `GET /queue/peek` marks the same chunk `blocked`, read without consuming — sticky until cleared |
 
 Every lever is optionally scoped to one `chunk_id` and may self-expire after
 `remaining` affected requests. The control plane and liveness are exempt from the

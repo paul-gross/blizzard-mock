@@ -59,9 +59,9 @@ class MockRunnerService:
         #: Monotonic sequence for facts that are not chunk-scoped leases —
         #: independent of a ``Held``'s own per-chunk lease-fact counter.
         self._runner_seq = 0
-        #: The transcript lane's own sequence (D3) — independent of ``_runner_seq``'s.
+        #: The transcript lane's own sequence — independent of ``_runner_seq``'s.
         self._transcript_seq = 0
-        #: The mock's own local git-commit declaration store (issue #143) —
+        #: The mock's own local git-commit declaration store —
         #: ``lease_id -> repo -> {forge, repo, branch, commit}``, latest-wins.
         self._git_commit_declarations: dict[str, dict[str, dict[str, str]]] = {}
 
@@ -85,7 +85,7 @@ class MockRunnerService:
     def register(
         self, *, capabilities: list[dict[str, Any]] | None = None, subscriptions: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:
-        """Register with the hub. ``capabilities`` (blizzard#433) is the raw
+        """Register with the hub. ``capabilities`` is the raw
         ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
         settable directly, with no real harness adapter behind it. ``subscriptions``
         is forwarded only when supplied, driving the hub's rosterless fallback when it
@@ -139,7 +139,7 @@ class MockRunnerService:
         return {"claimed": True, "status": status, "from_node_id": node_id, "epoch": held_epoch, "response": body}
 
     def claim_next(self, environment_ids: list[str], *, strict: bool = False) -> dict[str, Any]:
-        """Peek, select, and claim in one call (blizzard#459) — the mock's structural
+        """Peek, select, and claim in one call — the mock's structural
         sibling of the real runner's ``ReadyQueue`` peek seam. Reach-ahead by default:
         the first unmarked entry at any depth in the peeked list; ``strict`` holds at a
         marked head and claims nothing instead."""
@@ -244,7 +244,7 @@ class MockRunnerService:
 
     def declare_git_commit(self, lease_id: str, *, forge: str, repo: str, branch: str, commit: str) -> dict[str, Any]:
         """Record a worker's explicit git-commit declaration for ``repo`` against
-        ``lease_id`` (issue #143, Phase 3) — the mock's own structural sibling of the real
+        ``lease_id`` — the mock's own structural sibling of the real
         runner's ``GitCommitDeclarationService.declare``. Append-and-read-newest per
         ``(lease_id, repo)``, no hub call: the served route and the ``/_drive/*`` lever
         both land here."""
@@ -258,7 +258,7 @@ class MockRunnerService:
 
     def git_commits_for_lease(self, lease_id: str) -> dict[str, dict[str, str]]:
         """The lease's declared git commits, newest per repo — the read-back a service
-        test drives via ``/_drive/get-git-commits`` (issue #143, Phase 3)."""
+        test drives via ``/_drive/get-git-commits``."""
         return dict(self._git_commit_declarations.get(lease_id, {}))
 
     def escalate(
@@ -307,7 +307,7 @@ class MockRunnerService:
         harness_id: str | None = None,
     ) -> dict[str, Any]:
         """Push a ``question.asked`` fact via ``/events`` — mints a pollable question
-        hub-side. ``harness_id`` (D8) defaults to Claude Code when omitted (``None``) —
+        hub-side. ``harness_id`` defaults to Claude Code when omitted (``None``) —
         the one place that default is applied; callers pass what they received through."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
@@ -344,10 +344,10 @@ class MockRunnerService:
         record_truncated: bool = False,
         harness_id: str | None = None,
     ) -> dict[str, Any]:
-        """Push one transcript segment record via ``/transcripts`` (blizzard#246/#247) —
+        """Push one transcript segment record via ``/transcripts`` —
         the transcript lane's counterpart to ``ask``'s ``/events`` push, letting a
         hub-service test drive a transcript push from a mock runner rather than a raw
-        client. ``harness_id`` (D8) defaults to Claude Code when omitted, like :meth:`ask`."""
+        client. ``harness_id`` defaults to Claude Code when omitted, like :meth:`ask`."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
@@ -420,7 +420,7 @@ class MockRunnerService:
         node_name: str | None = None,
         detail: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Push one ``event.recorded`` operational-event fact via ``/events`` (issue #125).
+        """Push one ``event.recorded`` operational-event fact via ``/events``.
 
         ``chunk_id`` is optional — a runner-scoped event names none, exactly like
         ``pause``/``resume``. Not fence-advancing, so no held lease is required."""
@@ -451,8 +451,8 @@ class MockRunnerService:
         windows: list[dict[str, Any]],
         name: str | None = None,
     ) -> dict[str, Any]:
-        """Push one ``external_subscription_usage.sampled`` fact via ``/events``
-        (issue #218), per-slug — the driven counterpart to a real runner's own
+        """Push one ``external_subscription_usage.sampled`` fact via ``/events``,
+        per-slug — the driven counterpart to a real runner's own
         tick-scheduled sample, so a test can land an arbitrary slug's usage without
         waiting on a cadence. Runner-scoped, like ``report_event``: no chunk_id/lease_id,
         no held lease required."""
@@ -477,8 +477,8 @@ class MockRunnerService:
         reason: str,
         name: str | None = None,
     ) -> dict[str, Any]:
-        """Push one ``external_subscription_usage.missed`` fact via ``/events`` (blizzard#504
-        D7), per-slug — the sibling drive verb to :meth:`report_external_usage` for the miss
+        """Push one ``external_subscription_usage.missed`` fact via ``/events``,
+        per-slug — the sibling drive verb to :meth:`report_external_usage` for the miss
         half of a sample attempt. Runner-scoped, like it: no chunk_id/lease_id, no held
         lease required. ``reason`` only crosses — never a token, a refresh token, or a path."""
         self._apply_delay(None)

@@ -153,7 +153,7 @@ class OpenCodeRunWire:
 
     def __init__(self) -> None:
         self._streamed_message_id: str | None = None
-        #: The misbehaviour plane (D7) — see ``helpers.py`` — spliced in by :meth:`render`.
+        #: The misbehaviour plane — see ``helpers.py`` — spliced in by :meth:`render`.
         self.wire_events: list[str] = []
 
     def render_identity(self, session_id: str) -> str:
@@ -169,7 +169,7 @@ class OpenCodeRunWire:
         lines: list[str] = []
         if self._streamed_message_id is None:
             lines.append(json.dumps(_step_start_event(session_id, message_id)))
-        # The misbehaviour plane (D7): mid-turn wire lines a behavior script staged,
+        # The misbehaviour plane: mid-turn wire lines a behavior script staged,
         # spliced in before the turn's own closing text/error record.
         lines.extend(self.wire_events)
         if result.is_error:
@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> None:
     existed."""
     args_list = sys.argv[1:] if argv is None else list(argv)
     if args_list and args_list[0] == "--version":
-        # The health probe (blizzard#438) shells out to this same binary, not only
+        # The health probe shells out to this same binary, not only
         # `emit`'s separate CLI-surface artifact — so `run` must answer `--version` too.
         print(_MOCK_VERSION)
         raise SystemExit(0)
@@ -336,7 +336,7 @@ def main(argv: list[str] | None = None) -> None:
         session_id=args.session,
         is_resume=is_resume,
         transcript_factory=_build_transcript_factory(cwd=cwd, env=env),
-        # Recorded onto the session state (issue #144, blizzard#343), never acted on —
+        # Recorded onto the session state, never acted on —
         # the mock is model-agnostic and never enforces a permission policy.
         model=args.model,
         effort=args.variant,

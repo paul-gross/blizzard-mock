@@ -15,7 +15,7 @@ from blizzard_mock.mock_hub.domain.state import RunnerCapability
 
 
 class QueueMatchPolicy(Enum):
-    """The matched fleet peek's hold-or-pass-over policy (D8) — applied to the
+    """The matched fleet peek's hold-or-pass-over policy — applied to the
     capability-eligibility and blocked-dependency dimensions together, never one alone.
     :meth:`of` never raises: an unrecognized wire value reads as :attr:`PASS_OVER`,
     mirroring ``blizzard.hub.domain.queue.QueueMatchPolicy``."""
@@ -69,7 +69,7 @@ def _effective_model(node: NodeSpec, chunk: ChunkState) -> list[str]:
 def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[RunnerCapability]) -> bool:
     """Whether some reported capability could serve ``node_id``'s effective session —
     the mock's own mirror of ``EligibilityCheck._lineage_satisfied``. A capability health
-    has withdrawn from selection (blizzard#438) satisfies no lineage, mirroring the real
+    has withdrawn from selection satisfies no lineage, mirroring the real
     hub's own filter."""
     node = chunk.node(node_id)
     if node is None:

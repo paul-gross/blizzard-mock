@@ -175,7 +175,7 @@ def test_crash_yields_error_run(fenced_repo) -> None:
 
 
 def test_usage_limited_writes_the_synthetic_rate_limit_transcript_record(fenced_repo, tmp_path) -> None:
-    """blizzard#594: ``usage_limited()`` writes the verbatim 2026-09-05 shape — a
+    """``usage_limited()`` writes the verbatim 2026-09-05 shape — a
     synthetic assistant record with ``isApiErrorMessage: true``/``error: "rate_limit"``
     — and still ends the turn with an ordinary (non-error) envelope."""
     from blizzard_mock.harness.facades._transcript import ClaudeTranscriptWriter
@@ -435,7 +435,7 @@ def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo) 
 
 
 def test_claude_facade_node_entry_resume_continues_in_place(fenced_repo) -> None:
-    """A **spawn-shaped** node-entry resume (blizzard issue #115, Slice 6) — the
+    """A **spawn-shaped** node-entry resume — the
     extended real adapter's ``--resume <sid> <preamble+script>`` form, carrying the
     *same* full node preamble + node script a fresh spawn gets, not a bare
     follow-up message — must run the entered node's script and keep the session
@@ -522,7 +522,7 @@ def test_claude_facade_bare_invocation_prints_usage(capsys) -> None:
 
 
 def test_claude_facade_version_is_intercepted_before_argparse_and_exits_0(capsys) -> None:
-    """The runner's health probe (blizzard#438, blizzard#606) shells out with only
+    """The runner's health probe shells out with only
     `--version` — answered before any fence check or argparse validation runs, mirroring
     `opencode.py`'s own `--version` interception, unlike the real CLI's argparse-error exit
     2 this facade used to give it."""
@@ -561,7 +561,7 @@ def test_plain_text_wire_renders_ask() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The runner's spawn preamble (blizzard issue #17)
+# The runner's spawn preamble
 # --------------------------------------------------------------------------- #
 
 
@@ -599,7 +599,7 @@ def test_preamble_prefixed_prompt_still_runs_its_script(fenced_repo) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The <behavior-script> tag (blizzard-mock issue #2)
+# The <behavior-script> tag
 # --------------------------------------------------------------------------- #
 
 #: Prose that is a SyntaxError if it ever reaches the interpreter — every tagged-prompt
@@ -840,7 +840,7 @@ def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_re
 
 
 # --------------------------------------------------------------------------- #
-# Whole-message mode (blizzard-mock issue #8): the entire message is the script
+# Whole-message mode: the entire message is the script
 # --------------------------------------------------------------------------- #
 
 
@@ -936,7 +936,7 @@ def test_whole_message_defaults_to_off_and_leaves_tagged_prompts_alone(fenced_re
 
 
 # --------------------------------------------------------------------------- #
-# The acquired worktree (blizzard issue #17: cwd is the workspace root)
+# The acquired worktree (cwd is the workspace root)
 # --------------------------------------------------------------------------- #
 
 
@@ -999,7 +999,7 @@ def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_
 
 
 # --------------------------------------------------------------------------- #
-# Conversation transcripts: the claude_code-only ITranscriptWriter (blizzard#29)
+# Conversation transcripts: the claude_code-only ITranscriptWriter
 # --------------------------------------------------------------------------- #
 
 
@@ -1253,7 +1253,7 @@ def test_synthesize_cost_usd_grows_with_token_counts() -> None:
     assert large > small
 
 
-# --- recorded model/effort flags (issue #144) --------------------------------
+# --- recorded model/effort flags --------------------------------
 
 
 def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool = False, **flags) -> None:
@@ -1314,7 +1314,7 @@ def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -
 
 
 def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_repo) -> None:
-    """`--autocompact` (blizzard#343) is recorded the same way as `--model`/`--effort` —
+    """`--autocompact` is recorded the same way as `--model`/`--effort` —
     reasserted on a resume, never acted on: the mock only ever sees argv."""
     cwd, env = fenced_repo
     _run_claude(cwd, env, "sess-3", "verdict('pass')", autocompact="150000")
@@ -1454,7 +1454,7 @@ def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo) 
 
 def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo) -> None:
     """The model/variant/permission flags an OpenCode turn was launched with land on the
-    same shared ``Invocation`` record every other facade uses (issue #144, blizzard#343)."""
+    same shared ``Invocation`` record every other facade uses."""
     cwd, env = fenced_repo
     proc = _run_opencode(
         cwd, env, "run", "--model", "anthropic/claude-opus-4", "--variant", "max", "--auto", "verdict('pass')"

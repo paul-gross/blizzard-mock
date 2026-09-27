@@ -95,7 +95,7 @@ EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
 
-#: The one miss reason surfaced as a per-slug `condition` (D7) — restated from the real hub, not imported.
+#: The one miss reason surfaced as a per-slug `condition` — restated from the real hub, not imported.
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
 
 
@@ -122,7 +122,7 @@ _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -> FindingView:
     """`f` projected to the real hub's own `FindingView` shape, `routine_name`/
     `scope_slug` supplied by the caller since a `GardenFindingSpec` carries neither
-    itself. The one place `test_wire_parity.py` can't scan (blizzard#397) — keep it the
+    itself. The one place `test_wire_parity.py` can't scan — keep it the
     only place either read builds this dict."""
     # `class_`'s alias is the Python keyword `class` — constructed by alias via
     # `model_validate`, the real hub's own `finding_view` shape.
@@ -213,12 +213,12 @@ class NoRunContext(Exception):
 
 class NoAnsweredProposal(Exception):
     """The chunk carries no seeded answered-proposal finding set — mirrors the real hub's
-    refusal of a chunk answering no accepted, minted garden proposal (blizzard#397)."""
+    refusal of a chunk answering no accepted, minted garden proposal."""
 
 
 class FindingNotInAnsweredSet(Exception):
     """A finding id was asked for by :meth:`MockHubService.answered_finding` but is not
-    among the chunk's own seeded answered set (blizzard#397)."""
+    among the chunk's own seeded answered set."""
 
 
 class SystemArtifactNotFound(Exception):
@@ -235,15 +235,14 @@ class ClaimConflict(Exception):
 
 class UnresolvableRunner(Exception):
     """The matched fleet peek's caller named no ``runner_id``, or one no registration
-    knows (blizzard#433 Phase 3, D7) — mirrors the real hub's ``401`` for an
+    knows — mirrors the real hub's ``401`` for an
     unresolvable principal, raised in every mode the mock supports (the mock carries no
     ``warn``/``enforce`` toggle at all, so this is the one check unconditionally on)."""
 
 
 class DependencyUnmet(Exception):
     """The chunk stands on a prerequisite the ``dependency_unmet`` lever names as not
-    ``done`` — the claim is refused with a 409 distinct from :class:`ClaimConflict`
-    (blizzard#458)."""
+    ``done`` — the claim is refused with a 409 distinct from :class:`ClaimConflict`."""
 
     def __init__(self, prerequisite_chunk_id: str) -> None:
         super().__init__(f"chunk depends on unmet prerequisite {prerequisite_chunk_id}")
@@ -252,8 +251,8 @@ class DependencyUnmet(Exception):
 
 class ClaimIncompatible(Exception):
     """The claiming runner's *currently stored* capabilities can no longer run every
-    statically reachable runner-owned lineage from the chunk's current node (blizzard#433
-    D9) — refused outright, mirroring :class:`DependencyUnmet`'s shape. A registration
+    statically reachable runner-owned lineage from the chunk's current node — refused
+    outright, mirroring :class:`DependencyUnmet`'s shape. A registration
     reporting no capabilities is never checked (see :meth:`MockHubService.claim`)."""
 
     def __init__(self, runner_id: str) -> None:
@@ -271,15 +270,15 @@ class MockHubService:
         #: Per-runner fact high-water mark — a seq at/under this mark is
         #: re-acked as ``already_applied`` rather than re-applied.
         self._fact_high_water: dict[str, int] = {}
-        #: The transcript lane's own high-water mark (blizzard#247, D7) — a separate
+        #: The transcript lane's own high-water mark — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
         #: Accepted bytes per chunk — the chunk-budget cap's running total.
         self._transcript_chunk_bytes: dict[str, int] = {}
-        #: The real hub's natural key (D8): a key's own accept/reject decision, independent of
+        #: The real hub's natural key: a key's own accept/reject decision, independent of
         #: seq, mirroring `IWriteTranscriptSegments.natural_key_state`. Absent reads as "absent".
         self._transcript_key_state: dict[tuple[str, int], str] = {}
-        #: Retained transcript records, keyed by lease (D2), then by each record's own
+        #: Retained transcript records, keyed by lease, then by each record's own
         #: natural key — only accepted records land here, so a capped one never reads back.
         self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
 
@@ -339,7 +338,7 @@ class MockHubService:
             raise SystemArtifactNotFound(f"no system artifact {name!r}")
         return SystemArtifactView(name=name, content=content)
 
-    # -- scopes (global vocabulary, blizzard#582 D2) ------------------------
+    # -- scopes (global vocabulary) ------------------------
 
     def seed_scope(self, spec: ScopeSpec) -> None:
         """Upsert one scope (``POST /_seed/scopes``) — global, mirrors the real hub's
@@ -367,7 +366,7 @@ class MockHubService:
         """Ready = seeded, unclaimed, not terminal — FIFO by insertion (D-080).
 
         Reads the ``dependency_unmet`` lever the same as :meth:`claim` does, but never
-        consumes it (blizzard#459) — the one lever reaches both surfaces, and the peek's
+        consumes it — the one lever reaches both surfaces, and the peek's
         read must not expire what the later claim still needs to see."""
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         entries = [
@@ -597,7 +596,7 @@ class MockHubService:
 
     def _garden_run_or_404(self, chunk_id: str) -> ChunkState:
         """The chunk a worker's own routine-run-scoped read is confined to — shared by
-        the garden reads and the analytics reads (blizzard#545), all of which 404 a
+        the garden reads and the analytics reads, all of which 404 a
         chunk seeded with no ``garden_run`` rather than answering an empty bucket."""
         chunk = self._require(chunk_id)
         if chunk.garden_run is None:
@@ -606,7 +605,7 @@ class MockHubService:
 
     def analytics_counts_files(self, chunk_id: str) -> AnalyticsCountsResponse:
         """Mirrors ``GET /api/fleet/chunks/{id}/analytics/counts/files`` — the chunk's
-        own seeded rows, served as-is (blizzard#545: the mock does not aggregate)."""
+        own seeded rows, served as-is (the mock does not aggregate)."""
         chunk = self._garden_run_or_404(chunk_id)
         return _counts_response(chunk.analytics.counts_files)
 
@@ -700,13 +699,13 @@ class MockHubService:
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
         )
 
-    # -- transcript intake (its own lane, its own high-water — D3) ---------
+    # -- transcript intake (its own lane, its own high-water) ---------
 
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own
-        high-water mark (blizzard#247, D7). Mirrors the real hub's two caps and its
-        natural-key short-circuit (D8), the state keyed by natural key rather than seq, and
-        retains each accepted record by lease (blizzard#249, D2) for
+        high-water mark. Mirrors the real hub's two caps and its
+        natural-key short-circuit, the state keyed by natural key rather than seq, and
+        retains each accepted record by lease for
         :meth:`lease_transcript` — a capped record is never retained, so it never reads back."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
@@ -743,7 +742,7 @@ class MockHubService:
         )
 
     def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
-        """The transcript lane's own read-back (D2) — one lease's retained turns across every
+        """The transcript lane's own read-back — one lease's retained turns across every
         spawn generation, ordered like the real store's ``records_for_lease``
         (``spawn_generation, segment_id, turn_range_start``) rather than by retention, which a
         flush or a re-offer can disorder. The mock has no caller-identity concept here at
@@ -834,14 +833,14 @@ class MockHubService:
             self._state.reported_facts(runner_id).subscription_usage[slug] = self._usage_view(payload, slug=slug)
             return True
         if kind == EXTERNAL_SUBSCRIPTION_USAGE_MISSED:
-            # Sibling to the sampled kind above (D7) — upserts per slug into its own
+            # Sibling to the sampled kind above — upserts per slug into its own
             # dict, never touching the sample a sibling slug (or this same slug) holds.
             slug = payload.get("slug")
             if not isinstance(slug, str) or not slug:
                 return False
             self._state.reported_facts(runner_id).subscription_usage_misses[slug] = self._usage_miss(payload, slug=slug)
             return True
-        # usage.recorded / event.recorded (issue #125) are accepted as no-ops.
+        # usage.recorded / event.recorded are accepted as no-ops.
         return kind in (USAGE_RECORDED, EVENT_RECORDED)
 
     # -- completion apply --------------------------------------------------
@@ -959,7 +958,7 @@ class MockHubService:
     def stop_chunk(self, chunk_id: str) -> None:
         """Test-control only (``POST /_seed/stop``) — plays the operator's stop verb, which
         the fleet mirror carries no route for. One write: the status goes terminal and the
-        live route releases in the same step, mirroring the real hub's stop (D2) so
+        live route releases in the same step, mirroring the real hub's stop so
         ``chunk_detail`` never serves a route alongside a stopped status. The chunk's seeded
         graph and escalation state are untouched."""
         chunk = self._require(chunk_id)
@@ -1067,7 +1066,7 @@ class MockHubService:
         )
 
     def _usage_miss(self, payload: dict[str, Any], *, slug: str) -> SubscriptionUsageMiss:
-        """One missed-fact payload as the mirrored miss record (blizzard#504 D7) — ``name``
+        """One missed-fact payload as the mirrored miss record — ``name``
         defaults to ``slug`` itself, mirroring :meth:`_usage_view`'s own default."""
         name = payload.get("name")
         reason = payload.get("reason")

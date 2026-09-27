@@ -1,7 +1,7 @@
 """The mock hub's lever vocabulary — the edge states a runner-under-test must survive.
 
 Realises the shared lever menu (``implementation/mocking.md``) on the hub's
-side of the wire, plus ``chunk_unknown`` (blizzard-mock#4). Store/arm/clear
+side of the wire, plus ``chunk_unknown``. Store/arm/clear
 semantics are the shared primitive (``blizzard_mock.levers``).
 """
 
@@ -24,10 +24,10 @@ class HubLever(StrEnum):
     #: Every request answers 503 (go unreachable). With ``remaining=N`` it heals after N
     #: affected calls — the "unreachable *mid-lease*, then recover" window.
     UNREACHABLE = "unreachable"
-    #: ``POST /transcripts`` alone answers 503 — every other route stays healthy (D6,
-    #: issue #246): the lane-independence lever.
+    #: ``POST /transcripts`` alone answers 503 — every other route stays healthy: the
+    #: lane-independence lever.
     UNREACHABLE_TRANSCRIPTS = "unreachable_transcripts"
-    #: ``POST /transcripts`` alone sleeps ``payload.ms`` (D6) — the "slow, not hard-down"
+    #: ``POST /transcripts`` alone sleeps ``payload.ms`` — the "slow, not hard-down"
     #: half the generic ``delay`` lever can't isolate.
     DELAY_TRANSCRIPTS = "delay_transcripts"
     #: The next completion's apply-response is the *previous* one replayed — a duplicate
@@ -40,7 +40,7 @@ class HubLever(StrEnum):
     #: deleting the chunk's seeded state (commit ``68238d0``).
     CHUNK_UNKNOWN = "chunk_unknown"
     #: ``POST /routes`` denies the claim, naming ``payload.prerequisite_chunk_id`` as the
-    #: unmet dependency (blizzard#458) — sticky until cleared, mirroring the real hub's
+    #: unmet dependency — sticky until cleared, mirroring the real hub's
     #: standing edge rather than a one-shot fact.
     DEPENDENCY_UNMET = "dependency_unmet"
 

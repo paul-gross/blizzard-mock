@@ -1,4 +1,4 @@
-"""OpenCode-shaped session-export transcript writer (blizzard#437), for the
+"""OpenCode-shaped session-export transcript writer, for the
 ``opencode`` facade's ``run`` subcommand. Implements
 :class:`~blizzard_mock.harness.engine.ITranscriptWriter`; unlike Claude Code's
 append-only JSONL, real ``opencode export <id>`` returns one JSON document, so this

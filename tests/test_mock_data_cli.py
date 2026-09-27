@@ -2880,8 +2880,7 @@ def test_create_runner_pause_requires_exactly_one_of_local_fleet(tmp_path: Path)
 
 def test_create_runner_pause_store_runner_local_lands_into_the_runners_own_table(tmp_path: Path) -> None:
     """``--store runner`` lands into ``local_pause_facts`` — the table the runner's own
-    ``GET /api/runner``/panel actually reads, distinct from the hub's own mirror
-    (blizzard#594)."""
+    ``GET /api/runner``/panel actually reads, distinct from the hub's own mirror."""
     url, meta = _full_runner_store(tmp_path)
     result = _runner().invoke(
         cli,

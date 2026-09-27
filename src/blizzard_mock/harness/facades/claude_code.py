@@ -39,7 +39,7 @@ environment.
 See src/blizzard_mock/harness/README.md for the full contract.
 """
 
-# The real shape (blizzard#606), so the health probe's real normalizer gets exercised.
+# The real shape, so the health probe's real normalizer gets exercised.
 _MOCK_VERSION = "2.1.278 (Claude Code)"
 
 
@@ -98,7 +98,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="worker hook settings document; its PostToolUse/SessionEnd commands are executed",
     )
-    # All three are RECORDED onto the session state (issue #144, blizzard#343) and
+    # All three are RECORDED onto the session state and
     # otherwise ignored.
     parser.add_argument("--model", default=None, help="recorded onto the session, not acted on")
     parser.add_argument("--effort", default=None, help="recorded onto the session, not acted on")
@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mock-claude-code`` binary."""
     args_list = sys.argv[1:] if argv is None else list(argv)
     if args_list and args_list[0] == "--version":
-        # The health probe (blizzard#438, blizzard#606) shells out to this same binary
+        # The health probe shells out to this same binary
         # before argparse ever sees it — mirrors `opencode.py`'s own interception.
         print(_MOCK_VERSION)
         raise SystemExit(0)
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> None:
         is_resume=is_resume,
         transcript=transcript,
         hooks=hooks,
-        # Recorded onto the session state, not acted on (issue #144, blizzard#343).
+        # Recorded onto the session state, not acted on.
         model=args.model,
         effort=args.effort,
         compaction_window=args.compaction_window,

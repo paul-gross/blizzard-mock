@@ -91,7 +91,7 @@ def compose_chunk(
                 "chunk_id": minted_chunk_id,
                 "graph_id": graph.graph_id,
                 "minted_at": now,
-                # Retained-and-unread since blizzard issue #144 (schema.py's own note) —
+                # Retained-and-unread (schema.py's own note) —
                 # a placeholder is all a fresh row needs; nothing reads it as current.
                 "model": "mock-data-seed",
                 "default_model": None,

@@ -70,7 +70,7 @@ trigger execution.
 **Untagged, only the envelope half of it (legacy).** The runner spawns a worker at
 the winter **workspace root** and prepends a machine-local preamble — the
 operator's workspace prose plus a facts table naming the environments the chunk
-holds (blizzard issue #17, `design/harness-adapters.md`). That preamble is
+holds (`design/harness-adapters.md`). That preamble is
 addressed to an agent's judgement, not to `exec`, and the cwd it arrives with is
 the workspace, not the worktree the node must touch. A real agent reads the prose
 and goes to its env; the mock does the analogous thing without an LLM:
@@ -118,7 +118,7 @@ and how a settings document's hook commands are executed* — see "Hook executio
 - `helpers.py` — the terse helper library bound into every behavior script's
   namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
   `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
-  state, plus the OpenCode-only misbehaviour plane (D7) — `permission_denial`,
+  state, plus the OpenCode-only misbehaviour plane — `permission_denial`,
   `interrupt_tool`, `malformed_record` — see "Script helper API" below. Raw
   Python is available underneath for the weird cases. Its tool-call helpers
   also drive the transcript and the hook seam — see "Conversation transcripts"
@@ -144,8 +144,8 @@ and how a settings document's hook commands are executed* — see "Hook executio
 
 `mock-claude-code` and `mock-opencode` each mint a genuine harness-shaped transcript for
 every run that has a known session id — the same record shapes the real runner's own
-normalizer for that harness (`claude_code_normalizer`, blizzard#245; `opencode_normalizer`,
-blizzard#437) reads, so a chunk run through the fleet produces a conversation the runner
+normalizer for that harness (`claude_code_normalizer`; `opencode_normalizer`)
+reads, so a chunk run through the fleet produces a conversation the runner
 panel can open. This is **claude_code/opencode-only**: `codex` has no reader today, so
 `codex.py` never constructs a writer and the engine no-ops for it.
 
@@ -431,11 +431,11 @@ the `blizzard` repo's `tests/service/test_runner_service.py`,
 | `crash(hard=False)` | Die without a verdict — soft (error run, exit 1) or `hard` (`os._exit`). |
 | `state()` | The `SessionState` — `state().last_ask`, `state().last_answer`. |
 | `answer()` | The resume message this turn was resumed with — a tagged resume's **prose**, so a script never reads its own source back; an untagged one's raw message, as always. |
-| `permission_denial(name, patterns=None, *, permission_id=None)` | Stage an OpenCode `permission` event for a denied request — `patterns` defaults to a single wildcard. **OpenCode-only**, part of the misbehaviour plane (D7) below. |
+| `permission_denial(name, patterns=None, *, permission_id=None)` | Stage an OpenCode `permission` event for a denied request — `patterns` defaults to a single wildcard. **OpenCode-only**, part of the misbehaviour plane below. |
 | `interrupt_tool(name, tool_input=None, *, error="interrupted", call_id=None)` | Stage a `tool_use` event whose part's state is `"error"` — how an interrupted or denied tool call reads on OpenCode's wire. **OpenCode-only.** |
 | `malformed_record(line=None)` | Stage a raw line in the OpenCode JSONL stream the real parser rejects — defaults to invalid JSON; pass `line` for a different rejection shape. **OpenCode-only.** |
 
-### The misbehaviour plane (D7)
+### The misbehaviour plane
 
 `permission_denial`, `interrupt_tool`, and `malformed_record` stage a raw,
 pre-rendered JSONL line onto the active wire's own `wire_events` list — owned
@@ -453,8 +453,8 @@ Each facade registers a `[project.scripts]` binary:
 
 | Binary | Facade | Surface |
 |--------|--------|---------|
-| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0 (blizzard#606), the runner's health probe's own shape. |
-| `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` (blizzard#504) — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
+| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0, the runner's health probe's own shape. |
+| `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume

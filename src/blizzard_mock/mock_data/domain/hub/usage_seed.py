@@ -1,5 +1,5 @@
 """Composes one ``usage_facts`` row — one harness invocation's usage/cost
-telemetry (issue #59).
+telemetry.
 
 ``cost_usd`` and ``estimated_cost_usd`` are genuinely nullable; ``compose_usage``
 never substitutes ``0.0`` for either (pinned by tests/test_mock_data_usage_seed.py).

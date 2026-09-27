@@ -1,4 +1,4 @@
-"""Unit + component coverage for the stub IdP (``blizzard-mock:unit-test``, issue #92).
+"""Unit + component coverage for the stub IdP (``blizzard-mock:unit-test``).
 
 Drives both provider shapes — OIDC (discovery, authorize, signed ``id_token``, JWKS)
 and GitHub-style (authorize, access-token exchange, ``/user``, ``/user/emails``) —

@@ -17,7 +17,7 @@ from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
 
 @dataclass(frozen=True)
 class RunnerCapability:
-    """One harness binding a registered runner reported it can execute (blizzard#433) —
+    """One harness binding a registered runner reported it can execute —
     the mock's own domain-core mirror of the wire shape, kept import-free of it. ``version``
     is ``None`` when absent; ``default`` marks the runner's own default binding. ``default``/
     ``available`` are keyword-only so two adjacent bools can't swap silently unkeyworded."""
@@ -43,7 +43,7 @@ class DeclaredSubscription:
 
 @dataclass(frozen=True, kw_only=True)
 class SubscriptionUsageMiss:
-    """One declared subscription's newest reported miss (blizzard#504 D7) — a sibling to
+    """One declared subscription's newest reported miss — a sibling to
     :class:`SubscriptionUsageView`, held per slug and never overwriting the sample it is unioned
     with at read time; mirrors the real hub's ``runner_external_usage_misses`` row. Keyword-only:
     ``slug``/``name``/``reason`` share one type, and a positional call could swap them silently."""
@@ -62,14 +62,14 @@ class ReportedRunnerFacts:
 
     def __init__(self) -> None:
         # The runner's own locally-reported pause brake — distinct from ``RunnerRow.paused``,
-        # the fleet's brake (issue #43/#44); reported-up, read-only.
+        # the fleet's brake; reported-up, read-only.
         self.locally_paused = False
         self.locally_paused_by: str | None = None
         self.locally_paused_reason: str | None = None
-        # Every declared subscription's newest sample, keyed by slug (issue #218,
-        # blizzard#436) — a slug absent here has never reported.
+        # Every declared subscription's newest sample, keyed by slug —
+        # a slug absent here has never reported.
         self.subscription_usage: dict[str, SubscriptionUsageView] = {}
-        # Every declared subscription's newest reported miss, keyed by slug (blizzard#504 D7) —
+        # Every declared subscription's newest reported miss, keyed by slug —
         # a sibling to `subscription_usage`, never overwriting a sample; unioned at read time.
         self.subscription_usage_misses: dict[str, SubscriptionUsageMiss] = {}
 
@@ -109,12 +109,12 @@ class RunnerRow:
         self.workspace_id = workspace_id
         self.registered_at = at
         self.last_seen_at = at
-        # The runner's optional federation identity (issue #95) — reported on every
+        # The runner's optional federation identity — reported on every
         # (re-)registration.
         self.url = url
         self.redirect_uris = redirect_uris
         self.env_capacity = env_capacity
-        # The runner's capability snapshot (blizzard#433) — reported on every
+        # The runner's capability snapshot — reported on every
         # (re-)registration, replacing the prior snapshot whole.
         self.capabilities = capabilities
         # The runner's declared subscription roster, kept distinct from an absent one;
@@ -144,8 +144,8 @@ class IHubState(Protocol):
     ) -> bool:
         """Register/heartbeat a runner; return ``True`` on first registration.
 
-        ``url``/``redirect_uris`` (issue #95), ``env_capacity``, ``capabilities``
-        (blizzard#433), and ``declared_subscriptions`` are overwritten unconditionally on
+        ``url``/``redirect_uris``, ``env_capacity``, ``capabilities``, and
+        ``declared_subscriptions`` are overwritten unconditionally on
         every call, like ``workspace_id``."""
         ...
 

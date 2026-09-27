@@ -181,8 +181,8 @@ class ForgeService:
         return issue
 
     def set_issue_state(self, owner: str, name: str, number: int, *, state: str, state_reason: str | None) -> Issue:
-        """Support ``PATCH .../issues/{n}`` closing an issue without a merge
-        (issue #216). Setting the same state again is a clean no-op, mirroring
+        """Support ``PATCH .../issues/{n}`` closing an issue without a merge.
+        Setting the same state again is a clean no-op, mirroring
         GitHub's own PATCH."""
         if state not in ("open", "closed"):
             raise ValidationError(f"invalid state: {state}")
@@ -394,7 +394,7 @@ class ForgeService:
             return True, MergeableState.BLOCKED
         if self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pull.number) is not None:
             # A red check run — an armed PR must be a coherent world, never a
-            # green PR with a red check (blizzard#232).
+            # green PR with a red check.
             return True, MergeableState.BLOCKED
         if self._git.is_mergeable(repo, pull.base, pull.head):
             return True, MergeableState.CLEAN
@@ -402,7 +402,7 @@ class ForgeService:
 
     def list_check_runs(self, owner: str, name: str, ref: str) -> list[CheckRun]:
         """Live check runs against ``ref``, derived from the active lever set, not
-        stored (issue #232). ``checks_failed``/``base_checks_failed`` win over
+        stored. ``checks_failed``/``base_checks_failed`` win over
         ``checks_pending``; absent a lever, the ref reads green. Correlated by
         resolved commit sha, not branch name (pinned by tests/test_pin_mock.py).
         """

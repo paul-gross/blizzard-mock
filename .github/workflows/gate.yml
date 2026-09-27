@@ -64,3 +64,15 @@ jobs:
           install: false
       - name: pytest -m "not needs_blizzard" (mise run test)
         run: mise run test -- -m "not needs_blizzard"
+
+  process-ref-lint:
+    name: process-reference lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install mise + vale
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.9.2
+      - name: process-reference prose lint (mise run process-ref-lint)
+        run: mise run process-ref-lint

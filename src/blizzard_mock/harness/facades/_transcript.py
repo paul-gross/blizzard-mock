@@ -80,7 +80,7 @@ class ClaudeTranscriptWriter:
     def record_raw(self, record_type: str, message: dict[str, object], *, extra: Mapping[str, object]) -> None:
         """Append a record carrying top-level fields ``_append`` never sets — today, only
         the synthetic usage-limit shape's own ``isApiErrorMessage``/``error`` siblings of
-        ``message`` (blizzard#594, the verbatim 2026-09-05 shape). ``extra`` merges onto
+        ``message`` (the verbatim 2026-09-05 shape). ``extra`` merges onto
         the record after the ordinary fields."""
         self._append(record_type, message, extra=extra)
 

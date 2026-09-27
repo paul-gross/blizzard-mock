@@ -1,4 +1,4 @@
-"""Composes one ``event_log`` row — the operational event feed (issue #125).
+"""Composes one ``event_log`` row — the operational event feed.
 
 Composes exactly one row, never a redundant one for an escalation (pinned by
 tests/test_mock_data_event_seed.py). ``detail`` must parse as JSON before

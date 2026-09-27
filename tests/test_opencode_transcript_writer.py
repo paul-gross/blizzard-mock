@@ -1,4 +1,4 @@
-"""Direct, in-process coverage for :class:`OpenCodeTranscriptWriter` (blizzard#437).
+"""Direct, in-process coverage for :class:`OpenCodeTranscriptWriter`.
 
 ``test_harness_smoke.py`` covers the facade end to end through a real subprocess;
 these tests inspect the writer's own document shape and mutation-in-place behavior

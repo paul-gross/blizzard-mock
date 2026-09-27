@@ -37,7 +37,7 @@ STATE_DIR_ENV_VAR = "BLIZZARD_MOCK_HARNESS_STATE_DIR"
 #: e.g. ``"blizzard runner ask"``. Absent in unit tests — the ask is emit-only.
 ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
 #: The runner-injected, comma-separated workdirs of the environments the chunk
-#: holds (issue #17); see :func:`acquired_worktree`.
+#: holds; see :func:`acquired_worktree`.
 ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
 
 #: Header of the machine-local facts table the runner prepends to every spawn prompt.
@@ -341,7 +341,7 @@ def split_worker_preamble(prompt: str) -> tuple[str, str]:
     """Split a spawn prompt into ``(preamble, behavior_script)``.
 
     Legacy, untagged, positional split: the script follows the last row of the
-    table opened by :data:`PREAMBLE_TABLE_HEADER` (issue #17).
+    table opened by :data:`PREAMBLE_TABLE_HEADER`.
     """
     lines = prompt.splitlines()
     try:
@@ -357,7 +357,7 @@ def split_worker_preamble(prompt: str) -> tuple[str, str]:
 def acquired_worktree(env: Mapping[str, str], cwd: Path) -> Path:
     """The worktree a behavior-script runs in: the first held env's workdir, else ``cwd``.
 
-    Read off :data:`ENV_WORKDIRS_ENV_VAR` (issue #17); a workdir that does not
+    Read off :data:`ENV_WORKDIRS_ENV_VAR`; a workdir that does not
     exist is ignored, falling back to ``cwd``.
     """
     raw = env.get(ENV_WORKDIRS_ENV_VAR, "")
@@ -461,7 +461,7 @@ def run_prompt(
 
     env = env if env is not None else os.environ
     # An explicit cwd wins; otherwise work in the env the runner handed us, which is not
-    # the process cwd once the worker is spawned at the workspace root (issue #17).
+    # the process cwd once the worker is spawned at the workspace root.
     cwd = Path(cwd) if cwd is not None else acquired_worktree(env, Path.cwd())
     wire = wire if wire is not None else PlainTextWire()
     stream: IO[str] = out if out is not None else sys.stdout
@@ -507,7 +507,7 @@ def run_prompt(
     if transcript is None and transcript_factory is not None:
         transcript = transcript_factory(session_id)
     state.turns += 1
-    # What this turn was actually launched with (issue #144, blizzard#343).
+    # What this turn was actually launched with.
     state.invocations.append(
         Invocation(
             kind="resume" if is_resume else "spawn",
