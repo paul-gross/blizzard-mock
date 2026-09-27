@@ -164,7 +164,9 @@ def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> Gar
     return GardenProposalView.model_validate(
         {
             "proposal_id": p.proposal_id,
+            "origin": "routine-run",
             "routine_name": routine_name,
+            "created_by": None,
             "class": p.class_,
             "title": p.title,
             "body": p.body,
