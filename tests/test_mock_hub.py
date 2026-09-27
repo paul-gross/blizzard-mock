@@ -295,7 +295,7 @@ def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClien
     assert _registered_capabilities(client, "r-cap-2") == ()
 
 
-# --- declared subscription roster (blizzard#636) -----------------------------
+# --- declared subscription roster ---------------------------------------------
 
 
 def _declared_subscriptions(client: TestClient, runner_id: str) -> tuple[DeclaredSubscription, ...] | None:
@@ -309,14 +309,14 @@ def _declared_subscriptions(client: TestClient, runner_id: str) -> tuple[Declare
 
 def test_registration_without_a_roster_stores_none(client: TestClient) -> None:
     """A registration carrying no ``subscriptions`` key stores ``None`` — the rosterless
-    fallback, kept distinct from a declared-but-empty roster (D1)."""
+    fallback, kept distinct from a declared-but-empty roster."""
     assert client.post("/api/fleet/runners", json={"runner_id": "r-no-roster", "workspace_id": "ws"}).status_code == 201
     assert _declared_subscriptions(client, "r-no-roster") is None
 
 
 def test_registration_with_an_empty_roster_stores_empty_not_none(client: TestClient) -> None:
     """A declared-but-empty roster (``subscriptions: []``) is kept distinct from an absent
-    one (D1) — both round-trip through the store rather than collapsing together."""
+    one — both round-trip through the store rather than collapsing together."""
     reg = client.post(
         "/api/fleet/runners", json={"runner_id": "r-empty-roster", "workspace_id": "ws", "subscriptions": []}
     )
@@ -325,8 +325,8 @@ def test_registration_with_an_empty_roster_stores_empty_not_none(client: TestCli
 
 
 def test_registration_accepts_and_stores_a_subscription_roster(client: TestClient) -> None:
-    """blizzard#636 — the runner's declared roster round-trips into the stored registry
-    row, mirroring the real hub's own registration write."""
+    """The runner's declared roster round-trips into the stored registry row, mirroring
+    the real hub's own registration write."""
     reg = client.post(
         "/api/fleet/runners",
         json={
@@ -345,9 +345,9 @@ def test_registration_accepts_and_stores_a_subscription_roster(client: TestClien
 
 
 def test_reregistration_replaces_the_roster_whole_including_dropping_to_empty(client: TestClient) -> None:
-    """Unconditional overwrite (blizzard#636), like ``capabilities``: a re-registration
-    dropping a slug leaves no trace of it, and one omitting the field entirely reverts to
-    the rosterless ``None``."""
+    """Unconditional overwrite, like ``capabilities``: a re-registration dropping a
+    slug leaves no trace of it, and one omitting the field entirely reverts to the
+    rosterless ``None``."""
     client.post(
         "/api/fleet/runners",
         json={
@@ -368,8 +368,8 @@ def test_reregistration_replaces_the_roster_whole_including_dropping_to_empty(cl
 
 
 def test_runner_view_lists_a_never_sampled_declared_slug_as_a_member(client: TestClient) -> None:
-    """D4 — a declared slug is a member whatever the age of its sample, including one
-    that has never sampled or missed at all."""
+    """A declared slug is a member whatever the age of its sample, including one that
+    has never sampled or missed at all."""
     client.post(
         "/api/fleet/runners",
         json={
@@ -393,7 +393,7 @@ def test_runner_view_lists_a_never_sampled_declared_slug_as_a_member(client: Tes
 
 
 def test_runner_view_drops_a_slug_no_longer_declared_while_its_sample_persists(client: TestClient) -> None:
-    """D4 — a slug removed from the roster is no longer a member, even though its sampled
+    """A slug removed from the roster is no longer a member, even though its sampled
     report persists and resumes the moment it is redeclared."""
     client.post(
         "/api/fleet/runners",
@@ -440,8 +440,8 @@ def test_runner_view_drops_a_slug_no_longer_declared_while_its_sample_persists(c
 
 
 def test_runner_view_a_reported_slug_never_declared_is_absent_with_a_roster(client: TestClient) -> None:
-    """D4 — with a roster declared, a reported slug outside it is simply absent, unlike
-    the rosterless union path."""
+    """With a roster declared, a reported slug outside it is simply absent, unlike the
+    rosterless union path."""
     client.post(
         "/api/fleet/runners",
         json={
@@ -473,7 +473,7 @@ def test_runner_view_a_reported_slug_never_declared_is_absent_with_a_roster(clie
 
 
 def test_runner_view_a_duplicate_declared_slug_collapses_first_wins(client: TestClient) -> None:
-    """D4 — a duplicate declared slug collapses to one member, the first one wins."""
+    """A duplicate declared slug collapses to one member, the first one wins."""
     client.post(
         "/api/fleet/runners",
         json={
@@ -490,7 +490,7 @@ def test_runner_view_a_duplicate_declared_slug_collapses_first_wins(client: Test
 
 
 def test_runner_view_a_declared_lapsed_miss_has_no_age_gate(client: TestClient) -> None:
-    """D4 — on the roster path, a lapsed miss outranks an absent sample with no staleness
+    """On the roster path, a lapsed miss outranks an absent sample with no staleness
     gate on either operand."""
     client.post(
         "/api/fleet/runners",
@@ -1680,7 +1680,7 @@ def test_a_miss_with_no_prior_sample_renders_a_miss_only_lapsed_row(client: Test
     ]
 
 
-def test_a_miss_newer_than_the_sample_supersedes_it_as_a_lapsed_row(client: TestClient) -> None:
+def test_a_miss_newer_than_the_sample_sets_lapsed_over_the_surviving_sample(client: TestClient) -> None:
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
     client.post(
         "/api/fleet/events",
@@ -1725,7 +1725,7 @@ def test_a_miss_newer_than_the_sample_supersedes_it_as_a_lapsed_row(client: Test
         {
             "slug": "openai",
             "name": "OpenAI",
-            "sampled_at": None,
+            "sampled_at": "2026-08-01T12:00:00+00:00",
             "windows": [],
             "condition": "credential_lapsed",
             "miss_reason": "credential_lapsed",

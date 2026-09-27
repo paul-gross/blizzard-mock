@@ -1082,12 +1082,11 @@ class MockHubService:
     def _usage_condition_views(
         reported: ReportedRunnerFacts, *, declared_subscriptions: tuple[DeclaredSubscription, ...] | None
     ) -> list[SubscriptionUsageView]:
-        """Every subscription's rendered view (blizzard#636). With a roster declared, this
-        is one view per declared slug, whatever the age of its sample — the roster, not
-        reporting, now decides membership (D4); a slug reported but no longer declared is
-        simply absent, its rows untouched. With no roster declared, this is the
-        reported-slug union it has always been (blizzard#504 D7). No staleness gate on
-        either path: unlike the real hub, this mock never ages a report out on its own."""
+        """Every subscription's rendered view. With a roster declared, one view per
+        declared slug, whatever the age of its sample — the roster, not reporting, now
+        decides membership; a slug reported but no longer declared is simply absent. With
+        no roster declared, this is the reported-slug union it has always been. No
+        staleness gate on either path: this mock never ages a report out on its own."""
         if declared_subscriptions is not None:
             return MockHubService._roster_views(declared_subscriptions, reported)
         return MockHubService._reported_views(reported)
@@ -1096,8 +1095,8 @@ class MockHubService:
     def _roster_views(
         roster: tuple[DeclaredSubscription, ...], reported: ReportedRunnerFacts
     ) -> list[SubscriptionUsageView]:
-        """D4's roster-gated membership — one view per declared slug; a duplicate declared
-        slug collapses, first wins."""
+        """The roster-gated membership rule — one view per declared slug; a duplicate
+        declared slug collapses, first wins."""
         declared: dict[str, DeclaredSubscription] = {}
         for declaration in roster:
             declared.setdefault(declaration.slug, declaration)
@@ -1121,16 +1120,26 @@ class MockHubService:
 
     @staticmethod
     def _reported_views(reported: ReportedRunnerFacts) -> list[SubscriptionUsageView]:
-        """The rosterless fallback — unioned across samples and misses by slug (blizzard#504
-        D7): a slug whose newest miss is a ``credential_lapsed`` newer than its newest (or
-        absent) sample renders as a miss-only, lapsed row; every other slug with a sample
-        renders it unchanged."""
+        """The rosterless fallback — unioned across samples and misses by slug: a sample or
+        a lapsed miss admits the slug; once admitted, a surviving sample's fields are kept
+        regardless of a lapsed condition."""
         slugs = sorted(set(reported.subscription_usage) | set(reported.subscription_usage_misses))
         views: list[SubscriptionUsageView] = []
         for slug in slugs:
             sample = reported.subscription_usage.get(slug)
             miss = reported.subscription_usage_misses.get(slug)
-            if MockHubService._lapsed(sample, miss):
+            lapsed = MockHubService._lapsed(sample, miss)
+            if sample is not None:
+                views.append(
+                    sample.model_copy(
+                        update={
+                            "condition": _CREDENTIAL_LAPSED_CONDITION if lapsed else None,
+                            "miss_reason": miss.reason if miss is not None else None,
+                            "missed_at": miss.missed_at.isoformat() if miss is not None else None,
+                        }
+                    )
+                )
+            elif lapsed:
                 assert miss is not None  # narrowed by `_lapsed`'s own condition
                 views.append(
                     SubscriptionUsageView(
@@ -1141,15 +1150,6 @@ class MockHubService:
                         condition=_CREDENTIAL_LAPSED_CONDITION,
                         miss_reason=miss.reason,
                         missed_at=miss.missed_at.isoformat(),
-                    )
-                )
-            elif sample is not None:
-                views.append(
-                    sample.model_copy(
-                        update={
-                            "miss_reason": miss.reason if miss is not None else None,
-                            "missed_at": miss.missed_at.isoformat() if miss is not None else None,
-                        }
                     )
                 )
         return views
