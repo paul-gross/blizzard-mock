@@ -7,8 +7,9 @@ the live store's schema at runtime rather than importing ``blizzard``.
 
 from __future__ import annotations
 
+import json
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
@@ -49,6 +50,10 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import (
 from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
 from blizzard_mock.mock_data.domain.hub.question_seed import QuestionCompositionError, compose_question
 from blizzard_mock.mock_data.domain.hub.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
+from blizzard_mock.mock_data.domain.hub.runner_subscription_seed import (
+    compose_subscription_miss,
+    compose_subscription_sample,
+)
 from blizzard_mock.mock_data.domain.hub.scenario_seed import (
     DEFAULT_CHUNKS,
     ScenarioCompositionError,
@@ -384,27 +389,86 @@ def create() -> None:
 @click.option("--runner-id", "runner_id", default="runner-seed", help="The runner id.")
 @click.option("--workspace-id", "workspace_id", default="workspace-seed", help="The workspace binding.")
 @click.option("--paused", is_flag=True, default=False, help="Also land a pause fact.")
+@click.option(
+    "--subscription",
+    "subscriptions",
+    type=(str, str, str),
+    multiple=True,
+    metavar="SLUG NAME PROVIDER",
+    help="Declare one subscription in the roster (blizzard#636); repeatable. Omitted, the roster stores NULL.",
+)
+@click.option(
+    "--sample",
+    "samples",
+    type=(str, int),
+    multiple=True,
+    metavar="SLUG AGE_SECONDS",
+    help="Land a runner_external_usage row for SLUG, sampled AGE_SECONDS ago; repeatable.",
+)
+@click.option(
+    "--miss",
+    "misses",
+    type=(str, int, str),
+    multiple=True,
+    metavar="SLUG AGE_SECONDS REASON",
+    help="Land a runner_external_usage_misses row for SLUG, missed AGE_SECONDS ago, with REASON; repeatable.",
+)
 def create_runner(
-    store: str, url: str | None, runtime_dir: str | None, runner_id: str, workspace_id: str, paused: bool
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    runner_id: str,
+    workspace_id: str,
+    paused: bool,
+    subscriptions: tuple[tuple[str, str, str], ...],
+    samples: tuple[tuple[str, int], ...],
+    misses: tuple[tuple[str, int, str], ...],
 ) -> None:
     """Seed one registered runner into the hub's fleet registry.
 
-    With ``--paused``, also lands a pause fact.
+    With ``--paused``, also lands a pause fact. ``--subscription`` declares the
+    roster (blizzard#636) on the same row; ``--sample``/``--miss`` land per-slug
+    external-usage rows at a chosen age, independent of the roster.
     """
     _require_store("runner", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     now = SystemClock().now()
-    rows = [
-        FactRow(
-            table="runner_registrations",
-            values={"runner_id": runner_id, "workspace_id": workspace_id, "registered_at": now, "last_seen_at": now},
+    names_by_slug = {slug: name for slug, name, _provider in subscriptions}
+    registration_values: dict[str, object] = {
+        "runner_id": runner_id,
+        "workspace_id": workspace_id,
+        "registered_at": now,
+        "last_seen_at": now,
+    }
+    if subscriptions:
+        registration_values["subscriptions"] = json.dumps(
+            [{"slug": slug, "name": name, "provider": provider} for slug, name, provider in subscriptions]
         )
-    ]
+    rows = [FactRow(table="runner_registrations", values=registration_values)]
     if paused:
         rows.append(
             FactRow(
                 table="runner_pause_facts",
                 values={"runner_id": runner_id, "paused": True, "set_at": now, "set_by": "mock-data"},
+            )
+        )
+    for slug, age_seconds in samples:
+        rows.append(
+            compose_subscription_sample(
+                runner_id=runner_id,
+                slug=slug,
+                name=names_by_slug.get(slug, slug),
+                sampled_at=now - timedelta(seconds=age_seconds),
+            )
+        )
+    for slug, age_seconds, reason in misses:
+        rows.append(
+            compose_subscription_miss(
+                runner_id=runner_id,
+                slug=slug,
+                name=names_by_slug.get(slug, slug),
+                missed_at=now - timedelta(seconds=age_seconds),
+                reason=reason,
             )
         )
     try:

@@ -10,6 +10,7 @@ pinned too.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,7 +41,9 @@ def _runner() -> CliRunner:
 
 
 def _hub_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
-    """A sqlite store mirroring the hub's ``runner_registrations`` + ``runner_pause_facts``."""
+    """A sqlite store mirroring the hub's ``runner_registrations`` + ``runner_pause_facts``,
+    plus the per-slug ``runner_external_usage``/``runner_external_usage_misses`` siblings
+    ``create runner``'s ``--sample``/``--miss`` write into (blizzard#636)."""
     url = f"sqlite:///{tmp_path / 'hub.db'}"
     engine = create_engine(url)
     meta = MetaData()
@@ -51,6 +54,7 @@ def _hub_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
         Column("workspace_id", String, nullable=False),
         Column("registered_at", DateTime, nullable=False),
         Column("last_seen_at", DateTime, nullable=False),
+        Column("subscriptions", Text, nullable=True),
     )
     pause_facts = Table(
         "runner_pause_facts",
@@ -60,6 +64,26 @@ def _hub_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
         Column("paused", Boolean, nullable=False),
         Column("set_at", DateTime, nullable=False),
         Column("set_by", String, nullable=False),
+    )
+    Table(
+        "runner_external_usage",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("slug", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("sampled_at", DateTime, nullable=False),
+        Column("windows", Text, nullable=False),
+        Column("updated_at", DateTime, nullable=False),
+    )
+    Table(
+        "runner_external_usage_misses",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("slug", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("missed_at", DateTime, nullable=False),
+        Column("reason", String, nullable=False),
+        Column("updated_at", DateTime, nullable=False),
     )
     meta.create_all(engine)
     return url, meta, registrations, pause_facts
@@ -327,6 +351,27 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("workspace_id", String, nullable=False),
         Column("registered_at", DateTime, nullable=False),
         Column("last_seen_at", DateTime, nullable=False),
+        Column("subscriptions", Text, nullable=True),
+    )
+    Table(
+        "runner_external_usage",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("slug", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("sampled_at", DateTime, nullable=False),
+        Column("windows", Text, nullable=False),
+        Column("updated_at", DateTime, nullable=False),
+    )
+    Table(
+        "runner_external_usage_misses",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("slug", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("missed_at", DateTime, nullable=False),
+        Column("reason", String, nullable=False),
+        Column("updated_at", DateTime, nullable=False),
     )
     Table(
         "runner_pause_facts",
@@ -722,6 +767,157 @@ def test_create_runner_paused_lands_a_pause_fact(tmp_path: Path) -> None:
     with create_engine(url).begin() as conn:
         rows = conn.execute(select(pause_facts.c.runner_id, pause_facts.c.paused)).all()
     assert rows == [("seeded-2", True)]
+
+
+def test_create_runner_refuses_the_runner_store_even_with_a_roster(tmp_path: Path) -> None:
+    url, _meta, _reg, _pause = _runner_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "runner",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-refused",
+            "--subscription",
+            "anthropic",
+            "Anthropic",
+            "anthropic",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "hub" in result.output
+
+
+def test_create_runner_without_a_subscription_flag_stores_a_null_roster(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-3"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(registrations.c.subscriptions)).all()
+    assert [r[0] for r in rows] == [None]
+
+
+def test_create_runner_declares_a_roster_in_the_stores_own_json_shape(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-4",
+            "--subscription",
+            "anthropic",
+            "Anthropic",
+            "anthropic",
+            "--subscription",
+            "probe",
+            "Probe",
+            "none-such",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(registrations.c.subscriptions)).all()
+    assert json.loads(rows[0][0]) == [
+        {"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"},
+        {"slug": "probe", "name": "Probe", "provider": "none-such"},
+    ]
+
+
+def test_create_runner_sample_lands_a_runner_external_usage_row_at_the_chosen_age(tmp_path: Path) -> None:
+    url, meta, _reg, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-5",
+            "--subscription",
+            "anthropic",
+            "Anthropic",
+            "anthropic",
+            "--sample",
+            "anthropic",
+            "7200",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        usage = _table(meta, "runner_external_usage")
+        rows = conn.execute(select(usage.c.runner_id, usage.c.slug, usage.c.name, usage.c.sampled_at)).all()
+    assert len(rows) == 1
+    runner_id, slug, name, sampled_at = rows[0]
+    assert (runner_id, slug, name) == ("seeded-5", "anthropic", "Anthropic")
+    assert isinstance(sampled_at, datetime)
+
+
+def test_create_runner_miss_lands_a_runner_external_usage_misses_row_carrying_the_reason(tmp_path: Path) -> None:
+    url, meta, _reg, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-6",
+            "--miss",
+            "never",
+            "0",
+            "endpoint_unreachable",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        misses = _table(meta, "runner_external_usage_misses")
+        rows = conn.execute(select(misses.c.runner_id, misses.c.slug, misses.c.name, misses.c.reason)).all()
+    assert rows == [("seeded-6", "never", "never", "endpoint_unreachable")]
+
+
+def test_create_runner_sample_for_a_slug_outside_the_roster_is_accepted(tmp_path: Path) -> None:
+    url, meta, _reg, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "runner",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--runner-id",
+            "seeded-7",
+            "--subscription",
+            "anthropic",
+            "Anthropic",
+            "anthropic",
+            "--sample",
+            "retired",
+            "60",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        usage = _table(meta, "runner_external_usage")
+        rows = conn.execute(select(usage.c.slug)).all()
+    assert [r[0] for r in rows] == ["retired"]
 
 
 # --- create graph (implemented) ---------------------------------------------
