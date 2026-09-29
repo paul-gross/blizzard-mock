@@ -9,7 +9,9 @@ through the synchronous ``tool_call()`` helper (it calls both halves back to bac
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades._opencode_transcript import OpenCodeTranscriptWriter, document_path
@@ -84,12 +86,12 @@ def test_a_task_tool_call_mints_a_linked_child_document(tmp_path: Path) -> None:
     writer = OpenCodeTranscriptWriter(session_id="sess-4", root=tmp_path, cwd=tmp_path)
     writer.record_user("go")
 
-    call_id = writer.record_tool_call("task", {"agent": "explorer", "prompt": "dig in"})
+    call_id = writer.record_tool_call("task", {"subagent_type": "explorer", "prompt": "dig in"})
     writer.record_tool_result(call_id, "delegated")
 
     root = _read(document_path(tmp_path, "sess-4"))
     task_part = next(p for m in root["messages"] for p in m["parts"] if p.get("type") == "tool")
-    child_id = task_part["state"]["metadata"]["sessionID"]
+    child_id = task_part["state"]["metadata"]["sessionId"]
     assert child_id != "sess-4"
 
     child = _read(document_path(tmp_path, child_id))
@@ -129,3 +131,41 @@ def test_every_message_and_part_id_is_unique_and_self_consistent(tmp_path: Path)
         for part in message["parts"]:
             assert part["sessionID"] == "sess-6"
             assert part["messageID"] == message["info"]["id"]
+
+
+def test_messages_parts_and_tool_states_carry_times_and_a_task_window_holds_its_child() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        tmp_path = Path(raw)
+        seen: list[Mapping[str, Any]] = []
+        writer = OpenCodeTranscriptWriter(
+            session_id="sess-7", root=tmp_path, cwd=tmp_path, on_task_completed=seen.append
+        )
+        writer.record_user("go")
+        call_id = writer.record_tool_call("task", {"subagent_type": "explorer", "prompt": "dig in"})
+        writer.record_tool_result(call_id, "delegated")
+
+        root = _read(document_path(tmp_path, "sess-7"))
+        assert all(isinstance(m["info"]["time"]["created"], int) for m in root["messages"])
+        task = next(p for m in root["messages"] for p in m["parts"] if p.get("type") == "tool")
+        window = task["state"]["time"]
+        assert window["start"] <= window["end"]
+        assert seen == [task]
+        child = _read(document_path(tmp_path, task["state"]["metadata"]["sessionId"]))
+        assert all(window["start"] <= m["info"]["time"]["created"] <= window["end"] for m in child["messages"])
+
+
+def test_a_task_id_continues_the_same_child_document() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        tmp_path = Path(raw)
+        writer = OpenCodeTranscriptWriter(session_id="sess-8", root=tmp_path, cwd=tmp_path)
+        writer.record_user("go")
+        for _ in range(2):
+            call_id = writer.record_tool_call("task", {"task_id": "ses_kid", "prompt": "again"})
+            writer.record_tool_result(call_id, "ok")
+
+        child = _read(document_path(tmp_path, "ses_kid"))
+        assert [m["info"]["role"] for m in child["messages"]] == ["user", "assistant", "user", "assistant"]

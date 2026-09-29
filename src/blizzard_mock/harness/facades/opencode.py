@@ -14,6 +14,7 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from blizzard_mock.harness.engine import ITranscriptWriter, RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
@@ -281,13 +282,26 @@ def _takeover_banner(session_id: str) -> str:
     return f"mock-opencode: interactive takeover of session {session_id} (not automated)\n"
 
 
-def _build_transcript_factory(*, cwd: Path, env: Mapping[str, str]) -> Callable[[str], ITranscriptWriter]:
+def _task_use_event(session_id: str, part: Mapping[str, Any]) -> dict[str, object]:
+    """The ``tool_use`` event ``opencode run`` streams for a completed ``task`` part: the whole
+    part, whose ``state`` carries the child's ``metadata.sessionId`` and the call's ``time``."""
+    return {"type": "tool_use", "timestamp": part["state"]["time"]["end"], "sessionID": session_id, "part": part}
+
+
+def _build_transcript_factory(
+    *, cwd: Path, env: Mapping[str, str], wire: OpenCodeRunWire
+) -> Callable[[str], ITranscriptWriter]:
     """A per-run factory OpenCode's self-minted session id can be handed to once it is
     known (``run_prompt``'s ``transcript_factory``) — unlike Claude Code, whose facade
     always sees the id up front (``claude_code.py``'s ``_build_transcript_writer``),
     OpenCode mints its own inside the engine, well before any facade code sees it."""
     root = transcripts_root(env, fence_dir=fence_base_dir(cwd))
-    return lambda session_id: OpenCodeTranscriptWriter(session_id=session_id, root=root, cwd=cwd)
+    return lambda session_id: OpenCodeTranscriptWriter(
+        session_id=session_id,
+        root=root,
+        cwd=cwd,
+        on_task_completed=lambda part: wire.wire_events.append(json.dumps(_task_use_event(session_id, part))),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -335,7 +349,7 @@ def main(argv: list[str] | None = None) -> None:
         script=script,
         session_id=args.session,
         is_resume=is_resume,
-        transcript_factory=_build_transcript_factory(cwd=cwd, env=env),
+        transcript_factory=_build_transcript_factory(cwd=cwd, env=env, wire=wire),
         # Recorded onto the session state, never acted on —
         # the mock is model-agnostic and never enforces a permission policy.
         model=args.model,

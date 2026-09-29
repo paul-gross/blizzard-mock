@@ -7,8 +7,9 @@ writer rewrites the whole file on every mutation."""
 from __future__ import annotations
 
 import json
+import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,10 @@ _MOCK_VERSION = "1.18.25"
 
 #: The step-finish "reason" a completed turn reports; any nonempty string is faithful.
 _STEP_REASON = "stop"
+
+
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 def _new_id(prefix: str) -> str:
@@ -63,8 +68,17 @@ class OpenCodeTranscriptWriter:
     """Keeps one session's ``{info, messages}`` document in memory, rewriting the whole
     file on every mutation. A ``task`` tool call also mints a linked child document."""
 
-    def __init__(self, *, session_id: str, root: Path, cwd: Path) -> None:
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        root: Path,
+        cwd: Path,
+        on_task_completed: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> None:
         self._session_id = session_id
+        # Told each ``task`` part as it completes, so a facade can stream it as a ``tool_use`` event.
+        self._on_task_completed = on_task_completed
         self._cwd = cwd
         self._root = root
         self._dir = root / PROJECT_DIR_NAME
@@ -88,14 +102,14 @@ class OpenCodeTranscriptWriter:
     def record_user(self, text: str) -> None:
         self._open_assistant = None  # a new user turn starts a fresh assistant turn
         message = self._new_message("user")
-        message["parts"].append(self._new_part(message, {"type": "text", "text": text}))
+        message["parts"].append(self._new_part(message, {"type": "text", "text": text, "time": _span()}))
         self._doc["messages"].append(message)
         self._write()
 
     def record_result(self, result: RunResult) -> None:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         message = self._assistant_message()
-        message["parts"].append(self._new_part(message, {"type": "text", "text": text}))
+        message["parts"].append(self._new_part(message, {"type": "text", "text": text, "time": _span()}))
         usage = synthesize_usage_tokens(text)
         message["parts"].append(
             self._new_part(
@@ -116,12 +130,14 @@ class OpenCodeTranscriptWriter:
     def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
         message = self._assistant_message()
         call_id = _new_id("call")
-        state: dict[str, Any] = {"status": "pending", "input": dict(tool_input)}
+        started = _now_ms()
+        state: dict[str, Any] = {"status": "pending", "input": dict(tool_input), "time": {"start": started}}
         if name == "task":
-            # A fresh child session, linked only through the undocumented pointer.
-            child_id = _new_id("ses")
-            state["metadata"] = {"sessionID": child_id}
-            self._write_child_session(child_id, tool_input)
+            # 1.18.32's shape: the child session is named by ``metadata.sessionId``, and a
+            # ``task_id`` input continues that child rather than minting a new one.
+            child_id = str(tool_input.get("task_id") or _new_id("ses"))
+            state["metadata"] = {"parentSessionId": self._session_id, "sessionId": child_id, "truncated": False}
+            self._write_child_session(child_id, tool_input, started_at=started)
         part = self._new_part(message, {"type": "tool", "callID": call_id, "tool": name, "state": state})
         message["parts"].append(part)
         self._write()
@@ -137,7 +153,10 @@ class OpenCodeTranscriptWriter:
                     continue
                 part["state"]["status"] = "completed"
                 part["state"]["output"] = output
+                part["state"]["time"]["end"] = max(_now_ms(), part["state"]["time"]["start"])
                 self._write()
+                if part["tool"] == "task" and self._on_task_completed is not None:
+                    self._on_task_completed(part)
                 return
 
     # -- internals ------------------------------------------------------------ #
@@ -152,14 +171,18 @@ class OpenCodeTranscriptWriter:
             self._open_assistant = message
         return self._open_assistant
 
-    def _new_message(self, role: str, *, session_id: str | None = None) -> dict[str, Any]:
+    def _new_message(
+        self, role: str, *, session_id: str | None = None, created_at: int | None = None
+    ) -> dict[str, Any]:
         """A message under ``session_id`` — this writer's own session by default, or an
-        explicit one for the child document :meth:`_write_child_session` builds."""
+        explicit one for the child document :meth:`_write_child_session` builds — created
+        at ``created_at`` (else now)."""
         return {
             "info": {
                 "id": _new_id("msg"),
                 "sessionID": session_id if session_id is not None else self._session_id,
                 "role": role,
+                "time": {"created": _now_ms() if created_at is None else created_at},
             },
             "parts": [],
         }
@@ -179,21 +202,30 @@ class OpenCodeTranscriptWriter:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(self._doc))
 
-    def _write_child_session(self, child_id: str, tool_input: Mapping[str, object]) -> None:
-        """A trivial, complete child document — one user turn seeded from the parent
-        call's own ``prompt`` (else empty), one assistant text reply — round-trippable
-        through the real ``OpenCodeTranscriptSource``/``parse_session_export`` as a
-        resolved sidechain. Built through the same ``_new_message``/``_new_part`` this
-        writer's own root document uses, keyed to the child's own session id."""
+    def _write_child_session(self, child_id: str, tool_input: Mapping[str, object], *, started_at: int) -> None:
+        """One user turn seeded from the parent call's ``prompt`` and one assistant reply, appended to
+        the child's document (a ``task_id`` continues an existing one). Created no earlier than the
+        parent call's start, so they fall inside that call's window."""
         prompt = tool_input.get("prompt", "")
-        doc = _new_document(child_id, self._cwd, title="mock-opencode child session", parent_id=self._session_id)
+        child_path = document_path(self._root, child_id)
+        doc = (
+            json.loads(child_path.read_text())
+            if child_path.is_file()
+            else _new_document(child_id, self._cwd, title="mock-opencode child session", parent_id=self._session_id)
+        )
 
-        user = self._new_message("user", session_id=child_id)
-        user["parts"].append(self._new_part(user, {"type": "text", "text": str(prompt)}, session_id=child_id))
+        user = self._new_message("user", session_id=child_id, created_at=started_at)
+        user["parts"].append(
+            self._new_part(user, {"type": "text", "text": str(prompt), "time": _span(started_at)}, session_id=child_id)
+        )
 
-        assistant = self._new_message("assistant", session_id=child_id)
+        assistant = self._new_message("assistant", session_id=child_id, created_at=started_at)
         reply_text = "the child session completed its delegated task"
-        assistant["parts"].append(self._new_part(assistant, {"type": "text", "text": reply_text}, session_id=child_id))
+        assistant["parts"].append(
+            self._new_part(
+                assistant, {"type": "text", "text": reply_text, "time": _span(started_at)}, session_id=child_id
+            )
+        )
         usage = synthesize_usage_tokens(reply_text, base_input=50, base_output=10)
         assistant["parts"].append(
             self._new_part(
@@ -209,11 +241,16 @@ class OpenCodeTranscriptWriter:
         )
         assistant["info"]["tokens"] = _tokens_field(usage)
         assistant["info"]["cost"] = synthesize_cost_usd(usage)
-        doc["messages"] = [user, assistant]
+        doc["messages"].extend([user, assistant])
 
-        child_path = document_path(self._root, child_id)
         child_path.parent.mkdir(parents=True, exist_ok=True)
         child_path.write_text(json.dumps(doc))
+
+
+def _span(started_at: int | None = None) -> dict[str, int]:
+    """A part's ``time`` — an instant-long span starting at ``started_at`` (else now)."""
+    start = _now_ms() if started_at is None else started_at
+    return {"start": start, "end": start}
 
 
 def _new_document(session_id: str, cwd: Path, *, title: str, parent_id: str | None = None) -> dict[str, Any]:
