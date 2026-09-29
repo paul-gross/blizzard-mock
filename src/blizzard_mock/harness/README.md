@@ -193,7 +193,12 @@ panel can open. This is **claude_code/opencode-only**: `codex` has no reader tod
   <id>` reads that same path back verbatim, matching the real CLI's contract.
   A `task` tool call additionally mints a second, linked child document, the
   child's own `info.parentID` naming the parent — the same
-  `state.metadata.sessionID` pointer real OpenCode carries.
+  `state.metadata.sessionId` pointer real OpenCode 1.18.32 carries, beside
+  `parentSessionId` and the call's `state.time.{start,end}`. Every message
+  carries `info.time.created` and every text part a `time`; the child's messages
+  are created inside the spawning call's window. A `task_id` input continues
+  that child's document rather than minting a new one, and each completed
+  `task` part is also streamed on `run` as a `tool_use` event.
 - **The sidechain/thinking-fidelity gap — stated here and nowhere else.** This is
   the one place to update if the gap's shape changes. Beyond `sessionId`/`cwd`/
   `timestamp` per record — `facades/_transcript.py`'s module docstring is the one
