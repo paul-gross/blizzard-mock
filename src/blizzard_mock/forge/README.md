@@ -3,7 +3,8 @@
 ## Contract
 
 A standalone HTTP service that mocks the **subset of the GitHub API blizzard
-touches**, covering **two seams with one vendor surface**:
+touches**, plus browser destinations for delivery links, covering **two seams
+with one vendor surface**:
 
 - **Work-source seam** — issues, with bodies *and comment threads*, served
   **vendor-native** so the hub's GitHub-shaped pass-through reads (D-047 / D-074)
@@ -72,6 +73,14 @@ armed.
 | `GET /repos/{o}/{r}/commits/{ref}/check-runs` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`, derived live from the lever set |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `GET /healthz` | Liveness |
+
+## Browser destinations
+
+The `html_url` on a PR and commit resolves to a small browser-readable page on
+this same forge: `GET /{owner}/{repo}/pull/{number}` and
+`GET /{owner}/{repo}/commit/{sha}`. Both look up the actual PR or bare-repo
+commit; an unknown reference returns 404. The page displays the repository,
+PR disposition or commit message, and the landed SHA when a PR has merged.
 
 ## Lever surface (`/_levers`)
 

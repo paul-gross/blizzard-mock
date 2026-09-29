@@ -19,6 +19,7 @@ from blizzard_mock.forge.api.middleware import LeverMiddleware
 from blizzard_mock.forge.api.pulls import router as pulls_router
 from blizzard_mock.forge.api.refs import router as refs_router
 from blizzard_mock.forge.api.repos import router as repos_router
+from blizzard_mock.forge.api.web import router as web_router
 from blizzard_mock.forge.config import ForgeConfig
 from blizzard_mock.forge.domain.clock import Clock, SystemClock
 from blizzard_mock.forge.domain.errors import ForgeError
@@ -60,6 +61,7 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     app.include_router(pulls_router)
     app.include_router(refs_router)
     app.include_router(levers_router)
+    app.include_router(web_router)
 
     log.info("forge app created", repos_dir=str(config.repos_dir), base_url=config.base_url)
     return app

@@ -297,7 +297,7 @@ def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
 _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "AnalyticsCountView": ("AnalyticsCountView", frozenset()),
     "AnalyticsCountsResponse": ("AnalyticsCountsResponse", frozenset()),
-    "AnalyticsSpendView": ("AnalyticsSpendView", frozenset()),
+    "AnalyticsSpendView": ("AnalyticsSpendView", frozenset({"estimated_cost_usd"})),
     "AnalyticsSpendResponse": ("AnalyticsSpendResponse", frozenset()),
     "ApplyResponse": ("ApplyResponse", frozenset()),
     # The mock models one prerequisite at a time; the real default preserves that
@@ -314,6 +314,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "blocked",
                 "bounces",
                 "cost",
+                "closed_prs",
                 "current_node_name",
                 "decision",
                 "graph_created_at",
@@ -321,6 +322,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "history",
                 "intended_migration",
                 "landed",
+                "landed_repos",
                 "migrations",
                 "neighborhood",
                 "open_prs",
