@@ -255,6 +255,10 @@ class RunnerView(BaseModel):
     subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
     # The runner's reported capability snapshot — every harness/tier it can execute right now.
     capabilities: list[RunnerCapabilityView] = Field(default_factory=list)
+    # Retired — the mock never retires a runner, so these hold their defaults.
+    retired: bool = False
+    retired_at: str | None = None
+    retired_by: str | None = None
 
 
 class RunnerFactAck(BaseModel):
