@@ -259,6 +259,8 @@ class RunnerView(BaseModel):
     retired: bool = False
     retired_at: str | None = None
     retired_by: str | None = None
+    # The node names the runner declared it holds for a human decision.
+    gates: list[str] = Field(default_factory=list)
 
 
 class RunnerFactAck(BaseModel):

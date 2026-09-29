@@ -49,6 +49,7 @@ class InMemoryHubState:
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
+        gates: tuple[str, ...] = (),
     ) -> bool:
         existing = self._runners.get(runner_id)
         if existing is None:
@@ -61,6 +62,7 @@ class InMemoryHubState:
                 env_capacity=env_capacity,
                 capabilities=capabilities,
                 declared_subscriptions=declared_subscriptions,
+                gates=gates,
             )
             return True
         existing.last_seen_at = at
@@ -70,6 +72,7 @@ class InMemoryHubState:
         existing.env_capacity = env_capacity
         existing.capabilities = capabilities
         existing.declared_subscriptions = declared_subscriptions
+        existing.gates = gates
         return False
 
     def reported_facts(self, runner_id: str) -> ReportedRunnerFacts:
