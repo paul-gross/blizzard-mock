@@ -90,6 +90,38 @@ def _open_pull(client: TestClient, head: str, base: str = "main") -> dict[str, A
     return client.post(f"/repos/{REPO}/pulls", json={"title": head, "head": head, "base": base}).json()
 
 
+def test_pr_and_landed_commit_web_urls_resolve_against_forge_truth(client: TestClient) -> None:
+    pull = _open_pull(client, "feature")
+    before = client.get(pull["html_url"])
+    assert before.status_code == 200
+    assert "text/html" in before.headers["content-type"]
+    assert f"{REPO} PR #{pull['number']}" in before.text
+    assert "Open" in before.text
+
+    merged = client.put(f"/repos/{REPO}/pulls/{pull['number']}/merge", json={"sha": pull["head"]["sha"]}).json()
+    after = client.get(pull["html_url"])
+    assert after.status_code == 200
+    assert "Merged" in after.text
+    assert merged["sha"] in after.text
+
+    commit = client.get(f"/repos/{REPO}/commits/{merged['sha']}").json()
+    landed = client.get(commit["html_url"])
+    assert landed.status_code == 200
+    assert "text/html" in landed.headers["content-type"]
+    assert f"{REPO} commit {merged['sha']}" in landed.text
+    assert client.get(f"/octocat/hello/pull/{pull['number'] + 1}").status_code == 404
+    assert client.get(f"/octocat/hello/commit/{'0' * 40}").status_code == 404
+
+
+def test_pr_web_page_escapes_forge_metadata(client: TestClient) -> None:
+    pull = client.post(
+        f"/repos/{REPO}/pulls", json={"title": "<script>alert(1)</script>", "head": "feature", "base": "main"}
+    ).json()
+    page = client.get(pull["html_url"])
+    assert "&lt;script&gt;" in page.text
+    assert "<script>" not in page.text
+
+
 # -- repositories ----------------------------------------------------------
 
 

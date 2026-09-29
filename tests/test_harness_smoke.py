@@ -1259,7 +1259,7 @@ def test_synthesize_cost_usd_grows_with_token_counts() -> None:
 def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool = False, **flags) -> None:
     """One `mock-claude-code` turn, with whichever session flags were given."""
     session_flag = ["--resume", session] if resume else ["--session-id", session]
-    extra = [arg for name, value in flags.items() if value for arg in (f"--{name}", value)]
+    extra = [arg for name, value in flags.items() if value for arg in (f"--{name.replace('_', '-')}", value)]
     proc = subprocess.run(
         [
             sys.executable,
@@ -1326,6 +1326,13 @@ def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_re
         {"kind": "spawn", "model": None, "effort": None, "compaction_window": "150000", "permission": None},
         {"kind": "resume", "model": None, "effort": None, "compaction_window": "150000", "permission": None},
     ]
+
+
+def test_claude_facade_accepts_runner_permission_mode_on_spawn_and_resume(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    _run_claude(cwd, env, "sess-permissions", "verdict('pass')", permission_mode="bypassPermissions")
+    _run_claude(cwd, env, "sess-permissions", "verdict('pass')", resume=True, permission_mode="bypassPermissions")
+    assert [turn["kind"] for turn in _session_state(cwd, "sess-permissions")["invocations"]] == ["spawn", "resume"]
 
 
 # --------------------------------------------------------------------------- #

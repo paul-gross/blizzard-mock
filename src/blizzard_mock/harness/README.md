@@ -458,7 +458,7 @@ Each facade registers a `[project.scripts]` binary:
 
 | Binary | Facade | Surface |
 |--------|--------|---------|
-| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0, the runner's health probe's own shape. |
+| `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--permission-mode <mode>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. `--permission-mode` is accepted but inert. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0, the runner's health probe's own shape. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
 
