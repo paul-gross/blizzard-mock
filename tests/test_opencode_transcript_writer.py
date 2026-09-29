@@ -9,7 +9,9 @@ through the synchronous ``tool_call()`` helper (it calls both halves back to bac
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades._opencode_transcript import OpenCodeTranscriptWriter, document_path
@@ -136,7 +138,7 @@ def test_messages_parts_and_tool_states_carry_times_and_a_task_window_holds_its_
 
     with tempfile.TemporaryDirectory() as raw:
         tmp_path = Path(raw)
-        seen: list[dict] = []
+        seen: list[Mapping[str, Any]] = []
         writer = OpenCodeTranscriptWriter(
             session_id="sess-7", root=tmp_path, cwd=tmp_path, on_task_completed=seen.append
         )
