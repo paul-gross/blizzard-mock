@@ -978,6 +978,7 @@ class MockHubService:
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
         subscriptions: tuple[DeclaredSubscription, ...] | None = None,
+        gates: tuple[str, ...] = (),
     ) -> bool:
         return self._state.upsert_runner(
             runner_id,
@@ -988,6 +989,7 @@ class MockHubService:
             env_capacity=env_capacity,
             capabilities=capabilities,
             declared_subscriptions=subscriptions,
+            gates=gates,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
@@ -1019,6 +1021,7 @@ class MockHubService:
                 )
                 for c in row.capabilities
             ],
+            gates=list(row.gates),
         )
 
     def _parse_instant(self, value: Any) -> datetime:

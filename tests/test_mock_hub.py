@@ -237,6 +237,17 @@ def test_registration_accepts_and_stores_capabilities(client: TestClient) -> Non
     assert capability.default is True
 
 
+def test_registration_stores_gates_and_the_runner_view_echoes_them(client: TestClient) -> None:
+    """The node names a runner gates round-trip through registration into its view,
+    replaced whole on re-registration, and empty when omitted."""
+    body = {"runner_id": "r-gates", "workspace_id": "ws", "gates": ["build", "review"]}
+    assert client.post("/api/fleet/runners", json=body).status_code == 201
+    assert client.get("/api/fleet/runners/r-gates").json()["gates"] == ["build", "review"]
+
+    assert client.post("/api/fleet/runners", json={"runner_id": "r-gates", "workspace_id": "ws"}).status_code == 201
+    assert client.get("/api/fleet/runners/r-gates").json()["gates"] == []
+
+
 def test_runner_view_carries_the_registered_capability_snapshot(client: TestClient) -> None:
     """``RunnerView`` mirrors the real hub's ``capabilities`` field, so the
     board can read it back the same way it reads liveness or the pause brakes."""

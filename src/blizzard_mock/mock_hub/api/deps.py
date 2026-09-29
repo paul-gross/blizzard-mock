@@ -100,6 +100,8 @@ class RunnerRegistrationBody(BaseModel):
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
     # The runner's declared subscription roster — kept distinct from an absent one.
     subscriptions: list[RunnerSubscriptionDeclarationBody] | None = None
+    # The node names the runner holds for a human decision — reported, never enforced.
+    gates: list[str] = Field(default_factory=list)
 
 
 class RunnerFactBody(BaseModel):

@@ -91,7 +91,7 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
         _await_health(hub_port)
 
         runner_dir = tmp_path / "runner"
-        env = {**os.environ, "BZ_HUB_URL": f"http://127.0.0.1:{hub_port}"}
+        env = {**os.environ, "BZ_HUB_URL": f"http://127.0.0.1:{hub_port}", "BZ_RUNNER_GATES": "build,review"}
         init = subprocess.run(
             [str(runner_bin), "init", str(runner_dir)], env=env, capture_output=True, text=True, timeout=30
         )
@@ -113,6 +113,7 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     runners = service._state.list_runners()  # the only read-back this feature exposes
     assert len(runners) == 1, f"expected exactly one registered runner, got {runners!r}"
     row = runners[0]
+    assert row.gates == ("build", "review")
 
     # `known_harnesses` now binds two adapters (the OpenCode binding joined
     # Claude Code's), so the snapshot carries one capability per bound harness.

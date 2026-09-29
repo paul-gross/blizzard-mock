@@ -415,6 +415,7 @@ def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubServ
             for c in body.capabilities
         ),
         subscriptions=subscriptions,
+        gates=tuple(body.gates),
     )
     return {"runner_id": body.runner_id, "first_registration": first}
 

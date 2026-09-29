@@ -104,6 +104,7 @@ class RunnerRow:
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
+        gates: tuple[str, ...] = (),
     ) -> None:
         self.runner_id = runner_id
         self.workspace_id = workspace_id
@@ -120,6 +121,8 @@ class RunnerRow:
         # The runner's declared subscription roster, kept distinct from an absent one;
         # replaced whole on every (re-)registration, the same way `capabilities` is.
         self.declared_subscriptions = declared_subscriptions
+        # The node names the runner holds for a human decision, replaced whole on every (re-)registration.
+        self.gates = gates
         self.paused = False
 
 
@@ -141,11 +144,12 @@ class IHubState(Protocol):
         env_capacity: int | None = None,
         capabilities: tuple[RunnerCapability, ...] = (),
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
+        gates: tuple[str, ...] = (),
     ) -> bool:
         """Register/heartbeat a runner; return ``True`` on first registration.
 
-        ``url``/``redirect_uris``, ``env_capacity``, ``capabilities``, and
-        ``declared_subscriptions`` are overwritten unconditionally on
+        ``url``/``redirect_uris``, ``env_capacity``, ``capabilities``,
+        ``declared_subscriptions``, and ``gates`` are overwritten unconditionally on
         every call, like ``workspace_id``."""
         ...
 
