@@ -60,7 +60,7 @@ body), mirroring the real hub's own always-raising demand on this one route.
 | `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
 | `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
 | `POST /api/fleet/chunks/{id}/leases` | Direct, non-buffered `lease.minted` report — advances the fence (D-044), 202 `{"chunk_id"}` |
-| `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}` |
+| `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}`, or **409** when the chunk is stopped or done or the epoch is below the newest |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy |
@@ -79,8 +79,8 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | Kind | Effect |
 |------|--------|
 | `lease.minted` | Advances the fence (`chunk.latest_epoch`, D-044) |
-| `escalation.recorded` | Records the escalation — readable via `ChunkDetail.escalation` |
-| `question.asked` | Mints a pollable question — readable via `GET /questions/{id}` and `ChunkDetail.questions` |
+| `escalation.recorded` | Records the escalation — readable via `ChunkDetail.escalation`; rejected on a stopped or done chunk or below the newest epoch |
+| `question.asked` | Mints a pollable question — readable via `GET /questions/{id}` and `ChunkDetail.questions`; rejected on a stopped or done chunk or below the newest epoch |
 | `answer.delivered` | Marks the named question answered |
 | `runner.locally_paused` | Sets the runner's `locally_paused`/`_by`/`_reason` (runner-scoped) |
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
