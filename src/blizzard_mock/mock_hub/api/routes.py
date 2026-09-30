@@ -37,6 +37,7 @@ from blizzard_mock.mock_hub.domain.service import (
     QuestionNotFound,
     SystemArtifactNotFound,
     UnresolvableRunner,
+    WriteFenced,
 )
 from blizzard_mock.mock_hub.domain.state import DeclaredSubscription, RunnerCapability
 
@@ -460,6 +461,8 @@ def report_escalation(
         )
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except WriteFenced as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @fleet_router.post("/chunks/{chunk_id}/hub-advance")

@@ -1149,6 +1149,43 @@ def test_hub_advance_404s_on_unknown_chunk(client: TestClient) -> None:
     assert client.post("/api/fleet/chunks/unknown/hub-advance").status_code == 404
 
 
+def _push_fact(client: TestClient, kind: str, payload: dict, *, seq: int) -> dict:
+    resp = client.post(
+        "/api/fleet/events", json={"runner_id": "r1", "facts": [{"seq": seq, "kind": kind, "payload": payload}]}
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_a_stale_escalation_and_question_are_fenced_out(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id, epoch=2)
+    stale = client.post(
+        f"/api/fleet/chunks/{chunk_id}/escalations", json={"epoch": 1, "runner_id": "r1", "takeover_command": "x"}
+    )
+    assert stale.status_code == 409
+    escalated = _push_fact(
+        client, "escalation.recorded", {"chunk_id": chunk_id, "epoch": 1, "takeover_command": "x"}, seq=3
+    )
+    assert escalated["rejected"] == [3]
+    asked = _push_fact(client, "question.asked", {"chunk_id": chunk_id, "question_id": "q_1", "epoch": 1}, seq=4)
+    assert asked["rejected"] == [4]
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["escalation"] is None
+    assert client.get("/api/fleet/questions/q_1").status_code == 404
+
+
+def test_a_stopped_chunk_refuses_escalations_and_questions(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    assert client.post("/_seed/stop", json={"chunk_id": chunk_id}).status_code < 300
+    direct = client.post(
+        f"/api/fleet/chunks/{chunk_id}/escalations", json={"epoch": 1, "runner_id": "r1", "takeover_command": "x"}
+    )
+    assert direct.status_code == 409
+    asked = _push_fact(client, "question.asked", {"chunk_id": chunk_id, "question_id": "q_1", "epoch": 1}, seq=3)
+    assert asked["rejected"] == [3]
+
+
 # --- /events full fact vocabulary + ack partitioning -------------------------
 
 

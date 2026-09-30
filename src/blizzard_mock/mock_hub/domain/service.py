@@ -203,6 +203,9 @@ class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
 
 
+class WriteFenced(Exception): ...
+
+
 class QuestionNotFound(Exception):
     """No question with that id."""
 
@@ -772,9 +775,12 @@ class MockHubService:
         if kind == ESCALATION_RECORDED:
             chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
             if chunk is not None:
+                epoch = int(payload.get("epoch", 0))
+                if self._fence_refusal(chunk, epoch) is not None:
+                    return False
                 self._record_escalation(
                     chunk,
-                    epoch=int(payload.get("epoch", 0)),
+                    epoch=epoch,
                     takeover_command=str(payload.get("takeover_command", "")),
                     wrapped_takeover_command=str(payload.get("wrapped_takeover_command", "")),
                 )
@@ -783,6 +789,13 @@ class MockHubService:
             question_id = str(payload.get("question_id", ""))
             chunk_id = str(payload.get("chunk_id", ""))
             if not question_id or not chunk_id:
+                return False
+            asked_on = self._state.get_chunk(chunk_id)
+            if (
+                asked_on is not None
+                and self._state.get_question(question_id) is None
+                and self._fence_refusal(asked_on, int(payload.get("epoch", 0))) is not None
+            ):
                 return False
             self._state.put_question(
                 QuestionState(
@@ -910,6 +923,9 @@ class MockHubService:
         ``/events`` path does (the shared ``_record_escalation`` helper). Mirrors the
         real hub's 202 ``{"chunk_id"}`` body — no ``epoch`` in the response."""
         chunk = self._require(chunk_id)
+        refusal = self._fence_refusal(chunk, epoch)
+        if refusal is not None:
+            raise WriteFenced(refusal)
         self._record_escalation(
             chunk, epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
         )
@@ -1189,6 +1205,14 @@ class MockHubService:
         dispatch and the direct ``POST /chunks/{id}/leases`` route."""
         chunk.latest_epoch = max(chunk.latest_epoch, epoch)
         self._state.put_chunk(chunk)
+
+    @staticmethod
+    def _fence_refusal(chunk: ChunkState, epoch: int) -> str | None:
+        if chunk.status in (ChunkStatus.STOPPED, ChunkStatus.DONE):
+            return "chunk is terminal"
+        if chunk.latest_epoch and epoch < chunk.latest_epoch:
+            return f"stale epoch {epoch}; chunk is at {chunk.latest_epoch}"
+        return None
 
     def _record_escalation(
         self, chunk: ChunkState, *, epoch: int, takeover_command: str, wrapped_takeover_command: str = ""
