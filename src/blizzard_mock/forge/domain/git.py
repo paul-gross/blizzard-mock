@@ -32,6 +32,37 @@ class GitCommit:
     parents: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class GitCompareCommit:
+    """One commit in a compare's ``base..head`` range."""
+
+    sha: str
+    parents: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GitCompareFile:
+    """One file changed between a compare's merge base and head."""
+
+    filename: str
+    status: str  # GitHub's vocabulary: added/removed/modified/renamed/copied/changed
+    sha: str  # blob sha at head; at the merge base for a removed file
+    patch: str | None  # None for a binary change
+    previous_filename: str | None = None
+
+
+@dataclass(frozen=True)
+class GitCompare:
+    """``base...head`` resolved against the bare repo, GitHub-compare style."""
+
+    status: str  # identical/ahead/behind/diverged
+    ahead_by: int
+    behind_by: int
+    merge_base_sha: str
+    commits: list[GitCompareCommit]  # base..head, oldest first
+    files: list[GitCompareFile]  # diff of merge base against head
+
+
 class IReadGitBackend(Protocol):
     """Read-only operations over the directory of bare repos."""
 
@@ -48,6 +79,11 @@ class IReadGitBackend(Protocol):
         ...
 
     def get_commit(self, repo: Repo, ref: str) -> GitCommit: ...
+
+    def compare(self, repo: Repo, base: str, head: str) -> GitCompare:
+        """Compare ``base...head``. Raises ``BranchNotFound`` when either side
+        does not resolve."""
+        ...
 
     def is_mergeable(self, repo: Repo, base: str, head: str) -> bool:
         """True when ``head`` merges into ``base`` with no conflict, computed

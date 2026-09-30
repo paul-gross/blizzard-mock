@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import (
+    BranchNotFound,
+    CompareRefNotFound,
     HeadMismatch,
     IssueNotFound,
     LabelAlreadyExists,
@@ -19,7 +21,7 @@ from blizzard_mock.forge.domain.errors import (
     PullNotFound,
     ValidationError,
 )
-from blizzard_mock.forge.domain.git import GitCommit, IWriteGitBackend
+from blizzard_mock.forge.domain.git import GitCommit, GitCompare, IWriteGitBackend
 from blizzard_mock.forge.domain.levers import (
     ACTION_LEVERS,
     STATE_LEVERS,
@@ -438,6 +440,13 @@ class ForgeService:
     def commit(self, owner: str, name: str, ref: str) -> GitCommit:
         repo = self.get_repo(owner, name)
         return self._git.get_commit(repo, ref)
+
+    def compare(self, owner: str, name: str, base: str, head: str) -> GitCompare:
+        repo = self.get_repo(owner, name)
+        try:
+            return self._git.compare(repo, base, head)
+        except BranchNotFound as exc:
+            raise CompareRefNotFound(str(exc)) from exc
 
     def resolve_ref(self, owner: str, name: str, ref: str) -> str:
         repo = self.get_repo(owner, name)
