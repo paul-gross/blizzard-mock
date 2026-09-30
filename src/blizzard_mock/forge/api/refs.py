@@ -47,6 +47,13 @@ def list_check_runs(
     }
 
 
+@router.post("/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest", status_code=201)
+def rerequest_check_run(owner: str, repo: str, check_run_id: int) -> dict[str, Any]:
+    # Check runs are derived live from the lever set and hold no state, so a re-request
+    # has nothing to reset: it is acknowledged, exactly as GitHub's 201 with an empty body.
+    return {}
+
+
 @router.get("/repos/{owner}/{repo}/compare/{basehead:path}")
 def compare(
     owner: str,
