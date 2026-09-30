@@ -41,6 +41,7 @@ def compose_artifact(
     epoch: int,
     name: str,
     kind: str,
+    seq: int,
     clock: Clock,
     rng: Random,
     repo: str | None = None,
@@ -53,7 +54,8 @@ def compose_artifact(
     """One ``artifacts`` row, minted fresh (``art_<ulid>`` — the wire decodes
     ``recorded_at`` from the id, never from ``produced_at``). ``kind`` picks
     which payload flags are consistent; an unknown kind or an inconsistent pair
-    raises :class:`ArtifactCompositionError`.
+    raises :class:`ArtifactCompositionError`. ``seq`` is the chunk's durable write
+    order — the caller reads the chunk's current maximum and passes one past it.
     """
     if kind not in KINDS:
         raise ArtifactCompositionError(f"unknown artifact kind {kind!r} — one of {KINDS}")
@@ -97,5 +99,6 @@ def compose_artifact(
             "repo": row_repo,
             "forge": row_forge,
             "produced_at": clock.now(),
+            "seq": seq,
         },
     )
