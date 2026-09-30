@@ -317,6 +317,7 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("repo", String, nullable=True),
         Column("forge", String, nullable=True),
         Column("produced_at", DateTime, nullable=False),
+        Column("seq", Integer, nullable=False),
     )
     Table(
         "usage_facts",
@@ -1579,6 +1580,49 @@ def test_create_artifact_several_calls_land_under_different_node_epoch_pairs(tmp
             select(_table(meta, "artifacts")).where(_table(meta, "artifacts").c.chunk_id == chunk_id)
         ).all()
     assert sorted((r.node_name, r.epoch) for r in rows) == [("build", 1), ("build", 3), ("deliver", 2)]
+
+
+def test_create_artifact_continues_the_chunks_seq_from_its_current_maximum(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]
+    ).output.strip()
+    other_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]
+    ).output.strip()
+    artifacts = _table(meta, "artifacts")
+    with create_engine(url).begin() as conn:
+        conn.execute(
+            artifacts.insert().values(
+                artifact_id="art_existing",
+                chunk_id=chunk_id,
+                node_id="nd_x",
+                node_name="build",
+                epoch=1,
+                name="existing",
+                kind="asset",
+                data="",
+                produced_at=datetime(2026, 1, 1),
+                seq=7,
+            )
+        )
+
+    for target, name in ((chunk_id, "first"), (chunk_id, "second"), (other_id, "other")):
+        result = runner.invoke(
+            cli,
+            [
+                *("create", "artifact", "--store", "hub", "--url", url, "--chunk", target, "--name", name),
+                *("--kind", "asset", "--content", name, "--node", "build", "--epoch", "1"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(artifacts.c.chunk_id, artifacts.c.name, artifacts.c.seq)).all()
+    seqs = {(r.chunk_id, r.name): r.seq for r in rows}
+    assert [seqs[(chunk_id, n)] for n in ("existing", "first", "second")] == [7, 8, 9]
+    assert seqs[(other_id, "other")] == 1
 
 
 def test_create_artifact_mints_an_id_the_wires_decode_accepts(tmp_path: Path) -> None:

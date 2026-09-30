@@ -141,6 +141,7 @@ def test_the_done_chunks_two_steps_each_carry_their_own_artifact() -> None:
     assert len(artifacts) == 2
     artifact_steps = {(row.values["node_id"], row.values["epoch"]) for row in artifacts}
     assert artifact_steps == step_ids
+    assert [row.values["seq"] for row in artifacts] == [1, 2]  # write order within the chunk
 
 
 def test_stress_adds_a_deliberately_long_artifact_name() -> None:

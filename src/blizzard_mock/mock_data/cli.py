@@ -272,6 +272,13 @@ def _resolve_usage_defaults(
     return resolved_node, resolved_epoch, resolved_runner
 
 
+def _next_artifact_seq(service: SeedService, chunk_id: str) -> int:
+    """One past ``chunk_id``'s current maximum ``artifacts.seq`` — the store read that
+    keeps :func:`compose_artifact` pure."""
+    existing = service.query("artifacts", {"chunk_id": chunk_id})
+    return max((int(require_column(row, "seq", table="artifacts")) for row in existing), default=0) + 1  # type: ignore[arg-type]
+
+
 def _resolve_artifact_defaults(
     service: SeedService, chunk_id: str, *, node_name: str | None, epoch: int | None
 ) -> tuple[str, str, int]:
@@ -643,6 +650,7 @@ def create_artifact(
             epoch=resolved_epoch,
             name=name,
             kind=kind,
+            seq=_next_artifact_seq(service, chunk_id),
             clock=clock,
             rng=rng,
             repo=repo,
