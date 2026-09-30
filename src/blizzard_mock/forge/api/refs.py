@@ -1,9 +1,7 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
-Resolves refs to commits, compares two refs GitHub-style
-(``GET .../compare/{base}...{head}``), and supports an atomic compare-and-swap ref update
-(``PATCH .../git/refs/{ref}``). ``.../check-runs`` derives runs
-live from the active lever set.
+Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), and supports an atomic
+compare-and-swap ref update. ``.../check-runs`` derives runs live from the lever set.
 """
 
 from __future__ import annotations
