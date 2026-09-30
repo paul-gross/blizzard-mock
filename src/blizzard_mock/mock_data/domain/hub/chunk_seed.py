@@ -16,7 +16,7 @@ from blizzard_mock.clock import Clock
 from blizzard_mock.mock_data.domain import ids
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.graph_seed import BUILD_NODE_NAME, DELIVER_NODE_NAME, GraphContext
-from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
+from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_rows
 
 STOPPED = "stopped"
 DONE = "done"
@@ -127,8 +127,8 @@ def compose_chunk(
             },
         )
 
-    def lease(offset_seconds: int) -> FactRow:
-        return compose_lease_row(
+    def lease(offset_seconds: int) -> list[FactRow]:
+        return compose_lease_rows(
             chunk_id=minted_chunk_id, epoch=epoch, runner_id=runner_id, minted_at=at(offset_seconds)
         )
 
@@ -170,7 +170,7 @@ def compose_chunk(
 
     if status == DONE:
         rows.append(promoted())
-        rows.append(lease(2))
+        rows.extend(lease(2))
         # The graph's own edges: build --approved--> deliver --landed--> the
         # reserved terminal — one epoch, two node-steps.
         build_node = graph.node(BUILD_NODE_NAME)
@@ -250,7 +250,7 @@ def compose_chunk(
 
     if status == DELIVERING:
         rows.append(promoted())
-        rows.append(lease(2))
+        rows.extend(lease(2))
         resolved_name = node_name or DELIVER_NODE_NAME
         node = graph.node(resolved_name)
         if node.executor != "hub":
@@ -263,7 +263,7 @@ def compose_chunk(
 
     if status == RUNNING:
         rows.append(promoted())
-        rows.append(lease(2))
+        rows.extend(lease(2))
         resolved_name = node_name or BUILD_NODE_NAME
         node = graph.node(resolved_name)
         if node.executor == "hub":
