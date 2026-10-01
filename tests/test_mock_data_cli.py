@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     create_engine,
     insert,
     select,
@@ -284,6 +285,17 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("epoch", Integer, nullable=False),
         Column("runner_id", String, nullable=False),
         Column("minted_at", DateTime, nullable=False),
+        Column("lease_id", String, nullable=True),
+    )
+    Table(
+        "epoch_owners",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
+        Column("epoch", Integer, nullable=False),
+        Column("runner_id", String, nullable=True),
+        Column("recorded_at", DateTime, nullable=False),
+        UniqueConstraint("chunk_id", "epoch", name="uq_epoch_owners_chunk_id_epoch"),
     )
     Table(
         "route_created",
@@ -2046,6 +2058,56 @@ def test_create_lease_lands_a_lease_fact(tmp_path: Path) -> None:
             select(_table(meta, "lease_facts")).where(_table(meta, "lease_facts").c.chunk_id == chunk_id)
         ).all()
     assert [(r.runner_id, r.epoch) for r in rows] == [("r-lease", 5)]
+    with create_engine(url).begin() as conn:
+        owners = conn.execute(
+            select(_table(meta, "epoch_owners")).where(_table(meta, "epoch_owners").c.chunk_id == chunk_id)
+        ).all()
+    assert [(r.runner_id, r.epoch) for r in owners] == [("r-lease", 5)]
+
+
+def test_create_lease_hub_store_at_an_epoch_another_runner_owns_is_refused(tmp_path: Path) -> None:
+    """One owner per epoch: a second runner's lease at an owned epoch is a displaced
+    attempt's, refused before anything lands; the owner's own re-mint lands its lease only."""
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+
+    def lease(runner_id: str):  # type: ignore[no-untyped-def]
+        return runner.invoke(
+            cli,
+            [
+                "create",
+                "lease",
+                "--store",
+                "hub",
+                "--url",
+                url,
+                "--chunk",
+                chunk_id,
+                "--runner-id",
+                runner_id,
+                "--epoch",
+                "3",
+            ],
+        )
+
+    assert lease("r-a").exit_code == 0
+    refused = lease("r-b")
+    assert refused.exit_code != 0
+    assert "already owned by r-a" in refused.output
+    assert lease("r-a").exit_code == 0
+
+    with create_engine(url).begin() as conn:
+        leases = conn.execute(
+            select(_table(meta, "lease_facts")).where(_table(meta, "lease_facts").c.chunk_id == chunk_id)
+        ).all()
+        owners = conn.execute(
+            select(_table(meta, "epoch_owners")).where(_table(meta, "epoch_owners").c.chunk_id == chunk_id)
+        ).all()
+    assert [r.runner_id for r in leases] == ["r-a", "r-a"]
+    assert [(r.runner_id, r.epoch) for r in owners] == [("r-a", 3)]
 
 
 # --- create lease --store runner (implemented) -------------------------------

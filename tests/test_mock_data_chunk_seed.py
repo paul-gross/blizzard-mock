@@ -83,7 +83,7 @@ def test_done_lands_a_two_hop_terminal_path() -> None:
     ``deliver``->the reserved terminal — sharing one epoch, so the chunk carries
     two selectable node-steps rather than one."""
     seed = _compose("done")
-    assert _tables(seed.rows) == {"chunks", "chunk_promoted", "lease_facts", "transitions"}
+    assert _tables(seed.rows) == {"chunks", "chunk_promoted", "epoch_owners", "lease_facts", "transitions"}
     transitions = sorted(
         (row for row in seed.rows if row.table == "transitions"),
         key=lambda r: cast(datetime, r.values["recorded_at"]),
@@ -138,7 +138,14 @@ def test_paused_lands_a_pause_fact_reading_paused() -> None:
 
 def test_delivering_lands_a_transition_into_the_hub_node() -> None:
     seed = _compose("delivering")
-    assert _tables(seed.rows) == {"chunks", "chunk_promoted", "lease_facts", "route_created", "transitions"}
+    assert _tables(seed.rows) == {
+        "chunks",
+        "chunk_promoted",
+        "epoch_owners",
+        "lease_facts",
+        "route_created",
+        "transitions",
+    }
     transition = next(row for row in seed.rows if row.table == "transitions")
     assert transition.values["to_node_id"] == "nd_deliver"
     assert not any(row.table in ("chunk_stopped", "escalations", "questions", "chunk_pause_facts") for row in seed.rows)
@@ -146,7 +153,14 @@ def test_delivering_lands_a_transition_into_the_hub_node() -> None:
 
 def test_running_lands_a_live_route_and_a_non_hub_transition() -> None:
     seed = _compose("running")
-    assert _tables(seed.rows) == {"chunks", "chunk_promoted", "lease_facts", "route_created", "transitions"}
+    assert _tables(seed.rows) == {
+        "chunks",
+        "chunk_promoted",
+        "epoch_owners",
+        "lease_facts",
+        "route_created",
+        "transitions",
+    }
     transition = next(row for row in seed.rows if row.table == "transitions")
     assert transition.values["to_node_id"] == "nd_build"
     assert not any(row.table == "route_released" for row in seed.rows)

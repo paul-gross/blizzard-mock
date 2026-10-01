@@ -46,7 +46,7 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import (
     compose_graph,
     hydrate_graph_context,
 )
-from blizzard_mock.mock_data.domain.hub.lease_seed import compose_lease_row
+from blizzard_mock.mock_data.domain.hub.lease_seed import compose_epoch_owner_row, compose_lease_row
 from blizzard_mock.mock_data.domain.hub.question_seed import QuestionCompositionError, compose_question
 from blizzard_mock.mock_data.domain.hub.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
 from blizzard_mock.mock_data.domain.hub.runner_subscription_seed import (
@@ -867,8 +867,9 @@ def create_lease(
     seed: int | None,
 ) -> None:
     """Land one lease against an already-seeded chunk — store-polymorphic. Hub: one
-    ``lease_facts`` row, the shape ``create chunk --status running`` composes
-    internally. Runner: one ``leases`` row plus its ``lease_context`` sibling,
+    ``lease_facts`` row plus, when the epoch is still unowned, its ``epoch_owners`` row —
+    the shape ``create chunk --status running`` composes internally; an epoch another
+    owner already holds is refused. Runner: one ``leases`` row plus its ``lease_context`` sibling,
     always together (``domain/runner/lease_seed.py``)."""
     _require_store("lease", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
@@ -906,9 +907,19 @@ def create_lease(
             raise click.UsageError(f"{flag} has no column on the hub's lease_facts (--store hub) — runner store only")
     if seed is not None:
         raise click.UsageError("--seed mints nothing on the hub's lease_facts (--store hub) — runner store only")
-    row = compose_lease_row(chunk_id=chunk_id, epoch=epoch, runner_id=runner_id, minted_at=SystemClock().now())
+    now = SystemClock().now()
+    rows = [compose_lease_row(chunk_id=chunk_id, epoch=epoch, runner_id=runner_id, minted_at=now)]
+    owner = compose_epoch_owner_row(chunk_id=chunk_id, epoch=epoch, runner_id=runner_id, recorded_at=now)
+    owned = service.query("epoch_owners", {"chunk_id": chunk_id, "epoch": epoch})
+    if not owned:
+        rows.append(owner)
+    elif owned[0].get("runner_id") != owner.values["runner_id"]:
+        raise click.ClickException(
+            f"epoch {epoch} of chunk {chunk_id!r} is already owned by "
+            f"{owned[0].get('runner_id') or 'the hub'} — a lease there would be a displaced attempt's"
+        )
     try:
-        service.seed([row])
+        service.seed(rows)
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"created lease for chunk {chunk_id!r} (epoch={epoch}, runner_id={runner_id!r})")

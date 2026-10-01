@@ -129,9 +129,11 @@ its own entry below owns its flags.
   defaulting source exists against a runner store) and refuses `--runner-id`,
   naming the column; the hub side likewise refuses `--lease-id`/`--generation`.
 - `create lease --store {hub,runner} --chunk ID --runner-id R [--epoch N]` —
-  **implemented, store-polymorphic**. `--store hub` lands one `lease_facts` row
-  (`domain/hub/lease_seed.py`) — the same row shape `create chunk
-  --status running/delivering` composes internally. `--store runner` lands one
+  **implemented, store-polymorphic**. `--store hub` lands one `lease_facts` row plus,
+  while the epoch is unowned, its `epoch_owners` row (`domain/hub/lease_seed.py`) — the
+  same rows `create chunk --status running/delivering` composes internally, so the seeded
+  runner owns the epoch and the hub admits its writes there. An epoch another runner or the
+  hub already owns is refused, naming the owner. `--store runner` lands one
   `leases` row *plus* its `lease_context` sibling, always together
   (`domain/runner/lease_seed.py`, `[--node NAME] [--graph-id ID] [--retries-max N]
   [--seed N]`): the daemon's own lease reads (`list_active_leases`,
