@@ -112,10 +112,9 @@ _SEEDED_CLOCK_ANCHOR = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def _seeded_clock(seed: int | None) -> Clock:
-    """A clock pinned to :data:`_SEEDED_CLOCK_ANCHOR` under an explicit ``--seed``, the
-    real wall clock otherwise. The clock must be pinned alongside the RNG because
-    ``ids.ulid`` draws its leading 48 bits from it (pinned by tests/test_mock_data_cli.py::
-    test_create_graph_same_seed_mints_the_same_id_across_two_stores)."""
+    """Pin the clock with the RNG: ``ids.ulid`` draws time from it.
+
+    See ``test_create_graph_same_seed_mints_the_same_id_across_two_stores``."""
     return FixedClock(_SEEDED_CLOCK_ANCHOR) if seed is not None else SystemClock()
 
 
@@ -198,11 +197,7 @@ def _connect_fleet_store(label: str, url: str, engine: Engine) -> SeedService:
 
 
 def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: random.Random) -> GraphContext:
-    """Resolve ``--graph <name>`` (or its absence) to a :class:`GraphContext`.
-
-    Reuses the newest matching ``graphs`` row when found; mints and writes a
-    fresh one when absent, so ``create chunk`` never errors on an empty store.
-    """
+    """Reuse the newest matching graph or mint one for an empty store."""
     existing = service.query("graphs", {"name": name} if name else None)
     if existing:
         graph_row = max(existing, key=lambda row: str(require_column(row, "created_at", table="graphs")))
@@ -273,8 +268,7 @@ def _resolve_usage_defaults(
 
 
 def _next_artifact_seq(service: SeedService, chunk_id: str) -> int:
-    """One past ``chunk_id``'s current maximum ``artifacts.seq`` — the store read that
-    keeps :func:`compose_artifact` pure."""
+    """Read the chunk's next artifact sequence without burdening the composer."""
     existing = service.query("artifacts", {"chunk_id": chunk_id})
     return max((int(require_column(row, "seq", table="artifacts")) for row in existing), default=0) + 1  # type: ignore[arg-type]
 
@@ -325,10 +319,9 @@ def _resolve_artifact_defaults(
 
 
 def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_id: str | None) -> str | None:
-    """Resolve ``create event``'s ``--runner-id`` when omitted: the named chunk's newest
-    ``lease_facts`` runner, or :data:`_DEFAULT_EVENT_RUNNER_ID` absent either. An empty
-    string explicitly requests a hub-authored row — ``event_log.runner_id`` null, the
-    shape a live hub write produces for its own three kinds."""
+    """Default to the chunk's newest lease or mock-data runner.
+
+    An explicit empty string selects a hub-authored row (null runner_id)."""
     if runner_id == "":
         return None
     if runner_id is not None:
@@ -630,11 +623,9 @@ def create_artifact(
     epoch: int | None,
     seed: int | None,
 ) -> None:
-    """Land one ``artifacts`` row against an already-seeded chunk's node-step
-    (``domain/hub/artifact_seed.py``) — a peer of ``lease_facts``/``usage_facts``, not
-    an embedded column on ``chunks``. ``--kind`` constrains which payload flags are
-    accepted (README). Prints the minted artifact id, alone, on stdout.
-    """
+    """Land an artifact on a seeded node-step and print its minted id.
+
+    ``--kind`` constrains the accepted payload flags (README)."""
     _require_store("artifact", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     clock = _seeded_clock(seed)

@@ -47,8 +47,7 @@ def list_check_runs(
 
 @router.post("/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest", status_code=201)
 def rerequest_check_run(owner: str, repo: str, check_run_id: int) -> dict[str, Any]:
-    # Check runs are derived live from the lever set and hold no state, so a re-request
-    # has nothing to reset: it is acknowledged, exactly as GitHub's 201 with an empty body.
+    # Derived check runs have nothing to reset; acknowledge with GitHub's empty 201.
     return {}
 
 
@@ -75,7 +74,6 @@ def get_ref(
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
 ) -> dict[str, Any]:
-    # GitHub addresses a ref as e.g. ``heads/main``; resolve its short name.
     short = ref.removeprefix("heads/")
     sha = service.resolve_ref(owner, repo, short)
     return ser.ref_json(f"{owner}/{repo}", f"refs/{ref}", sha, base_url)
