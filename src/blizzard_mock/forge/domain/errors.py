@@ -42,6 +42,12 @@ class BranchNotFound(ForgeError):
     status = 422
 
 
+class CompareRefNotFound(ForgeError):
+    """A compare's base or head does not resolve to a commit (GitHub 404)."""
+
+    status = 404
+
+
 class NotFastForward(ForgeError):
     """A non-force ref update was not a fast-forward — the current ref sha is
     not an ancestor of the target sha (GitHub 422, ``Update is not a fast

@@ -438,6 +438,66 @@ def test_get_ref_and_commit(client: TestClient) -> None:
     assert commit["commit"]["message"].strip() == "main change"
 
 
+def _sha(client: TestClient, branch: str) -> str:
+    return client.get(f"/repos/{REPO}/git/ref/heads/{branch}").json()["object"]["sha"]
+
+
+def test_compare_diverged_over_http(client: TestClient) -> None:
+    resp = client.get(f"/repos/{REPO}/compare/main...feature")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["status"], body["ahead_by"], body["behind_by"]) == ("diverged", 1, 1)
+    assert body["merge_base_commit"]["sha"] == _sha(client, "old-main")
+    assert body["total_commits"] == 1
+    assert body["commits"] == [
+        {
+            "sha": _sha(client, "feature"),
+            "url": body["commits"][0]["url"],
+            "parents": [{"sha": _sha(client, "old-main")}],
+        }
+    ]
+    assert body["files"] == [
+        {
+            "filename": "feature.txt",
+            "status": "added",
+            "sha": body["files"][0]["sha"],
+            "patch": "@@ -0,0 +1 @@\n+feature",
+        }
+    ]
+
+
+def test_compare_identical_and_behind_over_http(client: TestClient) -> None:
+    assert client.get(f"/repos/{REPO}/compare/main...main").json()["status"] == "identical"
+    body = client.get(f"/repos/{REPO}/compare/main...old-main").json()
+    assert (body["status"], body["behind_by"], body["commits"]) == ("behind", 1, [])
+
+
+def test_compare_accepts_slashed_branch_names(client: TestClient, repos_dir: Path) -> None:
+    _git("--git-dir", str(repos_dir / BARE_REL), "branch", "feat/slashed", "feature")
+    body = client.get(f"/repos/{REPO}/compare/old-main...feat/slashed").json()
+    assert (body["status"], body["ahead_by"]) == ("ahead", 1)
+
+
+def test_compare_after_real_merge_lists_merge_commit_parents(client: TestClient) -> None:
+    feature_sha = _sha(client, "feature")
+    pr = _open_pull(client, "feature")
+    client.put(f"/repos/{REPO}/pulls/{pr['number']}/merge", json={"merge_method": "merge"})
+    body = client.get(f"/repos/{REPO}/compare/old-main...main").json()
+    assert body["status"] == "ahead"
+    merge = body["commits"][-1]
+    assert merge["sha"] == _sha(client, "main")
+    assert len(merge["parents"]) == 2
+    assert {"sha": feature_sha} in merge["parents"]
+
+
+def test_compare_unresolvable_ref_is_404(client: TestClient) -> None:
+    assert client.get(f"/repos/{REPO}/compare/main...ghost").status_code == 404
+
+
+def test_compare_malformed_basehead_is_422(client: TestClient) -> None:
+    assert client.get(f"/repos/{REPO}/compare/main").status_code == 422
+
+
 # -- git data: ref write (PR-free, fast-forward delivery) ------------------
 
 
@@ -564,6 +624,12 @@ def test_check_runs_read_green_when_no_lever(client: TestClient) -> None:
     run = body["check_runs"][0]
     assert run["status"] == "completed"
     assert run["conclusion"] == "success"
+
+
+def test_a_check_run_rerequest_is_acknowledged(client: TestClient) -> None:
+    resp = client.post(f"/repos/{REPO}/check-runs/1/rerequest")
+    assert resp.status_code == 201
+    assert resp.json() == {}
 
 
 def test_checks_pending_lever_reads_in_progress_check_run(client: TestClient) -> None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from blizzard_mock.forge.domain.git import GitCommit
+from blizzard_mock.forge.domain.git import GitCommit, GitCompare
 from blizzard_mock.forge.domain.levers import Lever
 from blizzard_mock.forge.domain.models import CheckRun, Comment, Issue, Label, Repo
 from blizzard_mock.forge.domain.service import MergeResult, PullView
@@ -128,6 +128,36 @@ def commit_json(repo_full: str, commit: GitCommit, base_url: str) -> dict[str, A
             },
         },
         "parents": [{"sha": sha} for sha in commit.parents],
+    }
+
+
+def compare_json(repo_full: str, compare: GitCompare, base_url: str) -> dict[str, Any]:
+    files: list[dict[str, Any]] = []
+    for f in compare.files:
+        entry: dict[str, Any] = {"filename": f.filename, "status": f.status, "sha": f.sha}
+        if f.patch is not None:
+            entry["patch"] = f.patch
+        if f.previous_filename is not None:
+            entry["previous_filename"] = f.previous_filename
+        files.append(entry)
+    return {
+        "status": compare.status,
+        "ahead_by": compare.ahead_by,
+        "behind_by": compare.behind_by,
+        "total_commits": len(compare.commits),
+        "merge_base_commit": {
+            "sha": compare.merge_base_sha,
+            "url": f"{base_url}/repos/{repo_full}/commits/{compare.merge_base_sha}",
+        },
+        "commits": [
+            {
+                "sha": c.sha,
+                "url": f"{base_url}/repos/{repo_full}/commits/{c.sha}",
+                "parents": [{"sha": p} for p in c.parents],
+            }
+            for c in compare.commits
+        ],
+        "files": files,
     }
 
 

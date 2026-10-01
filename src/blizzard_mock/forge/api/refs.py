@@ -1,8 +1,7 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
-Resolves refs to commits and supports an atomic compare-and-swap ref update
-(``PATCH .../git/refs/{ref}``). ``.../check-runs`` derives runs
-live from the active lever set.
+Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), and supports an atomic
+compare-and-swap ref update. ``.../check-runs`` derives runs live from the lever set.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from fastapi import APIRouter, Depends
 
 from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.deps import UpdateRefBody, get_base_url, get_service
+from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.service import ForgeService
 
 router = APIRouter(tags=["git"])
@@ -43,6 +43,28 @@ def list_check_runs(
         "total_count": len(runs),
         "check_runs": [ser.check_run_json(repo_full, run, base_url) for run in runs],
     }
+
+
+@router.post("/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest", status_code=201)
+def rerequest_check_run(owner: str, repo: str, check_run_id: int) -> dict[str, Any]:
+    # Check runs are derived live from the lever set and hold no state, so a re-request
+    # has nothing to reset: it is acknowledged, exactly as GitHub's 201 with an empty body.
+    return {}
+
+
+@router.get("/repos/{owner}/{repo}/compare/{basehead:path}")
+def compare(
+    owner: str,
+    repo: str,
+    basehead: str,
+    service: Annotated[ForgeService, Depends(get_service)],
+    base_url: Annotated[str, Depends(get_base_url)],
+) -> dict[str, Any]:
+    # ``:path`` so slashed branch names survive; ``...`` never occurs in a ref name.
+    base, sep, head = basehead.partition("...")
+    if not sep or not base or not head:
+        raise ValidationError(f"compare expects base...head, got {basehead!r}")
+    return ser.compare_json(f"{owner}/{repo}", service.compare(owner, repo, base, head), base_url)
 
 
 @router.get("/repos/{owner}/{repo}/git/ref/{ref:path}")

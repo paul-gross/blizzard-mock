@@ -17,9 +17,19 @@ from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
 from blizzard_mock.forge.domain.errors import BranchNotFound, RepoNotFound
-from blizzard_mock.forge.domain.git import GitAuthor, GitCommit
+from blizzard_mock.forge.domain.git import GitAuthor, GitCommit, GitCompare, GitCompareCommit, GitCompareFile
 from blizzard_mock.forge.domain.models import Repo as RepoModel
 from blizzard_mock.forge.internal.errors import GitErrorFactory
+
+#: ``git diff --name-status`` letter → GitHub's compare ``files[].status``.
+_FILE_STATUS = {
+    "A": "added",
+    "D": "removed",
+    "M": "modified",
+    "R": "renamed",
+    "C": "copied",
+    "T": "changed",
+}
 
 #: Committer identity stamped on forge-performed merge commits.
 _MERGE_IDENTITY = {
@@ -111,6 +121,62 @@ class GitBackend:
             author=author,
             parents=[p.hexsha for p in commit.parents],
         )
+
+    def compare(self, repo: RepoModel, base: str, head: str) -> GitCompare:
+        git = self._open(repo.owner, repo.name)
+        base_sha = self.resolve_ref(repo, base)
+        head_sha = self.resolve_ref(repo, head)
+        merge_base = git.git.merge_base(base_sha, head_sha)
+        ahead_by = int(git.git.rev_list("--count", f"{base_sha}..{head_sha}"))
+        behind_by = int(git.git.rev_list("--count", f"{head_sha}..{base_sha}"))
+        if ahead_by and behind_by:
+            status = "diverged"
+        elif ahead_by:
+            status = "ahead"
+        elif behind_by:
+            status = "behind"
+        else:
+            status = "identical"
+        commits = []
+        for line in git.git.rev_list("--reverse", "--topo-order", "--parents", f"{base_sha}..{head_sha}").splitlines():
+            sha, *parents = line.split()
+            commits.append(GitCompareCommit(sha=sha, parents=parents))
+        return GitCompare(
+            status=status,
+            ahead_by=ahead_by,
+            behind_by=behind_by,
+            merge_base_sha=merge_base,
+            commits=commits,
+            files=self._diff_files(git, merge_base, head_sha),
+        )
+
+    def _diff_files(self, git: Repo, base_sha: str, head_sha: str) -> list[GitCompareFile]:
+        fields = git.git.diff("--name-status", "-M", "-z", base_sha, head_sha).split("\0")
+        files: list[GitCompareFile] = []
+        i = 0
+        while i < len(fields) and fields[i]:
+            letter = fields[i][0]
+            if letter in "RC":
+                previous, filename = fields[i + 1], fields[i + 2]
+                i += 3
+            else:
+                previous, filename = None, fields[i + 1]
+                i += 2
+            paths = [p for p in (previous, filename) if p is not None]
+            raw = git.git.diff("-M", base_sha, head_sha, "--", *paths)
+            hunk_start = raw.find("\n@@")
+            patch = raw[hunk_start + 1 :] if hunk_start != -1 else None
+            blob_at = base_sha if letter == "D" else head_sha
+            files.append(
+                GitCompareFile(
+                    filename=filename,
+                    status=_FILE_STATUS[letter],
+                    sha=git.git.rev_parse(f"{blob_at}:{filename}"),
+                    patch=patch,
+                    previous_filename=previous if letter == "R" else None,
+                )
+            )
+        return files
 
     def is_mergeable(self, repo: RepoModel, base: str, head: str) -> bool:
         git = self._open(repo.owner, repo.name)
