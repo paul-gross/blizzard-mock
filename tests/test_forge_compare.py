@@ -1,9 +1,4 @@
-"""Unit coverage for the forge's ``compare`` over a purpose-built bare repo.
-
-Pins each compare ``status`` and the merge-commit case directly against the
-git backend: a head that merged a newer base carries that base-side commit in
-its range, and every commit reports its parents.
-"""
+"""Compare statuses, merge-commit ranges and parents against a bare repo."""
 
 from __future__ import annotations
 
@@ -35,9 +30,6 @@ def _commit(work: Path, message: str) -> str:
 
 @pytest.fixture
 def shas(tmp_path: Path) -> dict[str, str]:
-    """``c0`` (root, also branch ``root``) → ``m1`` on ``main``; ``feature/topic``
-    (``t1``: add, rename, delete) off ``c0``; ``feature/merged`` (``t2``, then a
-    merge ``mm`` of ``main``) off ``c0``."""
     work = tmp_path / "work"
     subprocess.run(["git", "init", "-b", "main", str(work)], check=True, capture_output=True)
     _git(work, "config", "user.email", "seed@t")
@@ -102,7 +94,6 @@ def test_diverged_diffs_merge_base_against_head(backend: GitBackend, shas: dict[
     assert result.merge_base_sha == shas["c0"]
     assert [c.sha for c in result.commits] == [shas["t1"]]
     files = {f.filename: f for f in result.files}
-    # a.txt changed only on the base side, so it is absent from a merge-base diff.
     assert set(files) == {"new.txt", "moved.txt", "gone.txt"}
     assert files["new.txt"].status == "added"
     assert files["new.txt"].patch == "@@ -0,0 +1 @@\n+new"
@@ -123,11 +114,9 @@ def test_merge_commit_range_includes_base_side_commits_with_parents(backend: Git
     result = backend.compare(REPO, "root", "feature/merged")
     assert (result.status, result.ahead_by, result.behind_by) == ("ahead", 3, 0)
     by_sha = {c.sha: c.parents for c in result.commits}
-    # The base-side non-merge commit brought in by the merge is part of the range.
     assert set(by_sha) == {shas["t2"], shas["m1"], shas["mm"]}
     assert by_sha[shas["mm"]] == [shas["t2"], shas["m1"]]
     assert by_sha[shas["m1"]] == [shas["c0"]]
-    # Oldest first: the merge comes after both of its parents.
     assert result.commits[-1].sha == shas["mm"]
 
 

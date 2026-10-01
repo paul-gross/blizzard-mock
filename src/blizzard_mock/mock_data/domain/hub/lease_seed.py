@@ -1,10 +1,7 @@
-"""Composes a hub lease mint — one ``lease_facts`` row and its epoch's ``epoch_owners`` row
-(``bzh:facts-not-status``).
+"""Compose a hub lease and its epoch owner (``bzh:facts-not-status``).
 
-The shape ``running``/``delivering`` chunks share — this module is the one place the row
-shapes live, composed once and reused rather than re-derived. The hub admits a runner's
-write only at an epoch that runner owns, so a seeded lease without its owner row would
-leave a chunk no runner can drive.
+Running and delivering chunks share these rows; without an owner, the seeded
+runner cannot write at that epoch.
 """
 
 from __future__ import annotations
@@ -26,8 +23,7 @@ def compose_lease_row(*, chunk_id: str, epoch: int, runner_id: str, minted_at: d
 
 
 def compose_epoch_owner_row(*, chunk_id: str, epoch: int, runner_id: str, recorded_at: datetime) -> FactRow:
-    """One ``epoch_owners`` row — ``runner_id`` owns the chunk's ``epoch``; the hub for
-    :data:`HUB_RUNNER_ID`. The store keeps one owner per epoch."""
+    """One epoch owner; :data:`HUB_RUNNER_ID` denotes the hub."""
     return FactRow(
         table="epoch_owners",
         values={

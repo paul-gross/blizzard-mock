@@ -51,12 +51,10 @@ def compose_artifact(
     content: str | None = None,
     content_size: int | None = None,
 ) -> FactRow:
-    """One ``artifacts`` row, minted fresh (``art_<ulid>`` — the wire decodes
-    ``recorded_at`` from the id, never from ``produced_at``). ``kind`` picks
-    which payload flags are consistent; an unknown kind or an inconsistent pair
-    raises :class:`ArtifactCompositionError`. ``seq`` is the chunk's durable write
-    order — the caller reads the chunk's current maximum and passes one past it.
-    """
+    """Mint an artifact with a caller-supplied durable ``seq``.
+
+    Unknown kinds or mismatched payload flags raise :class:`ArtifactCompositionError`;
+    the wire derives recorded_at from the minted id, not produced_at."""
     if kind not in KINDS:
         raise ArtifactCompositionError(f"unknown artifact kind {kind!r} — one of {KINDS}")
 

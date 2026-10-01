@@ -1,11 +1,7 @@
-"""Unit + component coverage for the mock-data CLI (``blizzard-mock:unit-test``).
+"""Mock-data CLI contracts against reflected SQLite hub and runner schemas.
 
-The surface (verbs, help, contract) is asserted, plus the implemented verbs —
-``reset`` (reflection-based delete-all), ``create runner``, ``create graph``, and
-``create chunk`` — exercised against a **real sqlite store** whose schema mirrors the
-hub's own DDL. No ``blizzard`` import: the CLI reflects whatever schema it is pointed
-at, so the test builds the tables itself. The still-stubbed ``fixture`` verbs are
-pinned too.
+The tests build their own tables without importing blizzard
+(``blizzard-mock:unit-test``).
 """
 
 from __future__ import annotations

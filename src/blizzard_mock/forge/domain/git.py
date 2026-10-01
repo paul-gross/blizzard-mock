@@ -1,8 +1,7 @@
-"""The git backend seam — the single git truth behind the forge.
+"""Read/write git backend Protocols over bare repos.
 
-Backed by a directory of bare git repos: mergeability is computed against
-real refs, and merging performs a real merge into the base branch. Declared
-as read/write Protocols (``bzh:repository-split`` / ``bzh:dependency-inversion``).
+Mergeability uses real refs; merges update the base branch
+(``bzh:repository-split`` / ``bzh:dependency-inversion``).
 """
 
 from __future__ import annotations
@@ -15,8 +14,6 @@ from blizzard_mock.forge.domain.models import Repo
 
 @dataclass(frozen=True)
 class GitAuthor:
-    """Authorship of a commit."""
-
     name: str
     email: str
     date: str  # ISO-8601, as git records it
@@ -24,8 +21,6 @@ class GitAuthor:
 
 @dataclass(frozen=True)
 class GitCommit:
-    """A commit resolved from the bare repo."""
-
     sha: str
     message: str
     author: GitAuthor
@@ -34,16 +29,12 @@ class GitCommit:
 
 @dataclass(frozen=True)
 class GitCompareCommit:
-    """One commit in a compare's ``base..head`` range."""
-
     sha: str
     parents: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class GitCompareFile:
-    """One file changed between a compare's merge base and head."""
-
     filename: str
     status: str  # GitHub's vocabulary: added/removed/modified/renamed/copied/changed
     sha: str  # blob sha at head; at the merge base for a removed file
@@ -53,19 +44,15 @@ class GitCompareFile:
 
 @dataclass(frozen=True)
 class GitCompare:
-    """``base...head`` resolved against the bare repo, GitHub-compare style."""
-
     status: str  # identical/ahead/behind/diverged
     ahead_by: int
     behind_by: int
     merge_base_sha: str
-    commits: list[GitCompareCommit]  # base..head, oldest first
+    commits: list[GitCompareCommit]
     files: list[GitCompareFile]  # diff of merge base against head
 
 
 class IReadGitBackend(Protocol):
-    """Read-only operations over the directory of bare repos."""
-
     def get_repo(self, owner: str, name: str) -> Repo:
         """Resolve ``owner/name`` to a backing bare repo, reading its default
         branch from ``HEAD``. Raises ``RepoNotFound`` when none backs it."""
@@ -97,8 +84,6 @@ class IReadGitBackend(Protocol):
 
 
 class IWriteGitBackend(IReadGitBackend, Protocol):
-    """Read-write variant, for callers that mutate state."""
-
     def merge(self, repo: Repo, base: str, head: str, message: str) -> str:
         """Really merge ``head`` into ``base`` in the bare repo and return the
         new commit sha on ``base``. Raises ``NotMergeable`` on real conflict."""

@@ -71,7 +71,6 @@ def test_nine_or_more_chunks_covers_every_status_and_round_robins_the_remainder(
         "not_ready",
         "ready",
     }
-    # the remainder (chunks 9, 10, 11) round-robins from the front of the priority order again
     assert statuses[9:] == statuses[0:3]
 
 
