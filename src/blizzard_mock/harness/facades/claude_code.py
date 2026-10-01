@@ -108,6 +108,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--permission-prompts", default=None, help="accepted for runner CLI compatibility, not acted on"
     )
+    # The operator bundle's companion files: accepted so a bundled runner's argv parses, recorded
+    # nowhere and never loaded.
+    parser.add_argument("--mcp-config", default=None, help="accepted for runner CLI compatibility, not acted on")
+    parser.add_argument("--agents", default=None, help="accepted for runner CLI compatibility, not acted on")
+    parser.add_argument("--plugin-dir", default=None, help="accepted for runner CLI compatibility, not acted on")
     return parser
 
 
