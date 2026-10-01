@@ -26,7 +26,7 @@ mock-claude-code — mock Claude Code coding-harness facade
 
 Usage:
   mock-claude-code -p [--output-format text|json] [--session-id <uuid>]
-    [--settings <path>] [--permission-mode <mode>] "<script>"
+    [--settings <path>] [--permission-mode <mode>] [--permission-prompts <target>] "<script>"
   mock-claude-code -p --resume <session-id> [--settings <path>] "<resume-script>"
 
 --settings names a Claude Code settings document; its PostToolUse and SessionEnd
@@ -105,6 +105,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--effort", default=None, help="recorded onto the session, not acted on")
     parser.add_argument("--autocompact", default=None, dest="compaction_window", help="recorded, not acted on")
     parser.add_argument("--permission-mode", default=None, help="accepted for runner CLI compatibility, not acted on")
+    parser.add_argument(
+        "--permission-prompts", default=None, help="accepted for runner CLI compatibility, not acted on"
+    )
     return parser
 
 

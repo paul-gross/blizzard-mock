@@ -318,6 +318,33 @@ def test_claude_facade_json_envelope(fenced_repo, capsys) -> None:
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
+def test_claude_facade_accepts_the_runner_permission_flags(fenced_repo) -> None:
+    """The runner appends ``--permission-mode`` and ``--permission-prompts`` to every
+    unattended invocation; the facade accepts both and acts on neither."""
+    cwd, env = fenced_repo
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "manual",
+            "--permission-prompts",
+            "none",
+            "verdict('approve')",
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "<Choice>approve</Choice>" in json.loads(proc.stdout)["result"]
+
+
 def test_claude_facade_error_envelope_carries_no_result_key(fenced_repo) -> None:
     """A real Claude Code ``error_during_execution`` envelope has no ``result`` key at
     all — a captured crash sample confirmed it — unlike every other subtype's envelope,
