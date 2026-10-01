@@ -1362,6 +1362,37 @@ def test_claude_facade_accepts_runner_permission_mode_on_spawn_and_resume(fenced
     assert [turn["kind"] for turn in _session_state(cwd, "sess-permissions")["invocations"]] == ["spawn", "resume"]
 
 
+def test_claude_facade_accepts_the_bundle_companion_flags_before_the_prompt(fenced_repo) -> None:
+    """The runner passes ``--mcp-config=<path>`` in its ``=`` form so the trailing prompt stays
+    positional; the mock parses the same argv and runs the prompt as its script."""
+    cwd, env = fenced_repo
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "json",
+            "--session-id",
+            "sess-bundle",
+            "--mcp-config=/snap/mcp.json",
+            "--agents",
+            "/snap/agents.json",
+            "--plugin-dir",
+            "/snap/plugins",
+            "verdict('pass')",
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert [turn["kind"] for turn in _session_state(cwd, "sess-bundle")["invocations"]] == ["spawn"]
+
+
 # --------------------------------------------------------------------------- #
 # The OpenCode facade wire: a server-assigned session, JSONL events, and the
 # model/variant/permission flags recorded onto the shared invocation record.
