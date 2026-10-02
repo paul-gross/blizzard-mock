@@ -297,3 +297,22 @@ def test_the_sqlite_seed_engine_sets_a_busy_timeout_and_postgres_does_not(monkey
 
     assert recorded[0].get("timeout", 0) > 0
     assert recorded[1] == {}
+
+
+def test_the_envelope_carries_the_seeded_graph_name_and_labels_each_work_ref(hub_client: TestClient) -> None:
+    """The real hub's envelope names the graph and renders each ref's source-native label —
+    ``{source}#{ref}``, or ``hub:{ref}`` for the hub's own source."""
+    spec = {
+        **_HUB_SPEC,
+        "graph_name": "advanced",
+        "work_refs": [{"source": "o-r", "ref": "1"}, {"source": "hub", "ref": "9"}],
+    }
+    chunk_id = hub_client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    envelope = hub_client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
+
+    assert envelope["graph_name"] == "advanced"
+    assert envelope["work_refs"] == [
+        {"source": "o-r", "ref": "1", "label": "o-r#1"},
+        {"source": "hub", "ref": "9", "label": "hub:9"},
+    ]

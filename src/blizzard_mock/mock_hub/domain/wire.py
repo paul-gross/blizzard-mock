@@ -80,6 +80,7 @@ class SystemArtifactView(BaseModel):
 class NodeEnvelope(BaseModel):
     chunk_id: str
     graph_id: str
+    graph_name: str | None = None
     epoch: int
     node: NodeConfig
     prompt: str | None

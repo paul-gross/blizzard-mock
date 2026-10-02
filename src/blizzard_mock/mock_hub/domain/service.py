@@ -36,6 +36,7 @@ from blizzard_mock.mock_hub.domain.models import (
     RoutineProposalState,
     ScopeSpec,
     SystemArtifactSpec,
+    WorkRefSpec,
 )
 from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
@@ -97,6 +98,11 @@ EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
 
 #: The one miss reason surfaced as a per-slug `condition` — restated from the real hub, not imported.
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
+
+
+def _work_ref_label(ref: WorkRefSpec) -> str:
+    """A work ref's source-native token, rendered the way the real hub's sources render it."""
+    return f"hub:{ref.ref}" if ref.source == "hub" else f"{ref.source}#{ref.ref}"
 
 
 class _ExternalSubscriptionUsageWindowFact(BaseModel):
@@ -300,6 +306,7 @@ class MockHubService:
         chunk = ChunkState(
             chunk_id=chunk_id,
             graph_id=spec.graph_id,
+            graph_name=spec.graph_name,
             default_model=list(spec.default_model),
             default_effort=spec.default_effort,
             default_harnesses=list(spec.default_harnesses),
@@ -1296,6 +1303,7 @@ class MockHubService:
         return NodeEnvelope(
             chunk_id=chunk.chunk_id,
             graph_id=chunk.graph_id,
+            graph_name=chunk.graph_name,
             epoch=epoch,
             node=NodeConfig(
                 node_id=node_id,
@@ -1324,7 +1332,7 @@ class MockHubService:
             ),
             prompt=node.prompt,
             judgement_prompt=node.judgement_prompt,
-            work_refs=[p.model_dump() for p in chunk.work_refs],
+            work_refs=[{**p.model_dump(), "label": _work_ref_label(p)} for p in chunk.work_refs],
             graph_artifacts=[GraphArtifact(name=a.name, kind=a.kind, content=a.content) for a in chunk.graph_artifacts],
         )
 

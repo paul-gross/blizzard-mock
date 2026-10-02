@@ -331,6 +331,8 @@ class ChunkSpec(BaseModel):
 
     chunk_id: str | None = None
     graph_id: str = "gr_mock"
+    #: The pinned graph's name the envelope reports; ``None`` models a hub that omits it.
+    graph_name: str | None = None
     # Both default to express no preference, pinned by
     # tests/test_pin_mock.py.
     default_model: list[str] = Field(default_factory=list)
@@ -363,6 +365,7 @@ class ChunkState(BaseModel):
 
     chunk_id: str
     graph_id: str
+    graph_name: str | None = None
     default_model: list[str] = Field(default_factory=list)
     default_effort: str | None = None
     default_harnesses: list[str] = Field(default_factory=list)
