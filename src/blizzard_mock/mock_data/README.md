@@ -22,7 +22,7 @@ forge state (`blizzard_mock.forge`), and git state
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
 verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`,
-`artifact`, `usage`, `lease`, `escalation`, `question`, `garden-proposal`,
+`artifact`, `usage`, `lease`, `escalation`, `question`, `decision`, `garden-proposal`,
 `event`, `runner-pause`, `transcript-segment`), `scenario` (a group of its
 own: `board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
 
@@ -161,6 +161,15 @@ its own entry below owns its flags.
   has no dedicated "resumed" row beyond the delivery. Each call mints its own
   question id, so a chunk can carry several independent trails. Prints the minted
   question id, alone, on stdout.
+- `create decision --store hub --chunk ID --choice NAME[=DESCRIPTION]... [--node NAME] [--imposed-by-runner R] [--resolve NAME --resolved-by W] [--epoch N] [--seed N]`
+  — **implemented**. Lands one open-or-resolved `decisions` row
+  (`domain/hub/decision_seed.py`); `waiting_on_human` derives from a decision no
+  transition has closed, and an open one lists in the fleet's open decisions.
+  `--node`/`--epoch` default off the chunk's newest transition and lease, as for
+  `create artifact`. `--imposed-by-runner` marks a runner-configured gate; omitted,
+  the gate is graph-declared. `--resolve`/`--resolved-by` (required together;
+  `--resolve` must name a `--choice`) also land a `decision_resolutions` row.
+  Prints the minted decision id, alone, on stdout.
 - `create garden-proposal --store hub --routine NAME --class CLASS [--title T] [--body T] [--created-at ISO8601] [--closure {passed,accepted-minted,accepted-declined}] [--closed-by W] [--seed N]`
   — **implemented**. Lands one open-or-closed `garden_proposals` row
   (`domain/hub/garden_proposal_seed.py`); no already-seeded chunk or routine is
