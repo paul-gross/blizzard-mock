@@ -185,7 +185,11 @@ def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> Gar
 
 
 def _counts_response(rows: list[AnalyticsCountRowSpec]) -> AnalyticsCountsResponse:
-    return AnalyticsCountsResponse(counts=[AnalyticsCountView(key=r.key, count=r.count) for r in rows])
+    return AnalyticsCountsResponse(
+        counts=[
+            AnalyticsCountView(key=r.key, count=r.count, graph_name=r.graph_name, node_name=r.node_name) for r in rows
+        ]
+    )
 
 
 def _spend_response(rows: list[AnalyticsSpendRowSpec]) -> AnalyticsSpendResponse:
@@ -199,6 +203,8 @@ def _spend_response(rows: list[AnalyticsSpendRowSpec]) -> AnalyticsSpendResponse
                 cache_create_tokens=r.cache_create_tokens,
                 cost_usd=r.cost_usd,
                 cost_partial=r.cost_partial,
+                graph_name=r.graph_name,
+                node_name=r.node_name,
             )
             for r in rows
         ]

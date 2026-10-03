@@ -274,10 +274,14 @@ def get_chunk_analytics_counts_agent_types(
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/nodes")
 def get_chunk_analytics_counts_nodes(
-    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+    chunk_id: str,
+    since: Annotated[str, Query()],
+    service: Annotated[MockHubService, Depends(get_service)],
+    by_name: Annotated[bool, Query()] = False,
 ) -> object:
     """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/nodes``.
-    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
+    ``since`` is required for wire-contract fidelity; the mock ignores its value, and ``by_name`` too:
+    the mock serves its seeded rows as-is rather than aggregating."""
     try:
         return service.analytics_counts_nodes(chunk_id)
     except ChunkNotFound as exc:
@@ -288,10 +292,14 @@ def get_chunk_analytics_counts_nodes(
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/spend/nodes")
 def get_chunk_analytics_spend_nodes(
-    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+    chunk_id: str,
+    since: Annotated[str, Query()],
+    service: Annotated[MockHubService, Depends(get_service)],
+    by_name: Annotated[bool, Query()] = False,
 ) -> object:
     """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/nodes``.
-    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
+    ``since`` is required for wire-contract fidelity; the mock ignores its value, and ``by_name`` too:
+    the mock serves its seeded rows as-is rather than aggregating."""
     try:
         return service.analytics_spend_nodes(chunk_id)
     except ChunkNotFound as exc:
@@ -302,10 +310,14 @@ def get_chunk_analytics_spend_nodes(
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/spend/graphs")
 def get_chunk_analytics_spend_graphs(
-    chunk_id: str, since: Annotated[str, Query()], service: Annotated[MockHubService, Depends(get_service)]
+    chunk_id: str,
+    since: Annotated[str, Query()],
+    service: Annotated[MockHubService, Depends(get_service)],
+    by_name: Annotated[bool, Query()] = False,
 ) -> object:
     """Mirrors the real hub's ``GET /api/fleet/chunks/{id}/analytics/spend/graphs``.
-    ``since`` is required for wire-contract fidelity; the mock ignores its value."""
+    ``since`` is required for wire-contract fidelity; the mock ignores its value, and ``by_name`` too:
+    the mock serves its seeded rows as-is rather than aggregating."""
     try:
         return service.analytics_spend_graphs(chunk_id)
     except ChunkNotFound as exc:
