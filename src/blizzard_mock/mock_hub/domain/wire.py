@@ -360,6 +360,8 @@ class AnalyticsCountView(BaseModel):
 
     key: str
     count: int
+    graph_name: str | None = None
+    node_name: str | None = None
 
 
 class AnalyticsCountsResponse(BaseModel):
@@ -379,6 +381,8 @@ class AnalyticsSpendView(BaseModel):
     cache_create_tokens: int
     cost_usd: float
     cost_partial: bool
+    graph_name: str | None = None
+    node_name: str | None = None
 
 
 class AnalyticsSpendResponse(BaseModel):

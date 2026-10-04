@@ -3141,7 +3141,7 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
         else ("spend_nodes" if suffix == "spend/nodes" else "spend_graphs")
     )
     row = (
-        {"key": "k1", "count": 3}
+        {"key": "k1", "count": 3, "graph_name": "g", "node_name": "n"}
         if suffix.startswith("counts/")
         else {
             "key": "k1",
@@ -3151,6 +3151,8 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
             "cache_create_tokens": 5,
             "cost_usd": 0.1,
             "cost_partial": False,
+            "graph_name": "g",
+            "node_name": "n",
         }
     )
     spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"}, analytics={key: [row]})
@@ -3160,6 +3162,13 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
     assert resp.status_code == 200, resp.text
     envelope_key = "counts" if suffix.startswith("counts/") else "spend"
     assert resp.json()[envelope_key] == [row]
+    if suffix in {"counts/nodes", "spend/nodes", "spend/graphs"}:
+        rolled = client.get(
+            f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}",
+            params={"since": "2020-01-01T00:00:00Z", "by_name": "true"},
+        )
+        assert rolled.status_code == 200, rolled.text
+        assert rolled.json()[envelope_key] == [row]  # the mock serves its seeded rows as-is
 
 
 # --- answered findings (worker-scoped per-chunk read) -------------------------
