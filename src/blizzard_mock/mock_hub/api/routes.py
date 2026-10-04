@@ -24,10 +24,16 @@ from blizzard_mock.mock_hub.api.deps import (
     TranscriptSegmentBatchBody,
     get_service,
 )
-from blizzard_mock.mock_hub.domain.models import RoutineProposalState
+from blizzard_mock.mock_hub.domain.models import (
+    ClaimConflict,
+    ClaimDeniedNotReady,
+    ClaimDeniedTerminal,
+    NoCurrentNode,
+    RekeyDeniedTerminal,
+    RoutineProposalState,
+)
 from blizzard_mock.mock_hub.domain.service import (
     ChunkNotFound,
-    ClaimConflict,
     ClaimIncompatible,
     DependencyUnmet,
     FindingNotInAnsweredSet,
@@ -39,7 +45,12 @@ from blizzard_mock.mock_hub.domain.service import (
     UnresolvableRunner,
     WriteFenced,
 )
-from blizzard_mock.mock_hub.domain.state import DeclaredSubscription, RunnerCapability
+from blizzard_mock.mock_hub.domain.state import (
+    ClaimDeniedPaused,
+    ClaimDeniedUnregistered,
+    DeclaredSubscription,
+    RunnerCapability,
+)
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub.
@@ -124,6 +135,20 @@ def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends
             workspace_id=body.workspace_id,
             environment_ids=body.environment_ids,
         )
+    except ClaimDeniedUnregistered as exc:
+        return JSONResponse(
+            status_code=403, content={"chunk_id": body.chunk_id, "runner_id": exc.runner_id, "detail": str(exc)}
+        )
+    except ClaimDeniedPaused as exc:
+        return JSONResponse(
+            status_code=403,
+            content={"chunk_id": body.chunk_id, "runner_id": exc.runner_id, "detail": "runner is paused at the hub"},
+        )
+    except ClaimDeniedTerminal as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"chunk_id": body.chunk_id, "status": exc.status.value, "detail": "chunk is terminal"},
+        )
     except ClaimConflict as exc:
         return JSONResponse(
             status_code=409,
@@ -132,6 +157,11 @@ def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends
                 "held_by_runner_id": exc.held_by_runner_id,
                 "detail": "chunk already claimed",
             },
+        )
+    except ClaimDeniedNotReady as exc:
+        # The status-carrying terminal shape: a runner skips the chunk as it does an ended one.
+        return JSONResponse(
+            status_code=409, content={"chunk_id": body.chunk_id, "status": exc.status.value, "detail": str(exc)}
         )
     except DependencyUnmet as exc:
         return JSONResponse(
@@ -161,6 +191,8 @@ def rekey_route_token(chunk_id: str, service: Annotated[MockHubService, Depends(
         return service.rekey_route_token(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except RekeyDeniedTerminal as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @fleet_router.get("/chunks/{chunk_id}")
@@ -187,6 +219,8 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
         return service.envelope(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except NoCurrentNode as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @fleet_router.get("/chunks/{chunk_id}/work-items")

@@ -7,10 +7,11 @@ the mock's own control vocabulary: a scripted graph an agent seeds.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # --- Enums mirrored from blizzard.foundation (value-identical) ---------------
 
@@ -33,7 +34,9 @@ class JudgedBy(StrEnum):
 class ChunkStatus(StrEnum):
     """The derived statuses the mock reports (subset of the real ``ChunkStatus``)."""
 
+    NOT_READY = "not_ready"
     READY = "ready"
+    PAUSED = "paused"
     RUNNING = "running"
     DELIVERING = "delivering"
     NEEDS_HUMAN = "needs_human"
@@ -176,6 +179,16 @@ class QuestionState(BaseModel):
     answered_at: str | None = None
     delivered: bool = False
     delivered_at: str | None = None
+
+    def delivery_refusal(self, *, chunk_id: str) -> str | None:
+        """Why an ``answer.delivered`` report naming ``chunk_id`` cannot land, or ``None``.
+        Delivery is the answer's return trip to the asking session, so a report naming another
+        chunk is refused, and so is one for a question not yet answered."""
+        if chunk_id != self.chunk_id:
+            return f"question {self.question_id} belongs to chunk {self.chunk_id}"
+        if not self.answered:
+            return f"question {self.question_id} is not answered"
+        return None
 
 
 class WorkRefSpec(BaseModel):
@@ -361,6 +374,15 @@ class ChunkSpec(BaseModel):
     #: The chunk's own canned counts/spend rows — served as-is, gated on
     #: ``garden_run`` exactly like the garden reads above.
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
+    #: The status seeded with no live route: ``ready``, or one a runner may not claim; never ``running``.
+    status: ChunkStatus = ChunkStatus.READY
+
+    @field_validator("status")
+    @classmethod
+    def _routeless(cls, status: ChunkStatus) -> ChunkStatus:
+        if status is ChunkStatus.RUNNING:
+            raise ValueError("a chunk is running only under a live route; claim it instead of seeding it running")
+        return status
 
 
 # --- The in-memory state row the service advances ----------------------------
@@ -408,3 +430,103 @@ class ChunkState(BaseModel):
 
     def node(self, node_id: str) -> NodeSpec | None:
         return self.nodes.get(node_id)
+
+    @property
+    def ended(self) -> bool:
+        """``done`` or ``stopped`` — the chunk has no node-step left to run."""
+        return self.status in (ChunkStatus.DONE, ChunkStatus.STOPPED)
+
+    def refuse_claim(self) -> None:
+        """Refuse a claim the chunk cannot grant, in the real hub's order: an ended chunk
+        (:class:`ClaimDeniedTerminal`), a held route (:class:`ClaimConflict`), then any status
+        but ``ready`` (:class:`ClaimDeniedNotReady`)."""
+        if self.ended:
+            raise ClaimDeniedTerminal(chunk_id=self.chunk_id, status=self.status)
+        if self.claimed:
+            raise ClaimConflict(self.route_runner_id or "unknown")
+        if self.status is not ChunkStatus.READY:
+            raise ClaimDeniedNotReady(chunk_id=self.chunk_id, status=self.status)
+
+    def refuse_rekey(self) -> None:
+        """Refuse to re-key a route left on an ended chunk (:class:`RekeyDeniedTerminal`)."""
+        if self.ended:
+            raise RekeyDeniedTerminal(chunk_id=self.chunk_id, status=self.status)
+
+    def refuse_envelope(self) -> None:
+        """Refuse the envelope of an ended chunk (:class:`NoCurrentNode`)."""
+        if self.ended:
+            raise NoCurrentNode(self.chunk_id)
+
+    def incoherent_attempt(self, *, from_node_id: str, epoch: int, open_question_ids: Sequence[str]) -> str | None:
+        """Why the attempt at ``epoch`` cannot report out of ``from_node_id``, or ``None``: the
+        report is not from the chunk's current node, the attempt's own escalation is open, or one
+        of its own questions (``open_question_ids``, oldest first) is unanswered."""
+        current = self.current_node_id
+        if current is not None and from_node_id != current:
+            return f"node `{from_node_id}` is not the chunk's current node `{current}` at epoch {epoch}"
+        if self.escalation is not None and self.escalation.epoch == epoch:
+            return f"the attempt at epoch {epoch} escalated — requeue the chunk before it moves on"
+        if open_question_ids:
+            return f"question {open_question_ids[0]} is open — answer it before the chunk moves on"
+        return None
+
+    def hub_executed(self, from_node_id: str) -> str | None:
+        """Why a runner cannot report out of ``from_node_id``, or ``None``: the hub's own
+        executor authors a hub-executed node's transitions."""
+        node = self.node(from_node_id)
+        if node is not None and node.executor is Executor.HUB:
+            return f"node `{from_node_id}` is hub-executed — the hub authors its transitions"
+        return None
+
+
+def ships_from_lease_holder(owner: str | None, runner_id: str) -> bool:
+    """Whether a transcript record shipped by ``runner_id`` comes from its epoch's owner. An
+    epoch another runner owns refuses it; an epoch with no owner recorded yet admits it, since
+    the fact lane that records the owner may trail the transcript lane."""
+    return owner is None or owner == runner_id
+
+
+# --- Refusals the model raises -------------------------------------------------
+
+
+class ClaimConflict(Exception):
+    """The chunk is already claimed — the losing runner gets a 409."""
+
+    def __init__(self, held_by_runner_id: str) -> None:
+        super().__init__(f"chunk already claimed by {held_by_runner_id}")
+        self.held_by_runner_id = held_by_runner_id
+
+
+class ClaimDeniedTerminal(Exception):
+    """The chunk has ended — not a race loss: it can never be claimed again."""
+
+    def __init__(self, *, chunk_id: str, status: ChunkStatus) -> None:
+        super().__init__(f"chunk {chunk_id} is {status.value}, not claimable")
+        self.chunk_id = chunk_id
+        self.status = status
+
+
+class ClaimDeniedNotReady(Exception):
+    """The chunk is not ``ready`` and holds no live route, so the hub grants it to no runner."""
+
+    def __init__(self, *, chunk_id: str, status: ChunkStatus) -> None:
+        super().__init__(f"chunk {chunk_id} is {status.value}, not ready to claim")
+        self.chunk_id = chunk_id
+        self.status = status
+
+
+class RekeyDeniedTerminal(Exception):
+    """The live route sits on an ended chunk, where it confers no tenure — no token is minted."""
+
+    def __init__(self, *, chunk_id: str, status: ChunkStatus) -> None:
+        super().__init__(f"chunk {chunk_id} is {status.value}, its route confers no tenure")
+        self.chunk_id = chunk_id
+        self.status = status
+
+
+class NoCurrentNode(Exception):
+    """The chunk has ended, so it has no node-step whose envelope could be read."""
+
+    def __init__(self, chunk_id: str) -> None:
+        super().__init__("chunk has no current runner node (terminal)")
+        self.chunk_id = chunk_id

@@ -126,6 +126,33 @@ class RunnerRow:
         self.paused = False
 
 
+class ClaimDeniedUnregistered(Exception):
+    """The claiming runner holds no registration — refused before any race. A live runner
+    re-registers every tick, so the next tick's claim follows a registration."""
+
+    def __init__(self, *, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} is not registered at the hub")
+        self.runner_id = runner_id
+
+
+class ClaimDeniedPaused(Exception):
+    """The claiming runner is paused at the hub registry — refused before any race."""
+
+    def __init__(self, *, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} is paused at the hub")
+        self.runner_id = runner_id
+
+
+def refuse_braked_runner(row: RunnerRow | None, *, runner_id: str) -> RunnerRow:
+    """Refuse a claim from a runner unregistered (:class:`ClaimDeniedUnregistered`) or paused at
+    the hub registry (:class:`ClaimDeniedPaused`); the registration the claim stands on otherwise."""
+    if row is None:
+        raise ClaimDeniedUnregistered(runner_id=runner_id)
+    if row.paused:
+        raise ClaimDeniedPaused(runner_id=runner_id)
+    return row
+
+
 class IHubState(Protocol):
     """The mock hub's write-through state: chunks, questions, the runner registry, and the
     global (not per-chunk) published system-artifact set."""

@@ -275,16 +275,16 @@ class RunnerFactAck(BaseModel):
 
 
 class TranscriptSegmentAck(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck`` —
-    the transcript lane's own ack, distinct from :class:`RunnerFactAck`. ``capped`` is the
-    cap-rejection class: a record over the per-record or per-chunk cap is capped but
-    still acknowledged, so the mark still advances past it."""
+    """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck``, distinct from :class:`RunnerFactAck`.
+    ``capped`` lists records over the per-record or per-chunk cap, acknowledged so the mark advances past
+    them; ``refused`` lists records whose epoch another runner owns, never stored, yet passed by the mark."""
 
     runner_id: str
     high_water: int
     applied: list[int] = Field(default_factory=list)
     already_applied: list[int] = Field(default_factory=list)
     capped: list[int] = Field(default_factory=list)
+    refused: list[int] = Field(default_factory=list)
 
 
 class LeaseTranscriptView(BaseModel):

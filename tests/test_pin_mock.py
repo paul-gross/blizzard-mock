@@ -243,6 +243,7 @@ def test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token
     runner.post("/_levers/lease_via_events", json={"chunk_id": chunk_id})
     runner.post("/_levers/omit_route_token", json={"chunk_id": chunk_id})
 
+    runner.post("/_drive/register")
     claimed = runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
     token = claimed["response"]["route_token"]
 

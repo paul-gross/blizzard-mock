@@ -42,28 +42,30 @@ so a test can assert a real runner presented its bearer token. `POST
 `runner_id` naming an already-registered runner and refuses `401` without one — the
 mock carries no bearer-token registry to resolve a principal from a header, so it takes
 this identity as a query parameter instead (never inside the parity-checked request
-body), mirroring the real hub's own always-raising demand on this one route.
+body), mirroring the real hub's own always-raising demand on this one route. A claim, likewise, demands that its `runner_id` names a registered runner
+and refuses `403` otherwise — a live runner re-registers every tick, so its next claim
+follows a registration.
 
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
 | `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
-| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope, or **409** conflict |
-| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token |
+| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a runner unregistered or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or incompatible capabilities |
+| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **404** with no live route, **409** when the route sits on an ended chunk |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
-| `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090) |
+| `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090); **409** once the chunk has ended (`done` or `stopped`) |
 | `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |
 | `GET /api/fleet/chunks/{id}/garden/findings` | A worker-scoped read of the chunk's own routine's live finding bucket, or **404** for a chunk seeded with no `garden_run` |
 | `GET /api/fleet/chunks/{id}/findings` | The findings the chunk's own accepted, minted garden proposal answers, or **404** for a chunk seeded with no `garden_answered_findings` |
 | `GET /api/fleet/chunks/{id}/findings/{finding_id}` | One finding within the chunk's own answered set, or **404** for an id outside it |
-| `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007) |
-| `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032) |
+| `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007); a `failure` outcome when the report is off the current node, its attempt escalated or holds an unanswered question of its own, or the node is hub-executed |
+| `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032); refused like a completion when the report is off the current node, escalated, or holds an open question |
 | `POST /api/fleet/chunks/{id}/leases` | Direct, non-buffered `lease.minted` report — advances the fence (D-044), 202 `{"chunk_id"}` |
 | `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}`, or **409** when the chunk is stopped or done or the epoch is below the newest |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
-| `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease, no cap policy |
+| `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and its reported per-slug usage collection |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
@@ -78,10 +80,10 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 
 | Kind | Effect |
 |------|--------|
-| `lease.minted` | Advances the fence (`chunk.latest_epoch`, D-044) |
+| `lease.minted` | Advances the fence (`chunk.latest_epoch`, D-044); the first runner to mint an epoch owns it |
 | `escalation.recorded` | Records the escalation — readable via `ChunkDetail.escalation`; rejected on a stopped or done chunk or below the newest epoch |
 | `question.asked` | Mints a pollable question — readable via `GET /questions/{id}` and `ChunkDetail.questions`; rejected on a stopped or done chunk or below the newest epoch |
-| `answer.delivered` | Marks the named question answered |
+| `answer.delivered` | Marks the named, answered question delivered; rejected for a question not yet answered or one belonging to another chunk; a repeat is applied and writes nothing |
 | `runner.locally_paused` | Sets the runner's `locally_paused`/`_by`/`_reason` (runner-scoped) |
 | `runner.locally_resumed` | Clears the runner's `locally_paused`/`_by`/`_reason` |
 | `usage.recorded` | Accepted (no fence, no gate) — no per-node-step usage ledger modeled |
@@ -121,7 +123,10 @@ to either a sample or a miss.
   (each mirroring the real hub's `FindingView` fields, minus `routine_name`/
   `scope_slug`, which `garden_run` supplies) seed the chunk's own garden bucket —
   omitted, the chunk carries no run context, mirroring a chunk that is not a routine
-  run. `garden_answered_findings` (each mirroring the real hub's `FindingView` fields in
+  run. `status` seeds the chunk at a status with no live route — `ready` by default, or
+  `not_ready`, `paused`, `needs_human`, `delivering`, `done`, or `stopped` for a chunk no
+  runner may claim; `running` is refused, since only a claim reaches it.
+  `garden_answered_findings` (each mirroring the real hub's `FindingView` fields in
   full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
   accepted, minted garden proposal answers — an independent lever from `garden_run`/
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the

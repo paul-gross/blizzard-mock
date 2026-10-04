@@ -65,6 +65,9 @@ def _seed(hub: TestClient) -> str:
 
 
 def _claim(runner: TestClient, chunk_id: str) -> dict:
+    """Claim as a live runner does: registered first, since the hub refuses an unregistered
+    claimant."""
+    runner.post("/_drive/register")
     return runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
 
 
@@ -226,7 +229,7 @@ def test_driver_absorbs_a_claim_incompatible_denial(stack: tuple[TestClient, Tes
     chunk_id = _seed_harness_chunk(hub, "special_harness")
     assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
 
-    claim = _claim(runner, chunk_id)
+    claim = runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
 
     assert claim["claimed"] is False
     assert claim["status"] == 409
@@ -244,6 +247,7 @@ def test_drive_claim_next_reaches_past_a_marked_head_by_default(stack: tuple[Tes
         json={"chunk_id": blocked_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
     )
 
+    runner.post("/_drive/register")
     claim = runner.post("/_drive/claim-next", json={}).json()
 
     assert claim["claimed"] is True

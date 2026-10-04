@@ -12,13 +12,34 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
+from blizzard_mock.mock_hub.domain.models import (
+    ChunkState,
+    ChunkStatus,
+    ClaimConflict,
+    ClaimDeniedNotReady,
+    ClaimDeniedTerminal,
+    EscalationState,
+    Executor,
+    NoCurrentNode,
+    NodeSpec,
+    QuestionState,
+    RekeyDeniedTerminal,
+    ships_from_lease_holder,
+)
 from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES, MockHubService
-from blizzard_mock.mock_hub.domain.state import DeclaredSubscription
+from blizzard_mock.mock_hub.domain.state import (
+    ClaimDeniedPaused,
+    ClaimDeniedUnregistered,
+    DeclaredSubscription,
+    RunnerRow,
+    refuse_braked_runner,
+)
 
 _SPEC = {
     "entry": "build",
@@ -52,9 +73,19 @@ def _seed(client: TestClient) -> str:
     return resp.json()["chunk_id"]
 
 
+def _claim(client: TestClient, body: dict) -> httpx.Response:
+    """Claim as a live runner does: registered first, since the hub refuses an unregistered
+    claimant. Registers through the service rather than the wire, so a capability snapshot a
+    test registered stays put and no extra request lands in ``/_captured``."""
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    if service.runner_view(body["runner_id"]) is None:
+        service.register(body["runner_id"], workspace_id="ws")
+    return client.post("/api/fleet/routes", json=body)
+
+
 def _claim_and_fence(client: TestClient, chunk_id: str, *, epoch: int = 1) -> None:
     """Claim then report the lease.minted fence, mirroring a real runner's FILL+PULL."""
-    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
     ack = client.post(
         "/api/fleet/events",
         json={
@@ -72,7 +103,7 @@ def test_happy_path_ingest_to_done(client: TestClient) -> None:
     chunk_id = _seed(client)
     assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [chunk_id]
 
-    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1", "environment_ids": ["e1"]})
+    claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1", "environment_ids": ["e1"]})
     assert claim.status_code == 201
     assert claim.json()["envelope"]["node"]["node_name"] == "build"
     # claimed chunks leave the ready queue.
@@ -109,8 +140,8 @@ def test_happy_path_ingest_to_done(client: TestClient) -> None:
 
 def test_second_claim_conflicts(client: TestClient) -> None:
     chunk_id = _seed(client)
-    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
-    conflict = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r2"})
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+    conflict = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
     assert conflict.status_code == 409
     assert conflict.json()["held_by_runner_id"] == "r1"
 
@@ -119,7 +150,7 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
     """The slim batch projection — de-dupes preserving order, silently
     omits an unknown id, never a 404."""
     claimed_id = _seed(client)
-    assert client.post("/api/fleet/routes", json={"chunk_id": claimed_id, "runner_id": "r1"}).status_code == 201
+    assert _claim(client, {"chunk_id": claimed_id, "runner_id": "r1"}).status_code == 201
     unclaimed_id = _seed(client)
 
     resp = client.get(
@@ -157,7 +188,7 @@ def test_chunk_statuses_conflicting_fact_reports_a_foreign_holder(client: TestCl
 
 def test_rekey_route_token_returns_a_different_deterministic_token_than_the_claim(client: TestClient) -> None:
     chunk_id = _seed(client)
-    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     claimed_token = claim.json()["route_token"]
 
     rekey = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
@@ -707,7 +738,7 @@ def test_claim_denied_when_stored_capabilities_no_longer_satisfy_the_chunk(clien
     chunk_id = _seed_harness_chunk(client, "special_harness")
     _register_with_capabilities(client, _DEFAULT_CAPABILITY)  # advertises "claude_code", not "special_harness"
 
-    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
     body = denied.json()
@@ -722,7 +753,7 @@ def test_claim_allowed_when_stored_capabilities_satisfy_the_chunk(client: TestCl
     chunk_id = _seed(client)  # no declared harness preference — a default capability satisfies it
     _register_with_capabilities(client, _DEFAULT_CAPABILITY)
 
-    claimed = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert claimed.status_code == 201, claimed.text
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "r1"
@@ -734,7 +765,7 @@ def test_claim_with_no_registered_capabilities_is_never_revalidated(client: Test
     chunk_id = _seed_harness_chunk(client, "special_harness")
     _register(client)  # no capabilities field at all
 
-    claimed = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert claimed.status_code == 201, claimed.text
 
@@ -746,7 +777,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
     _register_with_capabilities(client, [{"harness_id": "special_harness", "default": True}])
 
     _register_with_capabilities(client, _DEFAULT_CAPABILITY)  # capability change lands before the claim
-    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
     assert denied.json()["incompatible_runner_id"] == "r1"
@@ -997,7 +1028,7 @@ def test_lever_dependency_unmet_denies_the_claim_naming_the_prerequisite(client:
         json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
     )
 
-    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
     body = denied.json()
@@ -1016,11 +1047,11 @@ def test_lever_dependency_unmet_is_sticky_until_cleared(client: TestClient) -> N
         json={"chunk_id": chunk_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
     )
 
-    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
-    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 409
 
     client.delete("/_levers/dependency_unmet", params={"chunk_id": chunk_id})
-    assert client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
 
 
 # --- new fleet routes --------------------------------------
@@ -1069,7 +1100,7 @@ def test_get_question_404s_on_unknown_question(client: TestClient) -> None:
 
 def test_report_lease_advances_the_fence_and_404s_on_unknown_chunk(client: TestClient) -> None:
     chunk_id = _seed(client)
-    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     resp = client.post(f"/api/fleet/chunks/{chunk_id}/leases", json={"epoch": 3, "runner_id": "r1"})
     assert resp.status_code == 202
     assert resp.json() == {"chunk_id": chunk_id}
@@ -1149,7 +1180,7 @@ def test_events_escalation_recorded_carries_an_unrecognized_cause_verbatim(clien
 def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
     resp = client.post("/_seed/chunk", json={"entry": "deliver", "nodes": {"deliver": {"executor": "hub"}}})
     chunk_id = resp.json()["chunk_id"]
-    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
 
     advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
@@ -1167,7 +1198,7 @@ def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: Test
 
 def test_hub_advance_is_a_noop_when_not_parked_at_a_hub_node(client: TestClient) -> None:
     chunk_id = _seed(client)  # entry node "build" is executor: runner
-    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
     assert advance.status_code == 200
     assert advance.json()["ran"] is False
@@ -1249,7 +1280,7 @@ def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestCli
     }
 
 
-def test_events_answer_delivered_marks_the_question_answered(client: TestClient) -> None:
+def test_events_answer_delivered_marks_the_answered_question_delivered(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
     client.post(
@@ -1271,6 +1302,7 @@ def test_events_answer_delivered_marks_the_question_answered(client: TestClient)
             ],
         },
     )
+    client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes"})
     ack = client.post(
         "/api/fleet/events",
         json={
@@ -2082,7 +2114,7 @@ def test_events_unknown_kind_lands_in_rejected(client: TestClient) -> None:
 
 def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient) -> None:
     chunk_id = _seed(client)
-    client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     first = client.post(
         "/api/fleet/events",
         json={
@@ -2740,7 +2772,7 @@ def test_a_seeded_session_declaration_rides_the_claim_envelope(client: TestClien
     assert resp.status_code == 201, resp.text
     chunk_id = resp.json()["chunk_id"]
 
-    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert claim.status_code == 201, claim.text
     node = claim.json()["envelope"]["node"]
@@ -2780,7 +2812,7 @@ def test_a_node_declaring_no_session_carries_the_pre_144_shape(client: TestClien
     # Every scenario written before #144 — no pool, no preference, nothing bounded.
     chunk_id = _seed(client)
 
-    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     node = claim.json()["envelope"]["node"]
     assert node["session_source"] is None
@@ -2805,7 +2837,7 @@ def test_seeded_graph_artifacts_ride_the_claim_envelope(client: TestClient) -> N
     assert resp.status_code == 201, resp.text
     chunk_id = resp.json()["chunk_id"]
 
-    claim = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+    claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     # Authored order, so a silent sort flips these; "runbook" seeds its kind explicitly
     # while "docket" leans on the default, so both spellings have to reach the envelope.
@@ -3322,3 +3354,450 @@ def test_chunk_finding_404s_on_a_chunk_with_no_answered_set(client: TestClient) 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_1")
     assert resp.status_code == 404
     assert "no accepted, minted garden proposal" in resp.json()["detail"]
+
+
+# --- the hub's runner-facing refusals -----------------------------------------
+
+
+_HUB_INSTANT = datetime(2026, 7, 13, tzinfo=UTC)
+
+
+def _chunk_state(**overrides: object) -> ChunkState:
+    fields: dict = {
+        "chunk_id": "c1",
+        "graph_id": "gr_mock",
+        "entry": "build",
+        "nodes": {"build": NodeSpec(), "deliver": NodeSpec(executor=Executor.HUB)},
+    }
+    fields.update(overrides)
+    return ChunkState(**fields)
+
+
+def _question_state(**overrides: object) -> QuestionState:
+    fields: dict = {
+        "question_id": "q1",
+        "chunk_id": "c1",
+        "runner_id": "r1",
+        "epoch": 1,
+        "question": "?",
+        "asked_at": "2026-07-13T00:00:00+00:00",
+    }
+    fields.update(overrides)
+    return QuestionState(**fields)
+
+
+def _ask(client: TestClient, chunk_id: str, *, seq: int, question_id: str = "q1", epoch: int = 1) -> None:
+    ack = client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {
+                    "seq": seq,
+                    "kind": "question.asked",
+                    "payload": {
+                        "question_id": question_id,
+                        "chunk_id": chunk_id,
+                        "epoch": epoch,
+                        "question": "?",
+                        "asked_at": "2026-07-13T00:00:00+00:00",
+                    },
+                }
+            ],
+        },
+    )
+    assert seq in ack.json()["applied"]
+
+
+def _complete(client: TestClient, chunk_id: str, *, from_node_id: str, epoch: int = 1, choice: str = "pass") -> dict:
+    resp = client.post(
+        f"/api/fleet/chunks/{chunk_id}/completions",
+        json={"from_node_id": from_node_id, "epoch": epoch, "choice": choice, "runner_id": "r1"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@pytest.mark.parametrize("status", [ChunkStatus.DONE, ChunkStatus.STOPPED])
+def test_an_ended_chunk_refuses_a_claim_as_terminal(status: ChunkStatus) -> None:
+    with pytest.raises(ClaimDeniedTerminal) as refused:
+        _chunk_state(status=status, claimed=True, route_runner_id="r1").refuse_claim()
+
+    assert (refused.value.chunk_id, refused.value.status) == ("c1", status)
+
+
+def test_a_held_route_refuses_a_claim_as_a_conflict() -> None:
+    with pytest.raises(ClaimConflict) as refused:
+        _chunk_state(status=ChunkStatus.RUNNING, claimed=True, route_runner_id="r1").refuse_claim()
+
+    assert refused.value.held_by_runner_id == "r1"
+
+
+@pytest.mark.parametrize(
+    "status", [ChunkStatus.NOT_READY, ChunkStatus.PAUSED, ChunkStatus.NEEDS_HUMAN, ChunkStatus.DELIVERING]
+)
+def test_a_chunk_not_ready_refuses_a_claim(status: ChunkStatus) -> None:
+    with pytest.raises(ClaimDeniedNotReady) as refused:
+        _chunk_state(status=status).refuse_claim()
+
+    assert str(refused.value) == f"chunk c1 is {status.value}, not ready to claim"
+
+
+def test_a_ready_chunk_grants_a_claim() -> None:
+    assert _chunk_state().refuse_claim() is None
+
+
+def test_a_route_on_an_ended_chunk_refuses_a_rekey() -> None:
+    with pytest.raises(RekeyDeniedTerminal) as refused:
+        _chunk_state(status=ChunkStatus.DONE, claimed=True).refuse_rekey()
+
+    assert str(refused.value) == "chunk c1 is done, its route confers no tenure"
+
+
+def test_a_running_chunk_rekeys() -> None:
+    assert _chunk_state(status=ChunkStatus.RUNNING, claimed=True).refuse_rekey() is None
+
+
+@pytest.mark.parametrize("status", [ChunkStatus.DONE, ChunkStatus.STOPPED])
+def test_an_ended_chunk_refuses_its_envelope(status: ChunkStatus) -> None:
+    with pytest.raises(NoCurrentNode) as refused:
+        _chunk_state(status=status).refuse_envelope()
+
+    assert str(refused.value) == "chunk has no current runner node (terminal)"
+
+
+def test_a_report_off_the_current_node_is_incoherent() -> None:
+    chunk = _chunk_state(current_node_id="build")
+
+    refusal = chunk.incoherent_attempt(from_node_id="review", epoch=2, open_question_ids=[])
+
+    assert refusal == "node `review` is not the chunk's current node `build` at epoch 2"
+
+
+def test_a_report_from_an_escalated_attempt_is_incoherent() -> None:
+    chunk = _chunk_state(current_node_id="build", escalation=EscalationState(epoch=2))
+
+    refusal = chunk.incoherent_attempt(from_node_id="build", epoch=2, open_question_ids=[])
+
+    assert refusal == "the attempt at epoch 2 escalated — requeue the chunk before it moves on"
+
+
+def test_an_escalation_at_another_epoch_leaves_the_attempt_coherent() -> None:
+    chunk = _chunk_state(current_node_id="build", escalation=EscalationState(epoch=1))
+
+    assert chunk.incoherent_attempt(from_node_id="build", epoch=2, open_question_ids=[]) is None
+
+
+def test_a_report_from_an_attempt_with_an_open_question_names_the_oldest() -> None:
+    chunk = _chunk_state(current_node_id="build")
+
+    refusal = chunk.incoherent_attempt(from_node_id="build", epoch=2, open_question_ids=["q1", "q2"])
+
+    assert refusal == "question q1 is open — answer it before the chunk moves on"
+
+
+def test_a_report_out_of_a_hub_executed_node_is_refused() -> None:
+    chunk = _chunk_state()
+
+    assert chunk.hub_executed("deliver") == "node `deliver` is hub-executed — the hub authors its transitions"
+    assert chunk.hub_executed("build") is None
+
+
+def test_a_delivery_naming_another_chunk_is_refused() -> None:
+    question = _question_state(answered=True)
+
+    assert question.delivery_refusal(chunk_id="c2") == "question q1 belongs to chunk c1"
+
+
+def test_a_delivery_of_an_unanswered_question_is_refused() -> None:
+    assert _question_state().delivery_refusal(chunk_id="c1") == "question q1 is not answered"
+
+
+def test_a_delivery_of_an_answered_question_lands() -> None:
+    assert _question_state(answered=True).delivery_refusal(chunk_id="c1") is None
+
+
+@pytest.mark.parametrize(
+    ("owner", "runner_id", "ships"),
+    [(None, "r1", True), ("r1", "r1", True), ("r2", "r1", False)],
+)
+def test_a_transcript_record_ships_only_from_its_epochs_owner(owner: str | None, runner_id: str, ships: bool) -> None:
+    assert ships_from_lease_holder(owner, runner_id) is ships
+
+
+def test_an_unregistered_runner_is_braked() -> None:
+    with pytest.raises(ClaimDeniedUnregistered) as refused:
+        refuse_braked_runner(None, runner_id="ghost")
+
+    assert str(refused.value) == "runner ghost is not registered at the hub"
+
+
+def test_a_runner_paused_at_the_hub_is_braked() -> None:
+    row = RunnerRow("r1", workspace_id="ws", at=_HUB_INSTANT)
+    row.paused = True
+
+    with pytest.raises(ClaimDeniedPaused) as refused:
+        refuse_braked_runner(row, runner_id="r1")
+
+    assert refused.value.runner_id == "r1"
+
+
+def test_a_registered_runner_is_not_braked() -> None:
+    row = RunnerRow("r1", workspace_id="ws", at=_HUB_INSTANT)
+
+    assert refuse_braked_runner(row, runner_id="r1") is row
+
+
+def test_a_claim_from_an_unregistered_runner_answers_403_and_leaves_the_chunk_unclaimed(client: TestClient) -> None:
+    chunk_id = _seed(client)
+
+    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "ghost"})
+
+    assert denied.status_code == 403
+    assert denied.json() == {
+        "chunk_id": chunk_id,
+        "runner_id": "ghost",
+        "detail": "runner ghost is not registered at the hub",
+    }
+    assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [chunk_id]
+
+
+def test_a_claim_from_a_runner_paused_at_the_hub_answers_403(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _register(client)
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service.set_paused("r1", True)
+
+    denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 403
+    assert denied.json() == {"chunk_id": chunk_id, "runner_id": "r1", "detail": "runner is paused at the hub"}
+
+
+def test_a_claim_on_a_stopped_chunk_answers_409_terminal(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/_seed/stop", json={"chunk_id": chunk_id})
+
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 409
+    assert denied.json() == {"chunk_id": chunk_id, "status": "stopped", "detail": "chunk is terminal"}
+
+
+def test_a_claim_on_a_done_chunk_still_carrying_its_route_answers_terminal_before_conflict(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _complete(client, chunk_id, from_node_id="build")
+    assert _complete(client, chunk_id, from_node_id="review")["outcome"] == "hub_node_taken"
+
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
+
+    assert denied.status_code == 409
+    assert denied.json() == {"chunk_id": chunk_id, "status": "done", "detail": "chunk is terminal"}
+
+
+@pytest.mark.parametrize("status", ["not_ready", "paused", "needs_human", "delivering"])
+def test_a_claim_on_a_chunk_not_ready_answers_409_with_its_status(client: TestClient, status: str) -> None:
+    chunk_id = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()["chunk_id"]
+
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+
+    assert denied.status_code == 409
+    assert denied.json() == {
+        "chunk_id": chunk_id,
+        "status": status,
+        "detail": f"chunk {chunk_id} is {status}, not ready to claim",
+    }
+    assert client.get("/api/fleet/queue/peek").json()["entries"] == []
+
+
+def test_a_chunk_cannot_be_seeded_running_without_a_route(client: TestClient) -> None:
+    assert client.post("/_seed/chunk", json={**_SPEC, "status": "running"}).status_code == 422
+
+
+def test_a_rekey_on_a_done_chunk_still_carrying_its_route_answers_409(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _complete(client, chunk_id, from_node_id="build")
+    _complete(client, chunk_id, from_node_id="review")
+
+    denied = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
+
+    assert denied.status_code == 409
+    assert denied.json() == {"detail": f"chunk {chunk_id} is done, its route confers no tenure"}
+
+
+def test_the_envelope_of_a_stopped_chunk_answers_409(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post("/_seed/stop", json={"chunk_id": chunk_id})
+
+    denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
+
+    assert denied.status_code == 409
+    assert denied.json() == {"detail": "chunk has no current runner node (terminal)"}
+
+
+def test_the_envelope_of_a_done_chunk_answers_409(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _complete(client, chunk_id, from_node_id="build")
+    _complete(client, chunk_id, from_node_id="review")
+
+    denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
+
+    assert denied.status_code == 409
+    assert denied.json() == {"detail": "chunk has no current runner node (terminal)"}
+
+
+def test_a_completion_off_the_current_node_names_both_nodes_and_the_epoch(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+
+    refused = _complete(client, chunk_id, from_node_id="review")
+
+    assert refused == {
+        "outcome": "failure",
+        "next_envelope": None,
+        "detail": "node `review` is not the chunk's current node `build` at epoch 1",
+    }
+
+
+def test_a_completion_from_an_escalated_attempt_is_refused(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [{"seq": 2, "kind": "escalation.recorded", "payload": {"chunk_id": chunk_id, "epoch": 1}}],
+        },
+    )
+
+    refused = _complete(client, chunk_id, from_node_id="build")
+
+    assert refused["detail"] == "the attempt at epoch 1 escalated — requeue the chunk before it moves on"
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == "build"
+
+
+def test_a_completion_waits_on_the_attempts_own_open_question(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _ask(client, chunk_id, seq=2)
+
+    refused = _complete(client, chunk_id, from_node_id="build")
+    client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes"})
+    moved = _complete(client, chunk_id, from_node_id="build")
+
+    assert refused["detail"] == "question q1 is open — answer it before the chunk moves on"
+    assert moved["outcome"] == "next"
+
+
+def test_a_completion_out_of_a_hub_executed_node_is_refused(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _complete(client, chunk_id, from_node_id="build")
+    _complete(client, chunk_id, from_node_id="review")
+
+    refused = _complete(client, chunk_id, from_node_id="deliver")
+
+    assert refused["detail"] == "node `deliver` is hub-executed — the hub authors its transitions"
+
+
+def test_a_decision_waits_on_the_attempts_own_open_question(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _ask(client, chunk_id, seq=2)
+
+    refused = client.post(
+        f"/api/fleet/chunks/{chunk_id}/decisions", json={"from_node_id": "build", "epoch": 1, "runner_id": "r1"}
+    ).json()
+
+    assert refused["outcome"] == "failure"
+    assert refused["detail"] == "question q1 is open — answer it before the chunk moves on"
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
+
+
+def _deliver(client: TestClient, *, seq: int, chunk_id: str, question_id: str = "q1") -> dict:
+    return client.post(
+        "/api/fleet/events",
+        json={
+            "runner_id": "r1",
+            "facts": [
+                {"seq": seq, "kind": "answer.delivered", "payload": {"question_id": question_id, "chunk_id": chunk_id}}
+            ],
+        },
+    ).json()
+
+
+def test_events_answer_delivered_rejects_an_unanswered_question(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _ask(client, chunk_id, seq=2)
+
+    ack = _deliver(client, seq=3, chunk_id=chunk_id)
+
+    assert (ack["rejected"], ack["high_water"]) == ([3], 2)
+    polled = client.get("/api/fleet/questions/q1").json()
+    assert (polled["answered"], polled["delivered"]) == (False, False)
+
+
+def test_events_answer_delivered_rejects_a_question_of_another_chunk(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _ask(client, chunk_id, seq=2)
+    client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes"})
+
+    ack = _deliver(client, seq=3, chunk_id="ch_other")
+
+    assert ack["rejected"] == [3]
+    assert client.get("/api/fleet/questions/q1").json()["delivered"] is False
+
+
+def test_events_answer_delivered_repeated_is_applied_without_rewriting(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    _ask(client, chunk_id, seq=2)
+    client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes"})
+    _deliver(client, seq=3, chunk_id=chunk_id)
+    first = client.get("/api/fleet/questions/q1").json()
+
+    ack = _deliver(client, seq=4, chunk_id=chunk_id)
+
+    assert ack["applied"] == [4]
+    assert client.get("/api/fleet/questions/q1").json() == first
+
+
+def test_transcripts_refuse_a_record_whose_epoch_another_runner_owns(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)  # r1 mints, and so owns, epoch 1
+
+    first = client.post(
+        "/api/fleet/transcripts", json={"runner_id": "r2", "records": [_transcript_record(chunk_id, seq=1)]}
+    ).json()
+    replay = client.post(
+        "/api/fleet/transcripts", json={"runner_id": "r2", "records": [_transcript_record(chunk_id, seq=1)]}
+    ).json()
+
+    assert first == {
+        "runner_id": "r2",
+        "high_water": 1,
+        "applied": [],
+        "already_applied": [],
+        "capped": [],
+        "refused": [1],
+    }
+    assert replay["refused"] == [1]
+    read = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
+    assert read.json()["turns"] == []
+
+
+def test_transcripts_admit_the_owning_runners_record(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+
+    ack = client.post(
+        "/api/fleet/transcripts", json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]}
+    ).json()
+
+    assert (ack["applied"], ack["refused"]) == ([1], [])
