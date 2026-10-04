@@ -180,6 +180,7 @@ class TranscriptSegmentRecordBody(MirroredWireBody):
     harness_version: str | None
     model: str | None = None
     effort: str | None = None
+    spawn_cwd: str | None = None
     record_truncated: bool = False
     supersedes: str | None = None
     turns: list[TurnSegmentBody]
