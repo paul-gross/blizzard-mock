@@ -221,9 +221,6 @@ class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
 
 
-class WriteFenced(Exception): ...
-
-
 class QuestionNotFound(Exception):
     """No question with that id."""
 
@@ -937,46 +934,6 @@ class MockHubService:
         self._state.put_chunk(chunk)
         return ApplyResponse(outcome=ApplyOutcome.PARKED_AT_GATE, detail="parked at gate")
 
-    # -- direct fact routes (non-buffered counterparts of /events) ----------
-
-    def report_lease(self, chunk_id: str, *, epoch: int, runner_id: str) -> dict[str, Any]:
-        """``POST /chunks/{id}/leases`` — the direct, non-buffered ``lease.minted``
-        report; advances the fence exactly as the batched ``/events`` path, but
-        404s on an unknown chunk rather than no-op'ing.
-        """
-        chunk = self._require(chunk_id)
-        self._advance_fence(chunk, epoch, runner_id=runner_id)
-        return {"chunk_id": chunk_id}
-
-    def report_escalation(
-        self,
-        chunk_id: str,
-        *,
-        epoch: int,
-        runner_id: str,
-        takeover_command: str,
-        wrapped_takeover_command: str = "",
-        cause: str | None = None,
-        detail: str | None = None,
-    ) -> dict[str, Any]:
-        """``POST /chunks/{id}/escalations`` — the direct, non-buffered
-        ``escalation.recorded`` report; records the escalation exactly as the batched
-        ``/events`` path does (the shared ``_record_escalation`` helper). Mirrors the
-        real hub's 202 ``{"chunk_id"}`` body — no ``epoch`` in the response."""
-        chunk = self._require(chunk_id)
-        refusal = self._fence_refusal(chunk, epoch)
-        if refusal is not None:
-            raise WriteFenced(refusal)
-        self._record_escalation(
-            chunk,
-            epoch=epoch,
-            takeover_command=takeover_command,
-            wrapped_takeover_command=wrapped_takeover_command,
-            cause=cause,
-            detail=detail,
-        )
-        return {"chunk_id": chunk_id}
-
     def hub_advance(self, chunk_id: str) -> HubAdvanceResponse:
         """``POST /chunks/{id}/hub-advance`` — drive a chunk parked at a hub-executor
         node one step (#65/#66). A chunk not parked at a hub-executor node is a
@@ -1256,9 +1213,8 @@ class MockHubService:
         return chunk.incoherent_attempt(from_node_id=from_node_id, epoch=epoch, open_question_ids=open_question_ids)
 
     def _advance_fence(self, chunk: ChunkState, epoch: int, *, runner_id: str) -> None:
-        """The ``lease.minted`` fence advance (D-044), shared by the batched ``/events``
-        dispatch and the direct ``POST /chunks/{id}/leases`` route. The first runner to mint an
-        epoch owns it, which decides whose transcript records that epoch admits."""
+        """The ``lease.minted`` fence advance (D-044). The first runner to mint an epoch owns
+        it, which decides whose transcript records that epoch admits."""
         chunk.latest_epoch = max(chunk.latest_epoch, epoch)
         self._epoch_owners.setdefault((chunk.chunk_id, epoch), runner_id)
         self._state.put_chunk(chunk)
@@ -1281,8 +1237,7 @@ class MockHubService:
         cause: str | None = None,
         detail: str | None = None,
     ) -> None:
-        """The ``escalation.recorded`` write, shared by the batched ``/events`` dispatch
-        and the direct ``POST /chunks/{id}/escalations`` route."""
+        """The ``escalation.recorded`` write."""
         chunk.escalation = EscalationState(
             epoch=epoch,
             takeover_command=takeover_command,

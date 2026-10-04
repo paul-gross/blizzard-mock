@@ -20,6 +20,8 @@ from blizzard_mock.mock_runner.domain.models import Held
 
 #: The runner-fact kind that advances the hub's fence (``blizzard.wire.facts.LEASE_MINTED``).
 LEASE_MINTED = "lease.minted"
+#: The runner-fact kind that records retries-exhausted (``blizzard.wire.facts.ESCALATION_RECORDED``).
+ESCALATION_RECORDED = "escalation.recorded"
 #: The remaining fact kinds this driver can push over ``/events`` — not
 #: fence-advancing.
 QUESTION_ASKED = "question.asked"
@@ -56,8 +58,8 @@ class MockRunnerService:
         self._runner_id = runner_id
         self._workspace_id = workspace_id
         self._held: dict[str, Held] = {}
-        #: Monotonic sequence for facts that are not chunk-scoped leases —
-        #: independent of a ``Held``'s own per-chunk lease-fact counter.
+        #: The fact lane's one monotonic sequence, shared by every kind this driver pushes: the hub keeps
+        #: one high-water mark per runner, so a second counter would replay as ``already_applied``.
         self._runner_seq = 0
         #: The transcript lane's own sequence — independent of ``_runner_seq``'s.
         self._transcript_seq = 0
@@ -134,8 +136,9 @@ class MockRunnerService:
         node_id = envelope.get("node", {}).get("node_id", "")
         held_epoch = int(envelope.get("epoch", 0)) + 1  # the real runner mints latest+1
         route_token = body.get("route_token")
-        self._held[chunk_id] = Held(chunk_id=chunk_id, epoch=held_epoch, from_node_id=node_id, route_token=route_token)
-        self._report_lease(chunk_id, held_epoch)
+        held = Held(chunk_id=chunk_id, epoch=held_epoch, from_node_id=node_id, route_token=route_token)
+        self._held[chunk_id] = held
+        self._report_lease(held)
         return {"claimed": True, "status": status, "from_node_id": node_id, "epoch": held_epoch, "response": body}
 
     def claim_next(self, environment_ids: list[str], *, strict: bool = False) -> dict[str, Any]:
@@ -270,12 +273,13 @@ class MockRunnerService:
         cause: str | None = None,
         detail: str | None = None,
     ) -> dict[str, Any]:
-        """Report retries-exhausted via the dedicated route, fenced by the held epoch."""
+        """Push an ``escalation.recorded`` fact via ``/events``, fenced by the held epoch."""
         self._apply_delay(chunk_id)
         held = self._held.get(chunk_id)
         if held is None:
             return {"drove": False, "reason": f"chunk {chunk_id} not claimed by this driver"}
-        body = {
+        payload = {
+            "chunk_id": chunk_id,
             "epoch": held.epoch,
             "runner_id": self._runner_id,
             "takeover_command": takeover_command,
@@ -283,7 +287,7 @@ class MockRunnerService:
             "cause": cause,
             "detail": detail,
         }
-        status, response = self._gw.report_escalation(chunk_id, body)
+        status, response = self._push_fact(ESCALATION_RECORDED, self._stamped(held, payload))
         return {"drove": True, "status": status, "response": response}
 
     def decide(self, chunk_id: str, choice: str | None = None) -> dict[str, Any]:
@@ -513,33 +517,30 @@ class MockRunnerService:
             nxt = body["next_envelope"]
             held.from_node_id = nxt.get("node", {}).get("node_id", held.from_node_id)
             held.epoch = int(nxt.get("epoch", 0)) + 1
-            self._report_lease(chunk_id, held.epoch)
+            self._report_lease(held)
         else:
             self._held.pop(chunk_id, None)  # hub-node / done / failure — the tenure is over
 
-    def _report_lease(self, chunk_id: str, epoch: int) -> None:
-        """Advance the hub's fence for the held chunk.
+    def _report_lease(self, held: Held) -> None:
+        """Advance the hub's fence for the held chunk with a ``lease.minted`` fact via
+        ``/events``. Never lever-distorted (pinned by tests/test_pin_mock.py)."""
+        payload: dict[str, Any] = {"chunk_id": held.chunk_id, "epoch": held.epoch, "runner_id": self._runner_id}
+        self._push_fact(LEASE_MINTED, self._stamped(held, payload))
 
-        Never lever-distorted for correctness; only the transport path is
-        lever-selectable (pinned by tests/test_mock_runner.py).
-        """
-        held = self._held.get(chunk_id)
-        if self._pull(RunnerLever.LEASE_VIA_EVENTS, chunk_id):
-            seq = (held.seq + 1) if held is not None else 1
-            if held is not None:
-                held.seq = seq
-            payload: dict[str, Any] = {"chunk_id": chunk_id, "epoch": epoch}
-            # Stamp the held claim's own route token — always,
-            # never lever-controlled (pinned by tests/test_pin_mock.py).
-            if held is not None and held.route_token is not None:
-                payload["route_token"] = held.route_token
-            self._gw.report_lease_via_events(
-                chunk_id,
-                {"runner_id": self._runner_id, "facts": [{"seq": seq, "kind": LEASE_MINTED, "payload": payload}]},
-            )
-            return
-        body: dict[str, Any] = {"epoch": epoch, "runner_id": self._runner_id}
-        self._gw.report_lease_direct(chunk_id, body)
+    @staticmethod
+    def _stamped(held: Held, payload: dict[str, Any]) -> dict[str, Any]:
+        """``payload`` carrying the held claim's own route token — always, never
+        lever-controlled — when the claim returned one."""
+        if held.route_token is None:
+            return payload
+        return {**payload, "route_token": held.route_token}
+
+    def _push_fact(self, kind: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Push one fact on the fact lane's next sequence number."""
+        self._runner_seq += 1
+        return self._gw.push_facts(
+            {"runner_id": self._runner_id, "facts": [{"seq": self._runner_seq, "kind": kind, "payload": payload}]}
+        )
 
     def _apply_delay(self, chunk_id: str | None) -> None:
         lever = self._levers.find(RunnerLever.DELAY.value, chunk_id)

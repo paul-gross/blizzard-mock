@@ -424,7 +424,7 @@ class ChunkState(BaseModel):
     #: The last apply-response produced, replayed verbatim by the ``replay`` lever
     #: (a duplicate delivery). Held as ``Any`` to avoid a cycle with ``domain.wire``.
     last_response: Any = None
-    #: Retries exhausted (``escalation.recorded`` / ``POST .../escalations``) — surfaced
+    #: Retries exhausted (``escalation.recorded``) — surfaced
     #: read-only via ``ChunkDetail.escalation``.
     escalation: EscalationState | None = None
 

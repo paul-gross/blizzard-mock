@@ -15,8 +15,6 @@ from fastapi.responses import JSONResponse
 from blizzard_mock.mock_hub.api.deps import (
     CompletionBody,
     DecisionBody,
-    EscalationReportBody,
-    LeaseReportBody,
     QueuePeekBody,
     RouteClaimBody,
     RunnerFactBatchBody,
@@ -43,7 +41,6 @@ from blizzard_mock.mock_hub.domain.service import (
     QuestionNotFound,
     SystemArtifactNotFound,
     UnresolvableRunner,
-    WriteFenced,
 )
 from blizzard_mock.mock_hub.domain.state import (
     ClaimDeniedPaused,
@@ -481,36 +478,6 @@ def get_question(question_id: str, service: Annotated[MockHubService, Depends(ge
         return service.question_view(question_id)
     except QuestionNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@fleet_router.post("/chunks/{chunk_id}/leases", status_code=202)
-def report_lease(
-    chunk_id: str, body: LeaseReportBody, service: Annotated[MockHubService, Depends(get_service)]
-) -> object:
-    try:
-        return service.report_lease(chunk_id, epoch=body.epoch, runner_id=body.runner_id)
-    except ChunkNotFound as exc:
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@fleet_router.post("/chunks/{chunk_id}/escalations", status_code=202)
-def report_escalation(
-    chunk_id: str, body: EscalationReportBody, service: Annotated[MockHubService, Depends(get_service)]
-) -> object:
-    try:
-        return service.report_escalation(
-            chunk_id,
-            epoch=body.epoch,
-            runner_id=body.runner_id,
-            takeover_command=body.takeover_command,
-            wrapped_takeover_command=body.wrapped_takeover_command,
-            cause=body.cause,
-            detail=body.detail,
-        )
-    except ChunkNotFound as exc:
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
-    except WriteFenced as exc:
-        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @fleet_router.post("/chunks/{chunk_id}/hub-advance")

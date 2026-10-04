@@ -40,18 +40,6 @@ class IHubGateway(Protocol):
     #: across many chunk ids in place of many ``get_chunk`` round-trips.
     def chunk_statuses(self, chunk_ids: list[str]) -> tuple[int, dict[str, Any]]: ...
 
-    #: The dedicated ``POST /chunks/{id}/leases`` route — the default
-    #: transport; ``lease_via_events`` routes through the batched push instead.
-    def report_lease_direct(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
-
-    #: The batched ``POST /events`` push, used for ``lease.minted`` only when the
-    #: ``lease_via_events`` lever is armed — otherwise ``report_lease_direct`` is used.
-    def report_lease_via_events(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
-
-    #: The dedicated ``POST /chunks/{id}/escalations`` route (``EscalationReport{epoch,
-    #: runner_id, takeover_command, wrapped_takeover_command}``).
-    def report_escalation(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
-
     #: ``POST /chunks/{id}/decisions`` — a runner-config gate decision
     #: (``DecisionSubmission{from_node_id, epoch, runner_id, artifacts, route_token?}``).
     def submit_decision(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
@@ -59,8 +47,8 @@ class IHubGateway(Protocol):
     #: ``GET /questions/{id}`` — the runner's answer poll.
     def get_question(self, question_id: str) -> tuple[int, dict[str, Any]]: ...
 
-    #: The generic batched ``POST /events`` push, for facts that are not chunk-scoped
-    #: leases (``question.asked``, ``runner.locally_paused``/``_resumed``).
+    #: The batched ``POST /events`` push — every fact this driver reports, ``lease.minted``
+    #: and ``escalation.recorded`` included.
     def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
 
     #: The dedicated ``POST /transcripts`` route — the transcript

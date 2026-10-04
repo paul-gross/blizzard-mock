@@ -3,7 +3,7 @@
 The mock runner is a *driver*: it performs the runner's outbound protocol against a hub.
 These tests wire it to an **in-process mock hub** (over ``httpx.ASGITransport`` — no
 network) and drive it through the driver's own control API (a ``TestClient`` over the mock
-runner app), asserting the happy path and **each of the nine runner-side levers** — the
+runner app), asserting the happy path and **each of the eight runner-side levers** — the
 misbehaviours a hub-under-test must reject or absorb. The mock hub does not itself
 validate the route capability token (``stale_route_token``/``omit_route_token``)
 — that check belongs to the real hub, exercised in ``blizzard``'s own
@@ -300,7 +300,6 @@ def test_lever_catalog_lists_all_nine(stack: tuple[TestClient, TestClient]) -> N
         "stale_epoch",
         "stale_route_token",
         "omit_route_token",
-        "lease_via_events",
     }
 
 
@@ -406,36 +405,35 @@ def test_lever_omit_route_token_submits_no_token(stack: tuple[TestClient, TestCl
     assert "route_token" not in submitted
 
 
-def test_default_lease_report_hits_the_dedicated_leases_route(stack: tuple[TestClient, TestClient]) -> None:
-    """The default transport (no lever) is the dedicated ``/leases`` route, not the
-    batched ``/events`` push — the hub's fence still advances (unchanged behavior)."""
+def test_the_lease_report_rides_the_batched_events_push(stack: tuple[TestClient, TestClient]) -> None:
+    """``lease.minted`` reaches the hub through ``/events``, the only intake it has, and
+    the hub's fence advances."""
     hub, runner = stack
     chunk_id = _seed(hub)
+    runner.post("/_drive/register")
     hub.post("/_captured/reset")
-    claim = _claim(runner, chunk_id)
+    claim = runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
+    paths = [r["path"] for r in hub.get("/_captured").json()["requests"]]
     assert claim["claimed"] is True and claim["epoch"] == 1
+    assert paths == ["/api/fleet/routes", "/api/fleet/events"]
     assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
-    requests = hub.get("/_captured").json()["requests"]
-    paths = [r["path"] for r in requests]
-    assert f"/api/fleet/chunks/{chunk_id}/leases" in paths
-    assert "/api/fleet/events" not in paths
 
 
-def test_lever_lease_via_events_routes_the_report_through_events(stack: tuple[TestClient, TestClient]) -> None:
-    """``lease_via_events`` retains the mock's original transport: the fence-advancing
-    report rides the batched ``/events`` push instead of the dedicated route."""
+def test_every_fact_shares_one_sequence_so_none_replays_as_already_applied(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    """Two claims and an escalation push three facts on one per-runner sequence: each is
+    applied, none is re-acked under the hub's per-runner high-water mark."""
     hub, runner = stack
-    chunk_id = _seed(hub)
-    runner.post("/_levers/lease_via_events", json={"chunk_id": chunk_id})
-    hub.post("/_captured/reset")
-    claim = _claim(runner, chunk_id)
-    assert claim["claimed"] is True and claim["epoch"] == 1
-    # the report still lands: the hub's fence advances exactly as the default path does.
-    assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
-    requests = hub.get("/_captured").json()["requests"]
-    paths = [r["path"] for r in requests]
-    assert f"/api/fleet/chunks/{chunk_id}/leases" not in paths
-    assert "/api/fleet/events" in paths
+    first, second = _seed(hub), _seed(hub)
+    _claim(runner, first)
+    _claim(runner, second)
+
+    escalated = runner.post("/_drive/escalate", json={"chunk_id": second}).json()
+
+    assert escalated["response"]["applied"] == [3]
+    assert hub.get(f"/api/fleet/chunks/{first}").json()["latest_epoch"] == 1
+    assert hub.get(f"/api/fleet/chunks/{second}").json()["latest_epoch"] == 1
 
 
 # --- new drive verbs ---------------------------------------------------------
@@ -448,7 +446,7 @@ def test_drive_escalate_records_the_escalation_over_the_wire(stack: tuple[TestCl
     out = runner.post(
         "/_drive/escalate", json={"chunk_id": chunk_id, "takeover_command": "git checkout -b rescue"}
     ).json()
-    assert out["drove"] is True and out["status"] == 202
+    assert out["drove"] is True and out["status"] == 200 and out["response"]["applied"] == [2]
     detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert detail["escalation"] == {
         "epoch": 1,
@@ -477,7 +475,7 @@ def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
             "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
         },
     ).json()
-    assert out["drove"] is True and out["status"] == 202
+    assert out["drove"] is True and out["status"] == 200 and out["response"]["applied"] == [2]
     detail = hub.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert detail["escalation"] == {
         "epoch": 1,

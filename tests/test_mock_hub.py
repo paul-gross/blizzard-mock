@@ -1098,70 +1098,15 @@ def test_get_question_404s_on_unknown_question(client: TestClient) -> None:
     assert client.get("/api/fleet/questions/unknown").status_code == 404
 
 
-def test_report_lease_advances_the_fence_and_404s_on_unknown_chunk(client: TestClient) -> None:
-    chunk_id = _seed(client)
-    _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
-    resp = client.post(f"/api/fleet/chunks/{chunk_id}/leases", json={"epoch": 3, "runner_id": "r1"})
-    assert resp.status_code == 202
-    assert resp.json() == {"chunk_id": chunk_id}
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 3
-    assert client.post("/api/fleet/chunks/unknown/leases", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
-
-
-def test_report_escalation_is_readable_on_chunk_detail_and_404s_on_unknown_chunk(client: TestClient) -> None:
+@pytest.mark.parametrize("report", ["leases", "escalations"])
+def test_the_direct_lease_and_escalation_report_routes_are_retired(client: TestClient, report: str) -> None:
+    """``lease.minted`` and ``escalation.recorded`` reach the hub through ``POST /events`` alone."""
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
-    resp = client.post(
-        f"/api/fleet/chunks/{chunk_id}/escalations",
-        json={"epoch": 1, "runner_id": "r1", "takeover_command": "blizzard runner takeover ch_1"},
-    )
-    assert resp.status_code == 202
-    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert detail["escalation"] == {
-        "epoch": 1,
-        "takeover_command": "blizzard runner takeover ch_1",
-        "wrapped_takeover_command": "",
-        "cause": None,
-        "detail": None,
-    }
-    assert client.post("/api/fleet/chunks/unknown/escalations", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
 
+    resp = client.post(f"/api/fleet/chunks/{chunk_id}/{report}", json={"epoch": 1, "runner_id": "r1"})
 
-def test_report_escalation_direct_route_carries_the_wrapped_takeover_command(client: TestClient) -> None:
-    """The DIRECT, non-buffered ``POST .../escalations`` route — the
-    counterpart to the batched ``/events`` case below."""
-    chunk_id = _seed(client)
-    _claim_and_fence(client, chunk_id)
-    resp = client.post(
-        f"/api/fleet/chunks/{chunk_id}/escalations",
-        json={
-            "epoch": 1,
-            "runner_id": "r1",
-            "takeover_command": "cd <workdir> && claude --resume abc",
-            "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
-        },
-    )
-    assert resp.status_code == 202
-    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert detail["escalation"] == {
-        "epoch": 1,
-        "takeover_command": "cd <workdir> && claude --resume abc",
-        "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
-        "cause": None,
-        "detail": None,
-    }
-
-
-def test_report_escalation_direct_route_carries_its_cause_and_detail(client: TestClient) -> None:
-    direct = _seed(client)
-    _claim_and_fence(client, direct)
-    resp = client.post(
-        f"/api/fleet/chunks/{direct}/escalations",
-        json={"epoch": 1, "runner_id": "r1", "cause": "retries-exhausted", "detail": "3 of 3 retries used"},
-    )
-    assert resp.status_code == 202
-    escalation = client.get(f"/api/fleet/chunks/{direct}").json()["escalation"]
-    assert (escalation["cause"], escalation["detail"]) == ("retries-exhausted", "3 of 3 retries used")
+    assert resp.status_code == 404
 
 
 def test_events_escalation_recorded_carries_an_unrecognized_cause_verbatim(client: TestClient) -> None:
@@ -1220,10 +1165,6 @@ def _push_fact(client: TestClient, kind: str, payload: dict, *, seq: int) -> dic
 def test_a_stale_escalation_and_question_are_fenced_out(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id, epoch=2)
-    stale = client.post(
-        f"/api/fleet/chunks/{chunk_id}/escalations", json={"epoch": 1, "runner_id": "r1", "takeover_command": "x"}
-    )
-    assert stale.status_code == 409
     escalated = _push_fact(
         client, "escalation.recorded", {"chunk_id": chunk_id, "epoch": 1, "takeover_command": "x"}, seq=3
     )
@@ -1238,10 +1179,10 @@ def test_a_stopped_chunk_refuses_escalations_and_questions(client: TestClient) -
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
     assert client.post("/_seed/stop", json={"chunk_id": chunk_id}).status_code < 300
-    direct = client.post(
-        f"/api/fleet/chunks/{chunk_id}/escalations", json={"epoch": 1, "runner_id": "r1", "takeover_command": "x"}
+    escalated = _push_fact(
+        client, "escalation.recorded", {"chunk_id": chunk_id, "epoch": 1, "takeover_command": "x"}, seq=2
     )
-    assert direct.status_code == 409
+    assert escalated["rejected"] == [2]
     asked = _push_fact(client, "question.asked", {"chunk_id": chunk_id, "question_id": "q_1", "epoch": 1}, seq=3)
     assert asked["rejected"] == [3]
 
@@ -2081,10 +2022,9 @@ def test_a_subscription_with_no_reported_sample_has_no_entry(client: TestClient)
 
 
 def test_events_known_kind_on_an_unknown_chunk_is_still_applied(client: TestClient) -> None:
-    """The batched ``_apply`` carries no chunk-existence check on the real hub (unlike
-    the direct ``/leases``/``/escalations`` routes) — a known kind naming a chunk the
-    mock doesn't hold still lands as applied and the mark advances; the mutation is
-    just a no-op."""
+    """The batched ``_apply`` carries no chunk-existence check on the real hub — a known
+    kind naming a chunk the mock doesn't hold still lands as applied and the mark
+    advances; the mutation is just a no-op."""
     ack = client.post(
         "/api/fleet/events",
         json={

@@ -23,7 +23,6 @@ class Held:
     chunk_id: str
     epoch: int
     from_node_id: str
-    seq: int = 0
     route_token: str | None = None
     last_submission: dict[str, Any] = field(default_factory=dict)
 
@@ -123,7 +122,7 @@ class LeaseQueryBody(BaseModel):
 
 
 class EscalateBody(BaseModel):
-    """POST /_drive/escalate — report retries-exhausted via the dedicated route,
+    """POST /_drive/escalate — report retries-exhausted as an ``escalation.recorded`` fact,
     fenced by the held lease's own epoch."""
 
     chunk_id: str

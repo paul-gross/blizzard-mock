@@ -34,11 +34,11 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   | `POST /_drive/register` | `POST {hub}/api/fleet/runners` — join the fleet |
   | `POST /_drive/peek` | `GET {hub}/api/fleet/queue/peek` |
   | `POST /_drive/peek-matched` `{capabilities?, policy?, enrolled?}` | `POST {hub}/api/fleet/queue/peek` under this driver's own identity, capabilities and policy asserted directly; falls back to the legacy `GET` on a `401` internally. `enrolled=false` presents no identity, driving the tokenless case the mock hub always refuses |
-  | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and reports `lease.minted` (advances the hub's fence, D-044) via the dedicated `POST {hub}/api/fleet/chunks/{id}/leases` route by default — arm `lease_via_events` to route the same report through the batched `/events` push instead |
+  | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and pushes a `lease.minted` fact via `POST {hub}/api/fleet/events` (advances the hub's fence, D-044), stamped with the claim's own route token |
   | `POST /_drive/claim-next` `{environment_ids?, strict?}` | Peeks, selects, and claims in one call — the mock's structural sibling of the real runner's own selection seam. `strict` (default `false`) reaches past a `blocked` head for the first unmarked entry; `true` holds at a `blocked` head and claims nothing |
   | `POST /_drive/complete` `{chunk_id, choice, artifacts?}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next`. `artifacts` (optional, default `[]`) are the submission's `produces:` artifacts (`SubmittedArtifact` dicts — `{name, kind, content, attached}`), letting a service test drive the hub's `produces_mode=enforce` backstop over the wire |
   | `POST /_drive/get-chunk` `{chunk_id}` | `GET {hub}/api/fleet/chunks/{id}` |
-  | `POST /_drive/escalate` `{chunk_id, takeover_command?, wrapped_takeover_command?}` | `POST {hub}/api/fleet/chunks/{id}/escalations` — reports retries-exhausted, fenced by the held lease's own epoch |
+  | `POST /_drive/escalate` `{chunk_id, takeover_command?, wrapped_takeover_command?}` | Pushes an `escalation.recorded` fact via `POST {hub}/api/fleet/events` — reports retries-exhausted, fenced by the held lease's own epoch |
   | `POST /_drive/decide` `{chunk_id, choice?}` | `POST {hub}/api/fleet/chunks/{id}/decisions` — a runner-config gate decision; `choice` is cosmetic (not part of the wire submission) |
   | `POST /_drive/ask` `{chunk_id, question, options?, harness_id?}` | Pushes a `question.asked` fact via `POST {hub}/api/fleet/events`, minting a pollable question hub-side; returns the minted `question_id`. `harness_id` defaults to the Claude Code compatibility value when omitted |
   | `POST /_drive/poll-answer` `{question_id}` | `GET {hub}/api/fleet/questions/{id}` — the runner's answer poll |
@@ -64,7 +64,6 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
 | `stale_epoch` | Submit a completion with a stale (held-epoch − 1) fence — the zombie the hub fences out over the wire (D-007) |
 | `stale_route_token` | Submit a completion carrying a wrong route capability token — neither the held claim's own token nor any token the hub minted for this chunk — driving the hub's route-token check without a real runner |
 | `omit_route_token` | Submit a completion carrying no route capability token at all — the pre-route-token-runner / dropped-field case `route_token_mode=warn` must absorb and `enforce` must reject |
-| `lease_via_events` | Route the fence-advancing `lease.minted` report through the batched `/events` push instead of the dedicated `/chunks/{id}/leases` route — a transport-path selection, not a correctness distortion |
 
 ## Architecture
 
