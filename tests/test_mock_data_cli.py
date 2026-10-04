@@ -238,6 +238,8 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("wrapped_takeover_command", Text, nullable=False, server_default=""),
         Column("decision_id", String, nullable=True),
         Column("recorded_at", DateTime, nullable=False),
+        Column("cause", Text, nullable=True),
+        Column("detail", Text, nullable=True),
     )
     Table(
         "questions",
@@ -1103,6 +1105,24 @@ _STATUS_EXPECTATIONS = {
     "not_ready": None,
     "ready": "chunk_promoted",
 }
+
+
+def test_create_chunk_needs_human_lands_the_selected_escalation_cause_and_detail(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create", "chunk", "--store", "hub", "--url", url, "--status", "needs_human",
+            "--escalation-cause", "bounce-cap", "--escalation-detail", "bounce cap (3) crossed after 4 bounces",
+        ],
+    )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    escalations = _table(meta, "escalations")
+    with create_engine(url).connect() as conn:
+        row = conn.execute(
+            select(escalations.c.cause, escalations.c.detail).where(escalations.c.chunk_id == result.output.strip())
+        ).one()
+    assert tuple(row) == ("bounce-cap", "bounce cap (3) crossed after 4 bounces")
 
 
 def test_create_chunk_lands_the_right_fact_table_per_status(tmp_path: Path) -> None:

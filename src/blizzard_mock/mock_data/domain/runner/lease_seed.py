@@ -82,11 +82,14 @@ TRANSITIONED = "transitioned"
 REAPED = "reaped"
 FAILED = "failed"
 ESCALATED = "escalated"
+OWNER_UNRESOLVABLE_MINT = "owner-unresolvable-mint"
+NO_ACCEPTABLE_HARNESS_MINT = "no-acceptable-harness-mint"
+ESCALATION_REASONS = (ESCALATED, OWNER_UNRESOLVABLE_MINT, NO_ACCEPTABLE_HARNESS_MINT)
 
 
 def compose_lease_closure(*, lease_id: str, chunk_id: str, node_id: str, reason: str, closed_at: datetime) -> FactRow:
     """One ``lease_closures`` row — closes ``lease_id``, dropping it out of
-    ``OPEN_LEASE`` (``sqlalchemy_store.py``). ``reason="escalated"`` is what
+    ``OPEN_LEASE`` (``sqlalchemy_store.py``). A reason in :data:`ESCALATION_REASONS` is what
     ``open_escalations`` selects on, alongside an unresolved
     ``escalation_closures`` row (composed nowhere here, so the escalation stays
     open) — the ``needs_human`` mirror ``domain/runner/scenario_seed.py`` composes."""

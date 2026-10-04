@@ -20,13 +20,20 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _RUNNER_ID = "runner-local"
 
 
-def _fleet(chunks: int = 6, *, seed: int = 1):
+def _fleet(chunks: int = 6, *, seed: int = 1, escalation_reason: str = "escalated"):
     clock = FixedClock(_NOW)
     rng = random.Random(seed)
     hub = compose_board_scenario(chunks=chunks, clock=clock, rng=rng, runner_id=_RUNNER_ID)
     assert hub.census is not None
     census = hub.census
-    fleet = compose_runner_fleet(census=census, graph_id=hub.graph_id, runner_id=_RUNNER_ID, clock=clock, rng=rng)
+    fleet = compose_runner_fleet(
+        census=census,
+        graph_id=hub.graph_id,
+        runner_id=_RUNNER_ID,
+        clock=clock,
+        rng=rng,
+        escalation_reason=escalation_reason,
+    )
     return census, fleet
 
 
@@ -89,6 +96,21 @@ def test_the_needs_human_chunk_gets_a_closed_escalated_lease_under_an_open_takeo
     assert takeovers[0].values["fence_epoch"] is None
     assert lease.values["harness_id"] == "claude_code"
     assert takeovers[0].values["harness_id"] == "claude_code"
+
+
+@pytest.mark.parametrize("reason", ["owner-unresolvable-mint", "no-acceptable-harness-mint"])
+def test_the_needs_human_lease_closes_under_a_selected_mint_reason(reason: str) -> None:
+    census, fleet = _fleet(escalation_reason=reason)
+    needs_human_entry = next(e for e in census.chunk_entries if e.status == "needs_human")
+    closures = [
+        row for row in _rows_for(fleet.rows, "lease_closures") if row.values["chunk_id"] == needs_human_entry.chunk_id
+    ]
+    assert [row.values["reason"] for row in closures] == [reason]
+
+
+def test_an_unknown_escalation_reason_is_refused() -> None:
+    with pytest.raises(RunnerFleetCompositionError, match="unknown escalation reason"):
+        _fleet(escalation_reason="transitioned")
 
 
 def test_both_mirrored_chunks_carry_an_env_binding() -> None:

@@ -100,6 +100,10 @@ EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
 
 
+def _optional_text(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
 def _work_ref_label(ref: WorkRefSpec) -> str:
     """A work ref's source-native token, rendered the way the real hub's sources render it."""
     return f"hub:{ref.ref}" if ref.source == "hub" else f"{ref.source}#{ref.ref}"
@@ -510,6 +514,8 @@ class MockHubService:
                 epoch=chunk.escalation.epoch,
                 takeover_command=chunk.escalation.takeover_command,
                 wrapped_takeover_command=chunk.escalation.wrapped_takeover_command,
+                cause=chunk.escalation.cause,
+                detail=chunk.escalation.detail,
             )
         questions = [self._question_view(q) for q in self._state.list_questions() if q.chunk_id == chunk_id]
         return ChunkDetail(
@@ -796,6 +802,8 @@ class MockHubService:
                     epoch=epoch,
                     takeover_command=str(payload.get("takeover_command", "")),
                     wrapped_takeover_command=str(payload.get("wrapped_takeover_command", "")),
+                    cause=_optional_text(payload.get("cause")),
+                    detail=_optional_text(payload.get("detail")),
                 )
             return True
         if kind == QUESTION_ASKED:
@@ -930,6 +938,8 @@ class MockHubService:
         runner_id: str,
         takeover_command: str,
         wrapped_takeover_command: str = "",
+        cause: str | None = None,
+        detail: str | None = None,
     ) -> dict[str, Any]:
         """``POST /chunks/{id}/escalations`` — the direct, non-buffered
         ``escalation.recorded`` report; records the escalation exactly as the batched
@@ -940,7 +950,12 @@ class MockHubService:
         if refusal is not None:
             raise WriteFenced(refusal)
         self._record_escalation(
-            chunk, epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
+            chunk,
+            epoch=epoch,
+            takeover_command=takeover_command,
+            wrapped_takeover_command=wrapped_takeover_command,
+            cause=cause,
+            detail=detail,
         )
         return {"chunk_id": chunk_id}
 
@@ -1228,12 +1243,23 @@ class MockHubService:
         return None
 
     def _record_escalation(
-        self, chunk: ChunkState, *, epoch: int, takeover_command: str, wrapped_takeover_command: str = ""
+        self,
+        chunk: ChunkState,
+        *,
+        epoch: int,
+        takeover_command: str,
+        wrapped_takeover_command: str = "",
+        cause: str | None = None,
+        detail: str | None = None,
     ) -> None:
         """The ``escalation.recorded`` write, shared by the batched ``/events`` dispatch
         and the direct ``POST /chunks/{id}/escalations`` route."""
         chunk.escalation = EscalationState(
-            epoch=epoch, takeover_command=takeover_command, wrapped_takeover_command=wrapped_takeover_command
+            epoch=epoch,
+            takeover_command=takeover_command,
+            wrapped_takeover_command=wrapped_takeover_command,
+            cause=cause,
+            detail=detail,
         )
         self._state.put_chunk(chunk)
 

@@ -450,6 +450,8 @@ def test_drive_escalate_records_the_escalation_over_the_wire(stack: tuple[TestCl
         "epoch": 1,
         "takeover_command": "git checkout -b rescue",
         "wrapped_takeover_command": "",
+        "cause": None,
+        "detail": None,
     }
 
 
@@ -477,6 +479,8 @@ def test_drive_escalate_forwards_the_wrapped_takeover_command_to_the_hub(
         "epoch": 1,
         "takeover_command": "git checkout -b rescue",
         "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
+        "cause": None,
+        "detail": None,
     }
 
 
