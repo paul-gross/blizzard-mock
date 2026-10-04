@@ -27,6 +27,7 @@ from blizzard_mock.mock_data.domain.hub.bounce_seed import (
     compose_bounce,
 )
 from blizzard_mock.mock_data.domain.hub.chunk_seed import STATUSES, ChunkCompositionError, compose_chunk
+from blizzard_mock.mock_data.domain.hub.decision_seed import DecisionChoice, DecisionCompositionError, compose_decision
 from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     CAUSE_RETRIES,
     CAUSES,
@@ -103,6 +104,7 @@ _COMPOSITION_ERRORS = (
     EscalationCompositionError,
     BounceCompositionError,
     QuestionCompositionError,
+    DecisionCompositionError,
     EventCompositionError,
     RunnerPauseCompositionError,
     ScenarioCompositionError,
@@ -284,7 +286,7 @@ def _next_artifact_seq(service: SeedService, chunk_id: str) -> int:
 def _resolve_artifact_defaults(
     service: SeedService, chunk_id: str, *, node_name: str | None, epoch: int | None
 ) -> tuple[str, str, int]:
-    """Resolve ``create artifact``'s ``--node`` name and ``--epoch`` against
+    """Resolve ``create artifact``/``create decision``'s ``--node`` name and ``--epoch`` against
     ``chunk_id``'s already-seeded rows — a store read the composition root does,
     never the composer (``bzh:dependency-injection``). Omitted, they default off
     the chunk's newest transition and lease, per the README's verb entry.
@@ -1096,6 +1098,86 @@ def create_question(
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(seeded.question_id)
+
+
+@create.command("decision")
+@click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
+@click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
+@click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
+@click.option("--chunk", "chunk_id", required=True, help="The chunk this decision parks.")
+@click.option(
+    "--node",
+    "node_name",
+    default=None,
+    help="The gate node's name (default: the chunk's newest transition target).",
+)
+@click.option(
+    "--choice",
+    "raw_choices",
+    multiple=True,
+    required=True,
+    help="A selectable outcome, NAME or NAME=DESCRIPTION — repeatable.",
+)
+@click.option(
+    "--imposed-by-runner",
+    "imposed_by_runner_id",
+    default=None,
+    help="The runner whose configuration imposed this gate (omit for a graph-declared gate).",
+)
+@click.option("--resolve", "resolved_choice", default=None, help="Also land a resolution picking this choice name.")
+@click.option("--resolved-by", "resolved_by", default=None, help="Who resolved (requires --resolve).")
+@click.option(
+    "--epoch",
+    "epoch",
+    type=int,
+    default=None,
+    help="The parked step's fencing epoch (default: the chunk's newest lease).",
+)
+@click.option(
+    "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
+)
+def create_decision(
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    chunk_id: str,
+    node_name: str | None,
+    raw_choices: tuple[str, ...],
+    imposed_by_runner_id: str | None,
+    resolved_choice: str | None,
+    resolved_by: str | None,
+    epoch: int | None,
+    seed: int | None,
+) -> None:
+    """Land one open-or-resolved gate decision against an already-seeded chunk.
+
+    ``--resolve``/``--resolved-by`` also land a ``decision_resolutions`` row.
+    """
+    _require_store("decision", store)
+    choices = [DecisionChoice(name, description) for name, _, description in (c.partition("=") for c in raw_choices)]
+    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    clock = _seeded_clock(seed)
+    rng = seeded_rng(seed)
+    try:
+        resolved_node_id, resolved_node_name, resolved_epoch = _resolve_artifact_defaults(
+            service, chunk_id, node_name=node_name, epoch=epoch
+        )
+        seeded = compose_decision(
+            chunk_id=chunk_id,
+            node_id=resolved_node_id,
+            node_name=resolved_node_name,
+            clock=clock,
+            rng=rng,
+            choices=choices,
+            epoch=resolved_epoch,
+            imposed_by_runner_id=imposed_by_runner_id,
+            resolved_choice=resolved_choice,
+            resolved_by=resolved_by,
+        )
+        service.seed(seeded.rows)
+    except _COMPOSITION_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(seeded.decision_id)
 
 
 @create.command("garden-proposal")

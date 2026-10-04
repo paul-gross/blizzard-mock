@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 from sqlalchemy import (
     Boolean,
     Column,
@@ -364,6 +364,26 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("delivered_at", DateTime, nullable=False),
     )
     Table(
+        "decisions",
+        meta,
+        Column("decision_id", String, primary_key=True),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
+        Column("node_id", String, nullable=False),
+        Column("node_name", String, nullable=False),
+        Column("epoch", Integer, nullable=False),
+        Column("choices", Text, nullable=False),
+        Column("submitted_at", DateTime, nullable=False),
+        Column("imposed_by_runner_id", String, nullable=True),
+    )
+    Table(
+        "decision_resolutions",
+        meta,
+        Column("decision_id", String, ForeignKey("decisions.decision_id"), primary_key=True),
+        Column("choice", String, nullable=False),
+        Column("resolved_by", String, nullable=False),
+        Column("resolved_at", DateTime, nullable=False),
+    )
+    Table(
         "runner_registrations",
         meta,
         Column("runner_id", String, primary_key=True),
@@ -681,6 +701,7 @@ def test_verbs_expose_help() -> None:
         ["create", "escalation", "--help"],
         ["create", "bounce", "--help"],
         ["create", "question", "--help"],
+        ["create", "decision", "--help"],
         ["create", "event", "--help"],
         ["create", "runner-pause", "--help"],
         ["scenario", "--help"],
@@ -704,6 +725,7 @@ def test_create_group_help_lists_every_subcommand() -> None:
         "escalation",
         "bounce",
         "question",
+        "decision",
         "event",
         "runner-pause",
     ):
@@ -2649,6 +2671,100 @@ def test_create_escalation_explicit_takeover_command_overrides_the_cause_default
             )
         ).scalar()
     assert takeover == "cd /custom && claude --resume abc"
+
+
+# --- create decision (implemented) -------------------------------------------
+
+
+def _create_decision(url: str, chunk_id: str, *extra: str) -> Result:
+    return _runner().invoke(
+        cli,
+        [
+            "create",
+            "decision",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--node",
+            "build",
+            "--choice",
+            "approve=Ship it",
+            "--choice",
+            "reject",
+            *extra,
+        ],
+    )
+
+
+def _running_chunk(url: str) -> str:
+    return (
+        _runner().invoke(cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "running"]).output.strip()
+    )
+
+
+def test_create_decision_lands_an_open_graph_declared_decision(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    chunk_id = _running_chunk(url)
+
+    result = _create_decision(url, chunk_id)
+    assert result.exit_code == 0, result.output
+    decision_id = result.output.strip()
+    assert decision_id.startswith("dec_")
+    with create_engine(url).begin() as conn:
+        row = conn.execute(select(_table(meta, "decisions"))).one()
+        resolutions = conn.execute(select(_table(meta, "decision_resolutions"))).all()
+    assert row.decision_id == decision_id
+    assert row.chunk_id == chunk_id
+    assert row.node_name == "build"
+    assert row.choices == '[{"name": "approve", "description": "Ship it"}, {"name": "reject", "description": ""}]'
+    assert row.imposed_by_runner_id is None
+    assert resolutions == []
+
+
+def test_create_decision_resolved_lands_the_resolution_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    chunk_id = _running_chunk(url)
+
+    result = _create_decision(url, chunk_id, "--resolve", "approve", "--resolved-by", "operator-1")
+    assert result.exit_code == 0, result.output
+    decision_id = result.output.strip()
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "decision_resolutions"))).all()
+    assert [(r.decision_id, r.choice, r.resolved_by) for r in rows] == [(decision_id, "approve", "operator-1")]
+
+
+def test_create_decision_runner_imposed_records_the_runner(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    chunk_id = _running_chunk(url)
+
+    result = _create_decision(url, chunk_id, "--imposed-by-runner", "r-gate")
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        row = conn.execute(select(_table(meta, "decisions"))).one()
+    assert row.imposed_by_runner_id == "r-gate"
+
+
+def test_create_decision_resolving_an_unoffered_choice_is_refused(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    chunk_id = _running_chunk(url)
+
+    result = _create_decision(url, chunk_id, "--resolve", "maybe", "--resolved-by", "operator-1")
+    assert result.exit_code != 0
+    assert "not one of the --choice names" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(_table(meta, "decisions"))).all() == []
+
+
+def test_create_decision_resolved_by_without_resolve_is_refused(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    chunk_id = _running_chunk(url)
+
+    result = _create_decision(url, chunk_id, "--resolved-by", "operator-1")
+    assert result.exit_code != 0
+    assert "together" in result.output
 
 
 # --- create question (implemented) -------------------------------------------
