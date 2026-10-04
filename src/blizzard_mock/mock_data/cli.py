@@ -20,6 +20,12 @@ from blizzard_mock.harness_identity import CLAUDE_CODE_HARNESS_ID
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.artifact_seed import KINDS as ARTIFACT_KINDS
 from blizzard_mock.mock_data.domain.hub.artifact_seed import ArtifactCompositionError, compose_artifact
+from blizzard_mock.mock_data.domain.hub.bounce_seed import (
+    BOUNCE_CAUSES,
+    CAUSE_CONFLICT,
+    BounceCompositionError,
+    compose_bounce,
+)
 from blizzard_mock.mock_data.domain.hub.chunk_seed import STATUSES, ChunkCompositionError, compose_chunk
 from blizzard_mock.mock_data.domain.hub.decision_seed import DecisionChoice, DecisionCompositionError, compose_decision
 from blizzard_mock.mock_data.domain.hub.escalation_seed import (
@@ -85,6 +91,7 @@ _USAGE_KIND_CHOICES = click.Choice(USAGE_KINDS)
 _ARTIFACT_KIND_CHOICES = click.Choice(ARTIFACT_KINDS)
 _SEVERITY_CHOICES = click.Choice(SEVERITIES)
 _CAUSE_CHOICES = click.Choice(CAUSES)
+_BOUNCE_CAUSE_CHOICES = click.Choice(BOUNCE_CAUSES)
 _GARDEN_PROPOSAL_CLOSURE_CHOICES = click.Choice(GARDEN_PROPOSAL_CLOSURES)
 _COMPOSITION_ERRORS = (
     SchemaDriftError,
@@ -95,6 +102,7 @@ _COMPOSITION_ERRORS = (
     RunnerUsageCompositionError,
     ArtifactCompositionError,
     EscalationCompositionError,
+    BounceCompositionError,
     QuestionCompositionError,
     DecisionCompositionError,
     EventCompositionError,
@@ -972,6 +980,52 @@ def create_escalation(
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"created a {cause!r}-cause escalation for chunk {chunk_id!r}")
+
+
+@create.command("bounce")
+@click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
+@click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
+@click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
+@click.option("--chunk", "chunk_id", required=True, help="The chunk the bounce kicks back.")
+@click.option("--epoch", "epoch", type=int, default=1, help="The bounced attempt's hub epoch.")
+@click.option(
+    "--cause",
+    "cause",
+    type=_BOUNCE_CAUSE_CHOICES,
+    default=CAUSE_CONFLICT,
+    help="Why the attempt was kicked back.",
+)
+@click.option(
+    "--envelope",
+    "envelope",
+    default=None,
+    help="The raw JSON-object kick-back payload, landed verbatim. Left unset, a minimal one naming the cause.",
+)
+def create_bounce(
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    chunk_id: str,
+    epoch: int,
+    cause: str,
+    envelope: str | None,
+) -> None:
+    """Land one ``chunk_bounces`` row against an already-seeded chunk
+    (``domain/hub/bounce_seed.py``)."""
+    _require_store("bounce", store)
+    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    try:
+        row = compose_bounce(
+            chunk_id=chunk_id,
+            epoch=epoch,
+            recorded_at=SystemClock().now(),
+            cause=cause,
+            envelope=envelope,
+        )
+        service.seed([row])
+    except _COMPOSITION_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"created a {cause!r}-cause bounce for chunk {chunk_id!r}")
 
 
 @create.command("question")

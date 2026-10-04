@@ -219,6 +219,16 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("stopped_by", String, nullable=True),
     )
     Table(
+        "chunk_bounces",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("chunk_id", String, ForeignKey("chunks.chunk_id"), nullable=False),
+        Column("epoch", Integer, nullable=False),
+        Column("cause", String, nullable=False),
+        Column("envelope", Text, nullable=False),
+        Column("recorded_at", DateTime, nullable=False),
+    )
+    Table(
         "escalations",
         meta,
         Column("id", Integer, primary_key=True, autoincrement=True),
@@ -689,6 +699,7 @@ def test_verbs_expose_help() -> None:
         ["create", "usage", "--help"],
         ["create", "lease", "--help"],
         ["create", "escalation", "--help"],
+        ["create", "bounce", "--help"],
         ["create", "question", "--help"],
         ["create", "decision", "--help"],
         ["create", "event", "--help"],
@@ -712,6 +723,7 @@ def test_create_group_help_lists_every_subcommand() -> None:
         "usage",
         "lease",
         "escalation",
+        "bounce",
         "question",
         "decision",
         "event",
@@ -2489,6 +2501,61 @@ def test_create_transcript_segment_refuses_a_hub_store(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "lives in the runner store" in result.output
+
+
+# --- create bounce (implemented) ---------------------------------------------
+
+
+def test_create_bounce_lands_one_chunk_bounces_row(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    runner = _runner()
+    chunk_id = runner.invoke(
+        cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
+    ).output.strip()
+    envelope = '{"reason": "red checks"}'
+
+    result = runner.invoke(
+        cli,
+        [
+            "create",
+            "bounce",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--chunk",
+            chunk_id,
+            "--epoch",
+            "3",
+            "--cause",
+            "checks",
+            "--envelope",
+            envelope,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    bounces = _table(meta, "chunk_bounces")
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(bounces).where(bounces.c.chunk_id == chunk_id)).all()
+    assert len(rows) == 1
+    assert (rows[0].epoch, rows[0].cause, rows[0].envelope) == (3, "checks", envelope)
+
+
+def test_create_bounce_refuses_a_non_object_envelope(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "bounce", "--store", "hub", "--url", url, "--chunk", "ch_1", "--envelope", "[1]"]
+    )
+    assert result.exit_code != 0
+    assert "JSON object" in result.output
+
+
+def test_create_bounce_refuses_the_runner_store(tmp_path: Path) -> None:
+    result = _runner().invoke(
+        cli, ["create", "bounce", "--store", "runner", "--url", f"sqlite:///{tmp_path / 'r.db'}", "--chunk", "ch_1"]
+    )
+    assert result.exit_code != 0
+    assert "lives in the hub store" in result.output
 
 
 # --- create escalation (implemented) -----------------------------------------

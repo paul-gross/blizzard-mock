@@ -22,13 +22,14 @@ forge state (`blizzard_mock.forge`), and git state
 
 `blizzard-mock-data` → `blizzard_mock.mock_data.cli:cli`. A click group with
 verbs `reset`, `create` (a group of its own: `runner`, `graph`, `chunk`,
-`artifact`, `usage`, `lease`, `escalation`, `question`, `decision`, `garden-proposal`,
+`artifact`, `usage`, `lease`, `escalation`, `bounce`, `question`, `decision`,
+`garden-proposal`,
 `event`, `runner-pause`, `transcript-segment`), `scenario` (a group of its
 own: `board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Twelve `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
+**Thirteen `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
 still stubbed.** The service tier needs to seed and clean the real hub/runner
 stores, so the workhorse verbs are implemented.
 
@@ -152,6 +153,8 @@ its own entry below owns its flags.
   `wrapped_takeover_command`'s default (the `blizzard runner takeover` entry point) is a synthesized placeholder regardless of `--cause` — a real spend-cap park composes it the same way a retries-exhausted park does.
   `--wrapped-takeover-command` overrides that default verbatim, the same way `--takeover-command` overrides the raw one.
   Does **not** also write an `event_log` row — an open escalation is synthesized into the read-time event feed (`derive_event_feed`), so `create escalation` alone is sufficient for it to show up there.
+- `create bounce --store hub --chunk ID [--epoch N] [--cause {conflict,checks,master-moved}] [--envelope JSON]` — **implemented**. Lands one `chunk_bounces` row (`domain/hub/bounce_seed.py`), served in `ChunkDetail.bounces`.
+  `--cause` defaults to `conflict`; `--envelope` must be a JSON object and lands verbatim, defaulting to a minimal one naming the cause.
 - `create question --store hub --chunk ID --text T [--option TEXT]... [--answer A --answered-by W] [--delivered] [--resumed] [--node NAME] [--runner-id R] [--epoch N] [--seed N]`
   — **implemented**. Lands one open-or-answered `questions` trail
   (`domain/hub/question_seed.py`); `waiting_on_human` derives from an open one.
