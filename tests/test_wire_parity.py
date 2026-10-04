@@ -5,7 +5,7 @@ repo cannot import. Both are compared here against the committed hub OpenAPI and
 committed fact-kind constants, so a real-side wire change that outruns the mirror fails a
 mock-side gate. ``mock-opencode``'s facade wire is checked the same way, but
 against code rather than a schema document: its actual stdout is fed through blizzard's own
-production ``opencode_shapes.parse_run_jsonl``, since a facade whose event stream the
+production ``blizzard.runner.harness.opencode.shapes.parse_run_jsonl``, since a facade whose event stream the
 real parser rejects is a mock nothing downstream can trust.
 
 The sibling worktree is a hard requirement for every test here that reads it, not a skip: an
@@ -45,7 +45,8 @@ pytestmark = pytest.mark.needs_blizzard
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
 _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "wire" / "facts.py"
-_OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "internal" / "opencode_shapes.py"
+_OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode" / "shapes.py"
+_ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
 
 
 def _sibling(path: Path) -> str:
@@ -58,27 +59,35 @@ def _sibling(path: Path) -> str:
     return path.read_text()
 
 
-def _load_opencode_shapes() -> ModuleType:
-    """Import blizzard's real ``opencode_shapes`` parser straight off the sibling worktree.
-
-    This repo cannot depend on ``blizzard`` as a package, so the module is loaded from its
-    source file directly — it is dependency-free (stdlib only), so this is not a partial or
-    stubbed import, it is the exact parser production code runs."""
-    path = _OPENCODE_SHAPES_SOURCE
+def _exec_source(name: str, path: Path) -> ModuleType:
+    """Execute one sibling source file as module ``name``, registered in ``sys.modules`` first:
+    a module's own ``@dataclass`` classes resolve their (all-string, ``from __future__ import
+    annotations``) field annotations by looking their module back up there, so unregistered,
+    every dataclass in the file fails to define at class-creation time."""
     assert path.is_file(), (
         f"no sibling blizzard worktree at {_BLIZZARD} (expected {path}) — parity is unverifiable, "
         f"not green; set $BLIZZARD_SOURCE if it lives elsewhere"
     )
-    spec = importlib.util.spec_from_file_location("_opencode_shapes_wire_parity", path)
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None, f"could not load a module spec from {path}"
     module = importlib.util.module_from_spec(spec)
-    # Registered before exec: the module's own `@dataclass`-decorated classes resolve their
-    # (all-string, `from __future__ import annotations`) field annotations by looking their
-    # module back up in `sys.modules` — unregistered, that lookup finds nothing and every
-    # dataclass in the file fails to define at class-creation time.
-    sys.modules[spec.name] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_opencode_shapes() -> ModuleType:
+    """Import blizzard's real OpenCode ``shapes`` parser straight off the sibling worktree.
+
+    This repo cannot depend on ``blizzard``, so the module loads from source; its one ``blizzard`` import,
+    the stdlib-only data-role markers module, loads under its real dotted name, then is unregistered so no
+    other test sees a ``blizzard`` package. This is the exact parser production code runs."""
+    roles = "blizzard.foundation.roles"
+    _exec_source(roles, _ROLES_SOURCE)
+    try:
+        return _exec_source("_opencode_shapes_wire_parity", _OPENCODE_SHAPES_SOURCE)
+    finally:
+        sys.modules.pop(roles, None)
 
 
 def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subprocess.CompletedProcess[str]:

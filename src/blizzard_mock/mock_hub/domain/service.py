@@ -37,6 +37,7 @@ from blizzard_mock.mock_hub.domain.models import (
     ScopeSpec,
     SystemArtifactSpec,
     WorkRefSpec,
+    ships_from_lease_holder,
 )
 from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
@@ -45,6 +46,7 @@ from blizzard_mock.mock_hub.domain.state import (
     RunnerCapability,
     ScopeRow,
     SubscriptionUsageMiss,
+    refuse_braked_runner,
 )
 from blizzard_mock.mock_hub.domain.wire import (
     AnalyticsCountsResponse,
@@ -244,14 +246,6 @@ class SystemArtifactNotFound(Exception):
     """No published system artifact with that name."""
 
 
-class ClaimConflict(Exception):
-    """The chunk is already claimed — the losing runner gets a 409."""
-
-    def __init__(self, held_by_runner_id: str) -> None:
-        super().__init__(f"chunk already claimed by {held_by_runner_id}")
-        self.held_by_runner_id = held_by_runner_id
-
-
 class UnresolvableRunner(Exception):
     """The matched fleet peek's caller named no ``runner_id``, or one no registration
     knows — mirrors the real hub's ``401`` for an
@@ -292,6 +286,8 @@ class MockHubService:
         #: The transcript lane's own high-water mark — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
+        #: ``(chunk_id, epoch)`` -> the runner whose ``lease.minted`` first named it.
+        self._epoch_owners: dict[tuple[str, int], str] = {}
         #: Accepted bytes per chunk — the chunk-budget cap's running total.
         self._transcript_chunk_bytes: dict[str, int] = {}
         #: The real hub's natural key: a key's own accept/reject decision, independent of
@@ -329,6 +325,7 @@ class MockHubService:
             garden_answered_findings=spec.garden_answered_findings,
             garden_proposals=spec.garden_proposals,
             analytics=spec.analytics,
+            status=spec.status,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -338,6 +335,7 @@ class MockHubService:
         self._levers.clear_all()
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
+        self._epoch_owners.clear()
         self._transcript_chunk_bytes.clear()
         self._transcript_key_state.clear()
         self._transcript_segments.clear()
@@ -445,16 +443,16 @@ class MockHubService:
         self, chunk_id: str, *, runner_id: str, workspace_id: str, environment_ids: list[str]
     ) -> RouteClaimResponse:
         chunk = self._require(chunk_id)
-        if chunk.claimed:
-            raise ClaimConflict(chunk.route_runner_id or "unknown")
+        # Re-read fresh, never cached from the peek: a capability change landing after this
+        # runner's peek must not race the claim.
+        registration = refuse_braked_runner(self._state.get_runner(runner_id), runner_id=runner_id)
+        chunk.refuse_claim()
         blocked = self._levers.find(HubLever.DEPENDENCY_UNMET.value, chunk_id)
         if blocked is not None:
             self._levers.consume(blocked)
             raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
-        # Re-read fresh, never cached from the peek: a capability change landing after this
-        # runner's peek must not race the claim. No capabilities at all is never revalidated.
-        registration = self._state.get_runner(runner_id)
-        if registration is not None and registration.capabilities:
+        # No capabilities at all is never revalidated.
+        if registration.capabilities:
             node_id = chunk.current_node_id or chunk.entry
             if matching.capability_ineligible(chunk, node_id, registration.capabilities):
                 raise ClaimIncompatible(runner_id)
@@ -484,6 +482,7 @@ class MockHubService:
         chunk = self._require(chunk_id)
         if not chunk.claimed:
             raise ChunkNotFound(f"chunk {chunk_id} has no live route")
+        chunk.refuse_rekey()
         chunk.route_token_rekey_count += 1
         self._state.put_chunk(chunk)
         return RouteTokenRekeyResponse(
@@ -682,6 +681,7 @@ class MockHubService:
         from it is fenced out as a zombie — the runner's stale-envelope path (D-007)."""
         self._consult_chunk_unknown(chunk_id)
         chunk = self._require(chunk_id)
+        chunk.refuse_envelope()
         node_id = chunk.current_node_id or chunk.entry
         epoch = chunk.latest_epoch
         stale = self._levers.find(HubLever.STALE_ENVELOPE.value, chunk_id)
@@ -724,18 +724,23 @@ class MockHubService:
     # -- transcript intake (its own lane, its own high-water) ---------
 
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
-        """Apply a batched ``POST /transcripts`` push against the transcript lane's own
-        high-water mark. Mirrors the real hub's two caps and its
-        natural-key short-circuit, the state keyed by natural key rather than seq, and
-        retains each accepted record by lease for
-        :meth:`lease_transcript` — a capped record is never retained, so it never reads back."""
+        """Apply a batched ``POST /transcripts`` push against the transcript lane's own high-water mark.
+        Mirrors the real hub's two caps and natural-key short-circuit, retaining each accepted record by
+        lease for :meth:`lease_transcript`; a capped record is never retained. A record whose epoch another
+        runner owns is refused unstored, on replay too, and the mark still advances past it."""
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
         capped: list[int] = []
+        refused: list[int] = []
         for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
             seq = int(record.get("seq", 0))
             key = (str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
+            owner = self._epoch_owners.get((str(record.get("chunk_id", "")), int(record.get("epoch", 0))))
+            if not ships_from_lease_holder(owner, runner_id):
+                refused.append(seq)
+                mark = max(mark, seq)
+                continue
             if seq <= mark:
                 # A lost-ack replay of an already-decided seq still reports its own outcome.
                 (capped if self._transcript_key_state.get(key) == "rejected" else already_applied).append(seq)
@@ -760,7 +765,12 @@ class MockHubService:
             applied.append(seq)
         self._transcript_high_water[runner_id] = mark
         return TranscriptSegmentAck(
-            runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, capped=capped
+            runner_id=runner_id,
+            high_water=mark,
+            applied=applied,
+            already_applied=already_applied,
+            capped=capped,
+            refused=refused,
         )
 
     def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
@@ -789,7 +799,7 @@ class MockHubService:
         if kind == LEASE_MINTED:
             chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
             if chunk is not None:
-                self._advance_fence(chunk, int(payload.get("epoch", 0)))
+                self._advance_fence(chunk, int(payload.get("epoch", 0)), runner_id=runner_id)
             return True
         if kind == ESCALATION_RECORDED:
             chunk = self._state.get_chunk(str(payload.get("chunk_id", "")))
@@ -837,9 +847,10 @@ class MockHubService:
             question = self._state.get_question(str(payload.get("question_id", "")))
             if question is None:
                 return False
-            # `answered` is set here too as a mock shortcut, so a scenario
-            # that skips `POST /_seed/answer` still gets a coherent poll row.
-            question.answered = True
+            if question.delivery_refusal(chunk_id=str(payload.get("chunk_id", ""))) is not None:
+                return False
+            if question.delivered:
+                return True  # a repeat delivery is a replay that writes nothing
             question.delivered = True
             question.delivered_at = self._clock.now().isoformat()
             self._state.put_question(question)
@@ -894,12 +905,16 @@ class MockHubService:
 
         if epoch < chunk.latest_epoch:
             return self._fail(chunk, f"stale epoch {epoch} < {chunk.latest_epoch}")
-        if chunk.current_node_id is not None and from_node_id != chunk.current_node_id:
-            return self._fail(chunk, f"unexpected from_node {from_node_id!r} (at {chunk.current_node_id!r})")
+        incoherent = self._incoherent_attempt(chunk, from_node_id=from_node_id, epoch=epoch)
+        if incoherent is not None:
+            return self._fail(chunk, incoherent)
 
         node = chunk.node(from_node_id)
         if node is None:
             return self._fail(chunk, f"unknown node {from_node_id!r}")
+        hub_executed = chunk.hub_executed(from_node_id)
+        if hub_executed is not None:
+            return self._fail(chunk, hub_executed)
         target = self._resolve_choice(node, choice)
         if target is None:
             return self._fail(chunk, f"unknown choice {choice!r} at {from_node_id!r}")
@@ -915,6 +930,9 @@ class MockHubService:
         chunk = self._require(chunk_id)
         if epoch < chunk.latest_epoch:
             return self._fail(chunk, f"stale epoch {epoch} < {chunk.latest_epoch}")
+        incoherent = self._incoherent_attempt(chunk, from_node_id=from_node_id, epoch=epoch)
+        if incoherent is not None:
+            return self._fail(chunk, incoherent)
         chunk.status = ChunkStatus.NEEDS_HUMAN
         self._state.put_chunk(chunk)
         return ApplyResponse(outcome=ApplyOutcome.PARKED_AT_GATE, detail="parked at gate")
@@ -927,7 +945,7 @@ class MockHubService:
         404s on an unknown chunk rather than no-op'ing.
         """
         chunk = self._require(chunk_id)
-        self._advance_fence(chunk, epoch)
+        self._advance_fence(chunk, epoch, runner_id=runner_id)
         return {"chunk_id": chunk_id}
 
     def report_escalation(
@@ -1228,15 +1246,26 @@ class MockHubService:
 
     # -- internals ---------------------------------------------------------
 
-    def _advance_fence(self, chunk: ChunkState, epoch: int) -> None:
+    def _incoherent_attempt(self, chunk: ChunkState, *, from_node_id: str, epoch: int) -> str | None:
+        """:meth:`ChunkState.incoherent_attempt`, fed the attempt's own unanswered questions."""
+        open_question_ids = [
+            q.question_id
+            for q in self._state.list_questions()
+            if q.chunk_id == chunk.chunk_id and q.epoch == epoch and not q.answered
+        ]
+        return chunk.incoherent_attempt(from_node_id=from_node_id, epoch=epoch, open_question_ids=open_question_ids)
+
+    def _advance_fence(self, chunk: ChunkState, epoch: int, *, runner_id: str) -> None:
         """The ``lease.minted`` fence advance (D-044), shared by the batched ``/events``
-        dispatch and the direct ``POST /chunks/{id}/leases`` route."""
+        dispatch and the direct ``POST /chunks/{id}/leases`` route. The first runner to mint an
+        epoch owns it, which decides whose transcript records that epoch admits."""
         chunk.latest_epoch = max(chunk.latest_epoch, epoch)
+        self._epoch_owners.setdefault((chunk.chunk_id, epoch), runner_id)
         self._state.put_chunk(chunk)
 
     @staticmethod
     def _fence_refusal(chunk: ChunkState, epoch: int) -> str | None:
-        if chunk.status in (ChunkStatus.STOPPED, ChunkStatus.DONE):
+        if chunk.ended:
             return "chunk is terminal"
         if chunk.latest_epoch and epoch < chunk.latest_epoch:
             return f"stale epoch {epoch}; chunk is at {chunk.latest_epoch}"
