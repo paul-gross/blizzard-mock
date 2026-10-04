@@ -61,8 +61,6 @@ follows a registration.
 | `GET /api/fleet/chunks/{id}/findings/{finding_id}` | One finding within the chunk's own answered set, or **404** for an id outside it |
 | `POST /api/fleet/chunks/{id}/completions` | Apply a node-step completion — epoch-fenced (D-007); a `failure` outcome when the report is off the current node, its attempt escalated or holds an unanswered question of its own, or the node is hub-executed |
 | `POST /api/fleet/chunks/{id}/decisions` | Runner-config gate → `parked_at_gate` (D-032); refused like a completion when the report is off the current node, escalated, or holds an open question |
-| `POST /api/fleet/chunks/{id}/leases` | Direct, non-buffered `lease.minted` report — advances the fence (D-044), 202 `{"chunk_id"}` |
-| `POST /api/fleet/chunks/{id}/escalations` | Direct, non-buffered `escalation.recorded` report — readable via `ChunkDetail.escalation`, 202 `{"chunk_id"}`, or **409** when the chunk is stopped or done or the epoch is below the newest |
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |

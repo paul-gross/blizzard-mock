@@ -70,9 +70,6 @@ class HttpxHubGateway:
     def claim(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/routes", body)
 
-    def report_lease_via_events(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        return self._post(f"{_API}/events", body)
-
     def submit_completion(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/chunks/{chunk_id}/completions", body)
 
@@ -81,12 +78,6 @@ class HttpxHubGateway:
 
     def chunk_statuses(self, chunk_ids: list[str]) -> tuple[int, dict[str, Any]]:
         return self._get(f"{_API}/chunk-statuses", params={"chunk_id": chunk_ids})
-
-    def report_lease_direct(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        return self._post(f"{_API}/chunks/{chunk_id}/leases", body)
-
-    def report_escalation(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        return self._post(f"{_API}/chunks/{chunk_id}/escalations", body)
 
     def submit_decision(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return self._post(f"{_API}/chunks/{chunk_id}/decisions", body)

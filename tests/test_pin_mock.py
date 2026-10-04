@@ -217,7 +217,7 @@ def test_work_items_are_served_under_both_the_route_and_the_pm_items_alias(hub_c
 
 
 class _RecordingGateway:
-    """Delegates to a real gateway, recording every lease-via-events body."""
+    """Delegates to a real gateway, recording every ``lease.minted`` push."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
@@ -226,9 +226,10 @@ class _RecordingGateway:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
-    def report_lease_via_events(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        self.lease_bodies.append(body)
-        return self._inner.report_lease_via_events(chunk_id, body)
+    def push_facts(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if body["facts"][0]["kind"] == "lease.minted":
+            self.lease_bodies.append(body)
+        return self._inner.push_facts(body)
 
 
 def test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token_armed() -> None:
@@ -240,7 +241,6 @@ def test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token
     runner = TestClient(create_runner_app(gateway=cast(IHubGateway, gateway), clock=clock))
 
     chunk_id = hub.post("/_seed/chunk", json=_HUB_SPEC).json()["chunk_id"]
-    runner.post("/_levers/lease_via_events", json={"chunk_id": chunk_id})
     runner.post("/_levers/omit_route_token", json={"chunk_id": chunk_id})
 
     runner.post("/_drive/register")

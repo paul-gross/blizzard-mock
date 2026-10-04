@@ -195,24 +195,6 @@ class PauseBody(BaseModel):
     paused: bool = True
 
 
-class LeaseReportBody(BaseModel):
-    """``POST /chunks/{id}/leases`` — mirrors ``blizzard.wire.facts.LeaseMintReport``."""
-
-    epoch: int
-    runner_id: str = "runner-mock"
-
-
-class EscalationReportBody(BaseModel):
-    """``POST /chunks/{id}/escalations`` — mirrors ``blizzard.wire.facts.EscalationReport``."""
-
-    epoch: int
-    runner_id: str = "runner-mock"
-    takeover_command: str = ""
-    wrapped_takeover_command: str = ""
-    cause: str | None = None
-    detail: str | None = None
-
-
 class AnswerControlBody(BaseModel):
     """``POST /_seed/answer`` — test-control only; plays the operator's answer so a
     scenario can make the runner's poll return ``answered=True`` without a real

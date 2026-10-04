@@ -36,9 +36,6 @@ class RunnerLever(StrEnum):
     #: Submit the completion with no route capability token at all (issue
     #: #84b) — ``route_token_mode=warn`` absorbs it, ``enforce`` rejects it.
     OMIT_ROUTE_TOKEN = "omit_route_token"
-    #: Report the fence-advancing lease through batched ``/events`` instead of
-    #: the dedicated ``/leases`` route — a transport-path choice, not a distortion.
-    LEASE_VIA_EVENTS = "lease_via_events"
 
 
 CATALOG: dict[str, str] = {
@@ -50,5 +47,4 @@ CATALOG: dict[str, str] = {
     RunnerLever.STALE_EPOCH.value: "submit a completion with a stale (held-epoch - 1) fence (D-007)",
     RunnerLever.STALE_ROUTE_TOKEN.value: "submit a completion with a wrong route capability token (issue #84b)",
     RunnerLever.OMIT_ROUTE_TOKEN.value: "submit a completion with no route capability token (issue #84b)",
-    RunnerLever.LEASE_VIA_EVENTS.value: "report lease.minted via /events instead of the dedicated /leases route",
 }
