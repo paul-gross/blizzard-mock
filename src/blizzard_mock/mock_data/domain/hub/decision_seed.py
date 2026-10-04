@@ -1,9 +1,7 @@
-"""Composes one gate decision's ``FactRow`` set — the ``decisions``/``decision_resolutions``
-trail (``bzh:facts-not-status``).
+"""Composes one gate decision's ``FactRow`` set (``bzh:facts-not-status``).
 
-A decision parks its chunk ``waiting_on_human`` while no closure fact names it; a
-``decision_resolutions`` row records the picked choice without closing it — the
-resolving transition does that.
+An unclosed decision parks its chunk ``waiting_on_human``; a ``decision_resolutions``
+row records the picked choice without closing it — the resolving transition does that.
 """
 
 from __future__ import annotations
