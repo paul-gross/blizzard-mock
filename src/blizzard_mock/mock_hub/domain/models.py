@@ -65,7 +65,7 @@ class ApplyOutcome(StrEnum):
 
 
 class GardenProposalClosureKind(StrEnum):
-    """Mirrors ``blizzard.hub.domain.garden_proposal_closure.GardenProposalClosureKind``
+    """Mirrors ``blizzard.foundation.garden_proposals.GardenProposalClosureKind``
     (value-identical)."""
 
     PASSED = "passed"
@@ -73,7 +73,7 @@ class GardenProposalClosureKind(StrEnum):
 
 
 class GardenProposalItemOutcome(StrEnum):
-    """Mirrors ``blizzard.hub.domain.garden_proposal_closure.GardenProposalItemOutcome``
+    """Mirrors ``blizzard.foundation.garden_proposals.GardenProposalItemOutcome``
     (value-identical)."""
 
     MINTED = "minted"
@@ -81,7 +81,7 @@ class GardenProposalItemOutcome(StrEnum):
 
 
 class GardenProposalOrigin(StrEnum):
-    """Mirrors ``blizzard.hub.domain.garden_proposals.GardenProposalOrigin``
+    """Mirrors ``blizzard.foundation.garden_proposals.GardenProposalOrigin``
     (value-identical)."""
 
     ROUTINE_RUN = "routine-run"
