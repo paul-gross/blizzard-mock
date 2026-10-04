@@ -262,7 +262,13 @@ class MockRunnerService:
         return dict(self._git_commit_declarations.get(lease_id, {}))
 
     def escalate(
-        self, chunk_id: str, *, takeover_command: str = "", wrapped_takeover_command: str = ""
+        self,
+        chunk_id: str,
+        *,
+        takeover_command: str = "",
+        wrapped_takeover_command: str = "",
+        cause: str | None = None,
+        detail: str | None = None,
     ) -> dict[str, Any]:
         """Report retries-exhausted via the dedicated route, fenced by the held epoch."""
         self._apply_delay(chunk_id)
@@ -274,6 +280,8 @@ class MockRunnerService:
             "runner_id": self._runner_id,
             "takeover_command": takeover_command,
             "wrapped_takeover_command": wrapped_takeover_command,
+            "cause": cause,
+            "detail": detail,
         }
         status, response = self._gw.report_escalation(chunk_id, body)
         return {"drove": True, "status": status, "response": response}

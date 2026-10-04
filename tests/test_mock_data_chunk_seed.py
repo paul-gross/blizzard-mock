@@ -54,6 +54,8 @@ def _compose(
     epoch: int = 1,
     workspace_id: str = _DEFAULT_WORKSPACE_ID,
     mirrored: bool = False,
+    escalation_cause: str | None = None,
+    escalation_detail: str | None = None,
 ) -> ChunkSeed:
     return compose_chunk(
         status=status,
@@ -67,6 +69,8 @@ def _compose(
         epoch=epoch,
         workspace_id=workspace_id,
         mirrored=mirrored,
+        escalation_cause=escalation_cause,
+        escalation_detail=escalation_detail,
     )
 
 
@@ -121,6 +125,22 @@ def test_needs_human_composes_a_wrapped_takeover_command_placeholder() -> None:
     seed = _compose("needs_human", chunk_id="ch_fixed")
     escalation = next(row for row in seed.rows if row.table == "escalations")
     assert escalation.values["wrapped_takeover_command"] == "blizzard runner takeover ch_fixed --dir <runner-dir>"
+
+
+def test_needs_human_escalation_records_no_cause_by_default() -> None:
+    escalation = next(row for row in _compose("needs_human").rows if row.table == "escalations")
+    assert (escalation.values["cause"], escalation.values["detail"]) == (None, None)
+
+
+def test_needs_human_escalation_carries_a_selected_cause_and_detail() -> None:
+    seed = _compose("needs_human", escalation_cause="spend-cap", escalation_detail="cap $5.00, spend $5.12")
+    escalation = next(row for row in seed.rows if row.table == "escalations")
+    assert (escalation.values["cause"], escalation.values["detail"]) == ("spend-cap", "cap $5.00, spend $5.12")
+
+
+def test_an_escalation_cause_off_needs_human_is_refused() -> None:
+    with pytest.raises(ChunkCompositionError, match="needs --status needs_human"):
+        _compose("running", escalation_cause="bounce-cap")
 
 
 def test_waiting_on_human_lands_an_open_question() -> None:

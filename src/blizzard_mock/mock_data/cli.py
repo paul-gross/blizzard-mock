@@ -26,7 +26,12 @@ from blizzard_mock.mock_data.domain.hub.bounce_seed import (
     BounceCompositionError,
     compose_bounce,
 )
-from blizzard_mock.mock_data.domain.hub.chunk_seed import STATUSES, ChunkCompositionError, compose_chunk
+from blizzard_mock.mock_data.domain.hub.chunk_seed import (
+    ESCALATION_CAUSES,
+    STATUSES,
+    ChunkCompositionError,
+    compose_chunk,
+)
 from blizzard_mock.mock_data.domain.hub.decision_seed import DecisionChoice, DecisionCompositionError, compose_decision
 from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     CAUSE_RETRIES,
@@ -69,6 +74,7 @@ from blizzard_mock.mock_data.domain.hub.scenario_seed import (
 from blizzard_mock.mock_data.domain.hub.usage_seed import KINDS as USAGE_KINDS
 from blizzard_mock.mock_data.domain.hub.usage_seed import UsageCompositionError, compose_usage
 from blizzard_mock.mock_data.domain.ids import seeded_rng
+from blizzard_mock.mock_data.domain.runner.lease_seed import ESCALATED, ESCALATION_REASONS
 from blizzard_mock.mock_data.domain.runner.lease_seed import compose_lease as compose_runner_lease
 from blizzard_mock.mock_data.domain.runner.local_pause_seed import compose_local_pause
 from blizzard_mock.mock_data.domain.runner.scenario_seed import (
@@ -537,6 +543,19 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch attributed to the chunk's facts.")
 @click.option("--chunk-id", "chunk_id", default=None, help="Override the minted chunk id.")
 @click.option(
+    "--escalation-cause",
+    "escalation_cause",
+    type=click.Choice(ESCALATION_CAUSES),
+    default=None,
+    help="--status needs_human only: the cause its escalation records (unset: not recorded).",
+)
+@click.option(
+    "--escalation-detail",
+    "escalation_detail",
+    default=None,
+    help="--status needs_human only: the one-line detail its escalation records (unset: not recorded).",
+)
+@click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
 def create_chunk(
@@ -550,6 +569,8 @@ def create_chunk(
     runner_id: str,
     epoch: int,
     chunk_id: str | None,
+    escalation_cause: str | None,
+    escalation_detail: str | None,
     seed: int | None,
 ) -> None:
     """Compose and write one chunk's fact rows so it derives ``--status``.
@@ -574,6 +595,8 @@ def create_chunk(
             work_refs=refs,
             runner_id=runner_id,
             epoch=epoch,
+            escalation_cause=escalation_cause,
+            escalation_detail=escalation_detail,
         )
         service.seed(seeded.rows)
     except _COMPOSITION_ERRORS as exc:
@@ -1520,6 +1543,14 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
 )
 @click.option("--stress", "stress", is_flag=True, default=False, help="Also seed the hub half's stress extremes.")
 @click.option(
+    "--escalation-reason",
+    "escalation_reason",
+    type=click.Choice(ESCALATION_REASONS),
+    default=ESCALATED,
+    show_default=True,
+    help="The closure reason the runner half's needs_human lease closes under.",
+)
+@click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
 def scenario_fleet(
@@ -1530,6 +1561,7 @@ def scenario_fleet(
     runner_id: str | None,
     chunks: int,
     stress: bool,
+    escalation_reason: str,
     seed: int | None,
 ) -> None:
     """Seed one coherent fleet: a scenario board in the hub store, mirrored into the
@@ -1576,7 +1608,12 @@ def scenario_fleet(
         census = board.census
         assert census is not None  # compose_board_scenario always returns one
         fleet = compose_runner_fleet(
-            census=census, graph_id=board.graph_id, runner_id=pinned_runner_id, clock=clock, rng=rng
+            census=census,
+            graph_id=board.graph_id,
+            runner_id=pinned_runner_id,
+            clock=clock,
+            rng=rng,
+            escalation_reason=escalation_reason,
         )
     except (*_COMPOSITION_ERRORS, SQLAlchemyError) as exc:
         raise click.ClickException(f"nothing landed: {exc}") from exc

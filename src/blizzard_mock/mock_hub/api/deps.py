@@ -209,6 +209,8 @@ class EscalationReportBody(BaseModel):
     runner_id: str = "runner-mock"
     takeover_command: str = ""
     wrapped_takeover_command: str = ""
+    cause: str | None = None
+    detail: str | None = None
 
 
 class AnswerControlBody(BaseModel):

@@ -151,6 +151,8 @@ class EscalationState(BaseModel):
     #: The ``blizzard runner takeover`` wrapped entry point; empty whenever the
     #: runner didn't compose one.
     wrapped_takeover_command: str = ""
+    cause: str | None = None
+    detail: str | None = None
 
 
 class QuestionState(BaseModel):

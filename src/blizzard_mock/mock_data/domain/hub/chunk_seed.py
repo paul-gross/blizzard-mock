@@ -36,6 +36,15 @@ STATUSES = (STOPPED, DONE, NEEDS_HUMAN, WAITING_ON_HUMAN, PAUSED, DELIVERING, RU
 #: for, since a live route outranks every status below it.
 MIRRORED_STATUSES = frozenset({WAITING_ON_HUMAN, NEEDS_HUMAN})
 
+ESCALATION_CAUSES = (
+    "retries-exhausted",
+    "owner-unresolvable",
+    "no-acceptable-harness",
+    "spend-cap",
+    "bounce-cap",
+    "migration-target-unresolvable",
+)
+
 # A local id-prefix, deliberately not in ``domain/ids.py``'s shared registry,
 # mirroring that the real one is its own module constant too.
 _ROUTE_PREFIX = "route"
@@ -70,6 +79,8 @@ def compose_chunk(
     epoch: int = 1,
     workspace_id: str = _DEFAULT_WORKSPACE_ID,
     mirrored: bool = False,
+    escalation_cause: str | None = None,
+    escalation_detail: str | None = None,
 ) -> ChunkSeed:
     """Compose one chunk minted onto ``graph``, landing at ``status``. Raises
     :class:`ChunkCompositionError` for an unknown status, an unresolvable node name,
@@ -77,6 +88,8 @@ def compose_chunk(
     ``route_created`` — valid only for :data:`MIRRORED_STATUSES`."""
     if status not in STATUSES:
         raise ChunkCompositionError(f"unknown status {status!r} — one of {STATUSES}")
+    if (escalation_cause is not None or escalation_detail is not None) and status != NEEDS_HUMAN:
+        raise ChunkCompositionError(f"an escalation cause/detail needs --status {NEEDS_HUMAN}, not {status!r}")
 
     minted_chunk_id = chunk_id or ids.mint(ids.CHUNK_PREFIX, clock, rng)
     now = clock.now()
@@ -208,6 +221,8 @@ def compose_chunk(
                     "takeover_command": f"cd <workdir> && <resume {minted_chunk_id}>",
                     "wrapped_takeover_command": f"blizzard runner takeover {minted_chunk_id} --dir <runner-dir>",
                     "decision_id": None,
+                    "cause": escalation_cause,
+                    "detail": escalation_detail,
                     "recorded_at": at(3),
                 },
             )

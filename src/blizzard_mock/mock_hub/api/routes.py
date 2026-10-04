@@ -470,6 +470,8 @@ def report_escalation(
             runner_id=body.runner_id,
             takeover_command=body.takeover_command,
             wrapped_takeover_command=body.wrapped_takeover_command,
+            cause=body.cause,
+            detail=body.detail,
         )
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})

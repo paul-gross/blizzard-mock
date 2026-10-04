@@ -19,7 +19,12 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import BUILD_NODE_NAME
 from blizzard_mock.mock_data.domain.hub.scenario_seed import STATUS_ORDER, BoardCensus
 from blizzard_mock.mock_data.domain.runner.ask_seed import compose_ask_park
 from blizzard_mock.mock_data.domain.runner.env_binding_seed import compose_env_binding
-from blizzard_mock.mock_data.domain.runner.lease_seed import ESCALATED, compose_lease, compose_lease_closure
+from blizzard_mock.mock_data.domain.runner.lease_seed import (
+    ESCALATED,
+    ESCALATION_REASONS,
+    compose_lease,
+    compose_lease_closure,
+)
 from blizzard_mock.mock_data.domain.runner.local_pause_seed import compose_local_pause
 from blizzard_mock.mock_data.domain.runner.outbound_fact_seed import (
     ESCALATION_RECORDED,
@@ -75,11 +80,16 @@ def compose_runner_fleet(
     runner_id: str,
     clock: Clock,
     rng: random.Random,
+    escalation_reason: str = ESCALATED,
 ) -> RunnerFleetScenario:
     """Mirror ``census``'s ``waiting_on_human`` and ``needs_human`` chunks into the
     runner store under ``runner_id`` and epoch 1 — the epoch every ``scenario board``
     chunk composes under. Raises :class:`RunnerFleetCompositionError` when ``census``
-    carries neither chunk (``--chunks`` too small to reach both)."""
+    carries neither chunk, or for an unknown ``escalation_reason``."""
+    if escalation_reason not in ESCALATION_REASONS:
+        raise RunnerFleetCompositionError(
+            f"unknown escalation reason {escalation_reason!r} — one of {ESCALATION_REASONS}"
+        )
     waiting_entry = next((e for e in census.chunk_entries if e.status == WAITING_ON_HUMAN), None)
     needs_human_entry = next((e for e in census.chunk_entries if e.status == NEEDS_HUMAN), None)
     if waiting_entry is None or needs_human_entry is None:
@@ -193,7 +203,7 @@ def compose_runner_fleet(
             lease_id=needs_human_lease.lease_id,
             chunk_id=needs_human_entry.chunk_id,
             node_id=census.build_node_id,
-            reason=ESCALATED,
+            reason=escalation_reason,
             closed_at=now,
         )
     )

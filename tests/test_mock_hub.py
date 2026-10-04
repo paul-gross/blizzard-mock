@@ -1090,6 +1090,8 @@ def test_report_escalation_is_readable_on_chunk_detail_and_404s_on_unknown_chunk
         "epoch": 1,
         "takeover_command": "blizzard runner takeover ch_1",
         "wrapped_takeover_command": "",
+        "cause": None,
+        "detail": None,
     }
     assert client.post("/api/fleet/chunks/unknown/escalations", json={"epoch": 1, "runner_id": "r1"}).status_code == 404
 
@@ -1114,7 +1116,34 @@ def test_report_escalation_direct_route_carries_the_wrapped_takeover_command(cli
         "epoch": 1,
         "takeover_command": "cd <workdir> && claude --resume abc",
         "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
+        "cause": None,
+        "detail": None,
     }
+
+
+def test_report_escalation_direct_route_carries_its_cause_and_detail(client: TestClient) -> None:
+    direct = _seed(client)
+    _claim_and_fence(client, direct)
+    resp = client.post(
+        f"/api/fleet/chunks/{direct}/escalations",
+        json={"epoch": 1, "runner_id": "r1", "cause": "retries-exhausted", "detail": "3 of 3 retries used"},
+    )
+    assert resp.status_code == 202
+    escalation = client.get(f"/api/fleet/chunks/{direct}").json()["escalation"]
+    assert (escalation["cause"], escalation["detail"]) == ("retries-exhausted", "3 of 3 retries used")
+
+
+def test_events_escalation_recorded_carries_an_unrecognized_cause_verbatim(client: TestClient) -> None:
+    batched = _seed(client)
+    _claim_and_fence(client, batched)
+    _push_fact(
+        client,
+        "escalation.recorded",
+        {"chunk_id": batched, "epoch": 1, "cause": "some-future-cause", "detail": "kept verbatim"},
+        seq=2,
+    )
+    escalation = client.get(f"/api/fleet/chunks/{batched}").json()["escalation"]
+    assert (escalation["cause"], escalation["detail"]) == ("some-future-cause", "kept verbatim")
 
 
 def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
@@ -1215,6 +1244,8 @@ def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestCli
         "epoch": 1,
         "takeover_command": "take it over",
         "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
+        "cause": None,
+        "detail": None,
     }
 
 

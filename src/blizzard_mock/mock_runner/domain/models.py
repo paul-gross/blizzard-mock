@@ -131,6 +131,8 @@ class EscalateBody(BaseModel):
     #: The ``blizzard runner takeover`` wrapped entry point,
     #: carried alongside the raw ``takeover_command``.
     wrapped_takeover_command: str = ""
+    cause: str | None = None
+    detail: str | None = None
 
 
 class DecideBody(BaseModel):
