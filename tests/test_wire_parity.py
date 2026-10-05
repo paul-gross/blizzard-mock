@@ -44,7 +44,7 @@ pytestmark = pytest.mark.needs_blizzard
 
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
-_FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "wire" / "facts.py"
+_FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "fact_kinds.py"
 _OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode" / "shapes.py"
 _ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
 
@@ -464,7 +464,7 @@ def test_mirror_field_set_agrees_with_the_real_schema(name: str) -> None:
 
 
 def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
-    """The batched ``/events`` dispatch and the real ``wire/facts`` constants name the same
+    """The batched ``/events`` dispatch and the real ``foundation/fact_kinds`` constants name the same
     kinds — a real-side kind the mock never learned would be rejected, silently."""
     real = set(re.findall(r'^[A-Z_]+ = "([a-z_]+\.[a-z_]+)"$', _sibling(_FACT_KINDS_SOURCE), re.MULTILINE))
     mirrored = {

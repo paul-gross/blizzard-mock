@@ -13,7 +13,7 @@ from datetime import datetime
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 
-# The fact kinds this buffer carries — mirrored from ``blizzard.wire.facts``.
+# The fact kinds this buffer carries — mirrored from ``blizzard.foundation.fact_kinds``.
 QUESTION_ASKED = "question.asked"
 ESCALATION_RECORDED = "escalation.recorded"
 

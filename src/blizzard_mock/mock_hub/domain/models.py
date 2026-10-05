@@ -104,7 +104,7 @@ class GraphArtifactKind(StrEnum):
 
 
 class ApplyOutcome(StrEnum):
-    """Mirrors ``blizzard.wire.envelope.ApplyOutcome`` (value-identical)."""
+    """Mirrors ``blizzard.foundation.node_steps.ApplyOutcome`` (value-identical)."""
 
     NEXT = "next"
     HUB_NODE_TAKEN = "hub_node_taken"
