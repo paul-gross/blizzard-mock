@@ -2923,6 +2923,7 @@ def test_garden_findings_reads_the_seeded_live_bucket(client: TestClient) -> Non
             "source": "routine",
             "severity": None,
             "raised_by_chunk_id": None,
+            "exit": None,
         }
     ]
 
@@ -3222,6 +3223,7 @@ def test_chunk_findings_reads_the_seeded_answered_set(client: TestClient) -> Non
             "source": "routine",
             "severity": None,
             "raised_by_chunk_id": None,
+            "exit": None,
         }
     ]
 
@@ -3741,3 +3743,184 @@ def test_transcripts_admit_the_owning_runners_record(client: TestClient) -> None
     ).json()
 
     assert (ack["applied"], ack["refused"]) == ([1], [])
+
+
+# --------------------------------------------------------------------------- #
+# chunk detail: the operator-verb affordances, derived the real hub's way
+# --------------------------------------------------------------------------- #
+
+
+def _affordances(detail: dict) -> dict:
+    keys = (
+        "pausable",
+        "status_if_paused",
+        "completable",
+        "deletable",
+        "graph_editable",
+        "terminal",
+        "current_node_terminal",
+    )
+    return {key: detail[key] for key in keys}
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (
+            "ready",
+            {
+                "pausable": True,
+                "status_if_paused": "paused",
+                "completable": True,
+                "deletable": True,
+                "graph_editable": True,
+                "terminal": False,
+                "current_node_terminal": False,
+            },
+        ),
+        (
+            "not_ready",
+            {
+                "pausable": True,
+                "status_if_paused": "paused",
+                "completable": True,
+                "deletable": True,
+                "graph_editable": True,
+                "terminal": False,
+                "current_node_terminal": False,
+            },
+        ),
+        (
+            "paused",
+            {
+                "pausable": True,
+                "status_if_paused": "paused",
+                "completable": True,
+                "deletable": False,
+                "graph_editable": False,
+                "terminal": False,
+                "current_node_terminal": False,
+            },
+        ),
+        (
+            "needs_human",
+            {
+                "pausable": True,
+                "status_if_paused": "needs_human",
+                "completable": True,
+                "deletable": False,
+                "graph_editable": False,
+                "terminal": False,
+                "current_node_terminal": False,
+            },
+        ),
+        (
+            "delivering",
+            {
+                "pausable": False,
+                "status_if_paused": "delivering",
+                "completable": True,
+                "deletable": False,
+                "graph_editable": False,
+                "terminal": False,
+                "current_node_terminal": False,
+            },
+        ),
+    ],
+)
+def test_chunk_detail_derives_each_seeded_status_affordances(client: TestClient, status: str, expected: dict) -> None:
+    chunk_id = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()["chunk_id"]
+
+    assert _affordances(client.get(f"/api/fleet/chunks/{chunk_id}").json()) == expected
+
+
+def test_chunk_detail_of_a_claimed_chunk_is_no_longer_deletable_or_graph_editable(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+
+    assert _affordances(client.get(f"/api/fleet/chunks/{chunk_id}").json()) == {
+        "pausable": True,
+        "status_if_paused": "paused",
+        "completable": True,
+        "deletable": False,
+        "graph_editable": False,
+        "terminal": False,
+        "current_node_terminal": False,
+    }
+
+
+def test_chunk_detail_of_a_stopped_chunk_is_terminal_and_still_completable(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    client.post("/_seed/stop", json={"chunk_id": chunk_id})
+
+    assert _affordances(client.get(f"/api/fleet/chunks/{chunk_id}").json()) == {
+        "pausable": False,
+        "status_if_paused": "stopped",
+        "completable": True,
+        "deletable": False,
+        "graph_editable": False,
+        "terminal": True,
+        "current_node_terminal": False,
+    }
+
+
+def test_chunk_detail_of_a_chunk_routed_to_the_reserved_terminal_is_done(client: TestClient) -> None:
+    review = {**_SPEC["nodes"]["review"], "choices": [{"name": "pass", "description": "p", "to": "done"}]}
+    spec = {**_SPEC, "nodes": {**_SPEC["nodes"], "review": review}}
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    _claim_and_fence(client, chunk_id)
+    _complete(client, chunk_id, from_node_id="build")
+    _complete(client, chunk_id, from_node_id="review")
+
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+
+    assert (detail["status"], detail["current_node_id"]) == ("done", "done")
+    assert _affordances(detail) == {
+        "pausable": False,
+        "status_if_paused": "done",
+        "completable": False,
+        "deletable": False,
+        "graph_editable": False,
+        "terminal": True,
+        "current_node_terminal": True,
+    }
+
+
+def test_work_items_mark_only_the_hub_reserved_source_as_hub_source(client: TestClient) -> None:
+    spec = {**_SPEC, "work_refs": [{"source": "o-r", "ref": "1"}, {"source": "hub", "ref": "wi_1"}]}
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    items = client.get(f"/api/fleet/chunks/{chunk_id}/work-items").json()["items"]
+
+    assert [(item["source"], item["hub_source"]) for item in items] == [("o-r", False), ("hub", True)]
+
+
+def test_chunk_findings_carry_each_exited_finding_exit(client: TestClient) -> None:
+    def finding(finding_id: str, state: str) -> dict:
+        return {
+            "finding_id": finding_id,
+            "routine_name": "nightly",
+            "scope_slug": "blizzard",
+            "class": "c",
+            "locus": "a.py:1",
+            "summary": "s",
+            "live": state == "live",
+            "state": state,
+        }
+
+    states = ["live", "gone", "resolved", "gone-confirmed", "wont-fix", "not-a-finding", "superseded"]
+    spec = _answered_spec(garden_answered_findings=[finding(f"fin_{i}", s) for i, s in enumerate(states)])
+    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+
+    findings = client.get(f"/api/fleet/chunks/{chunk_id}/findings").json()
+
+    assert [(row["state"], row["exit"]) for row in findings] == [
+        ("live", None),
+        ("gone", None),
+        ("resolved", "outflow"),
+        ("gone-confirmed", "outflow"),
+        ("wont-fix", "withdrawn"),
+        ("not-a-finding", "withdrawn"),
+        ("superseded", "withdrawn"),
+    ]

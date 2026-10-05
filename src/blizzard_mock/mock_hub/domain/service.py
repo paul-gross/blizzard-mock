@@ -20,7 +20,11 @@ from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.models import (
+    PAUSABLE_STATUSES,
+    PRE_CLAIM_STATUSES,
+    RESERVED_HUB_SOURCE_NAME,
     TERMINAL,
+    TERMINAL_STATUSES,
     AnalyticsCountRowSpec,
     AnalyticsSpendRowSpec,
     ApplyOutcome,
@@ -37,7 +41,9 @@ from blizzard_mock.mock_hub.domain.models import (
     ScopeSpec,
     SystemArtifactSpec,
     WorkRefSpec,
+    finding_exit,
     ships_from_lease_holder,
+    status_if_paused,
 )
 from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
@@ -108,7 +114,7 @@ def _optional_text(value: object) -> str | None:
 
 def _work_ref_label(ref: WorkRefSpec) -> str:
     """A work ref's source-native token, rendered the way the real hub's sources render it."""
-    return f"hub:{ref.ref}" if ref.source == "hub" else f"{ref.source}#{ref.ref}"
+    return f"hub:{ref.ref}" if ref.source == RESERVED_HUB_SOURCE_NAME else f"{ref.source}#{ref.ref}"
 
 
 class _ExternalSubscriptionUsageWindowFact(BaseModel):
@@ -154,6 +160,7 @@ def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -
             "note": f.note,
             "last_seen_at": f.last_seen_at,
             "observed_count": f.observed_count,
+            "exit": finding_exit(f.state),
         }
     )
 
@@ -514,11 +521,19 @@ class MockHubService:
                 detail=chunk.escalation.detail,
             )
         questions = [self._question_view(q) for q in self._state.list_questions() if q.chunk_id == chunk_id]
+        status = chunk.status
         return ChunkDetail(
             chunk_id=chunk.chunk_id,
             graph_id=chunk.graph_id,
-            status=chunk.status.value,
+            status=status.value,
             current_node_id=chunk.current_node_id,
+            pausable=status in PAUSABLE_STATUSES,
+            status_if_paused=status_if_paused(status).value,
+            completable=status is not ChunkStatus.DONE,
+            deletable=status in PRE_CLAIM_STATUSES,
+            graph_editable=status in PRE_CLAIM_STATUSES and chunk.current_node_id is None,
+            terminal=status in TERMINAL_STATUSES,
+            current_node_terminal=chunk.current_node_id == TERMINAL,
             latest_epoch=chunk.latest_epoch or None,
             work_refs=[p.model_dump() for p in chunk.work_refs],
             default_model=list(chunk.default_model),
@@ -575,7 +590,13 @@ class MockHubService:
         now = self._clock.now().isoformat()
         return WorkItemsView(
             items=[
-                WorkItemEntry(source=p.source, ref=p.ref, fetched_at=now, title=f"mock item {p.source}#{p.ref}")
+                WorkItemEntry(
+                    source=p.source,
+                    ref=p.ref,
+                    hub_source=p.source == RESERVED_HUB_SOURCE_NAME,
+                    fetched_at=now,
+                    title=f"mock item {p.source}#{p.ref}",
+                )
                 for p in chunk.work_refs
             ]
         )
