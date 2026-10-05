@@ -198,7 +198,12 @@ panel can open. This is **claude_code/opencode-only**: `codex` has no reader tod
   carries `info.time.created` and every text part a `time`; the child's messages
   are created inside the spawning call's window. A `task_id` input continues
   that child's document rather than minting a new one, and each completed
-  `task` part is also streamed on `run` as a `tool_use` event.
+  `task` part is also streamed on `run` as a `tool_use` event. A `task` input's
+  reserved `child_tool_calls` key — a list of `{"tool", "input", "output"}`
+  mappings, never copied into the recorded input — gives the child's reply a
+  completed tool part per entry, so a mock transcript holds events inside a
+  subagent: `tool_call("task", {"subagent_type": "explorer", "prompt": "...",
+  "child_tool_calls": [{"tool": "read", "input": {"filePath": "a.py"}}]})`.
 - **The sidechain/thinking-fidelity gap — stated here and nowhere else.** This is
   the one place to update if the gap's shape changes. Beyond `sessionId`/`cwd`/
   `timestamp` per record — `facades/_transcript.py`'s module docstring is the one

@@ -102,6 +102,26 @@ def test_a_task_tool_call_mints_a_linked_child_document(tmp_path: Path) -> None:
     assert child["messages"][0]["parts"][0]["text"] == "dig in"
 
 
+def test_a_task_call_can_carry_the_child_sessions_own_tool_calls(tmp_path: Path) -> None:
+    writer = OpenCodeTranscriptWriter(session_id="sess-4b", root=tmp_path, cwd=tmp_path)
+    writer.record_user("go")
+    child_calls = [{"tool": "read", "input": {"filePath": "src/a.py"}, "output": "contents"}]
+
+    call_id = writer.record_tool_call("task", {"prompt": "dig in", "child_tool_calls": child_calls})
+    writer.record_tool_result(call_id, "delegated")
+
+    root = _read(document_path(tmp_path, "sess-4b"))
+    task_part = next(p for m in root["messages"] for p in m["parts"] if p.get("type") == "tool")
+    assert task_part["state"]["input"] == {"prompt": "dig in"}
+    child = _read(document_path(tmp_path, task_part["state"]["metadata"]["sessionId"]))
+    [tool_part] = [p for m in child["messages"] for p in m["parts"] if p.get("type") == "tool"]
+    assert tool_part["tool"] == "read"
+    assert tool_part["state"]["status"] == "completed"
+    assert tool_part["state"]["input"] == {"filePath": "src/a.py"}
+    assert tool_part["state"]["output"] == "contents"
+    assert tool_part["sessionID"] == child["info"]["id"]
+
+
 def test_a_non_task_tool_call_mints_no_child_document(tmp_path: Path) -> None:
     writer = OpenCodeTranscriptWriter(session_id="sess-5", root=tmp_path, cwd=tmp_path)
     writer.record_user("go")

@@ -19,6 +19,7 @@ from blizzard_mock.harness.facades._transcript import TRANSCRIPTS_ROOT_ENV_VAR, 
 from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
 
 __all__ = [
+    "CHILD_TOOL_CALLS_KEY",
     "PROJECT_DIR_NAME",
     "TRANSCRIPTS_ROOT_ENV_VAR",
     "OpenCodeTranscriptWriter",
@@ -31,6 +32,9 @@ PROJECT_DIR_NAME = "mock-opencode"
 
 #: The pinned OpenCode version these export documents claim.
 _MOCK_VERSION = "1.18.25"
+
+#: The reserved ``task`` input key holding the child session's own tool calls; never recorded as input.
+CHILD_TOOL_CALLS_KEY = "child_tool_calls"
 
 #: The step-finish "reason" a completed turn reports; any nonempty string is faithful.
 _STEP_REASON = "stop"
@@ -131,13 +135,16 @@ class OpenCodeTranscriptWriter:
         message = self._assistant_message()
         call_id = _new_id("call")
         started = _now_ms()
-        state: dict[str, Any] = {"status": "pending", "input": dict(tool_input), "time": {"start": started}}
+        recorded = {key: value for key, value in tool_input.items() if key != CHILD_TOOL_CALLS_KEY}
+        state: dict[str, Any] = {"status": "pending", "input": recorded, "time": {"start": started}}
         if name == "task":
             # 1.18.32's shape: the child session is named by ``metadata.sessionId``, and a
             # ``task_id`` input continues that child rather than minting a new one.
             child_id = str(tool_input.get("task_id") or _new_id("ses"))
             state["metadata"] = {"parentSessionId": self._session_id, "sessionId": child_id, "truncated": False}
-            self._write_child_session(child_id, tool_input, started_at=started)
+            child_calls = tool_input.get(CHILD_TOOL_CALLS_KEY) or []
+            assert isinstance(child_calls, list)
+            self._write_child_session(child_id, recorded, child_calls, started_at=started)
         part = self._new_part(message, {"type": "tool", "callID": call_id, "tool": name, "state": state})
         message["parts"].append(part)
         self._write()
@@ -202,9 +209,17 @@ class OpenCodeTranscriptWriter:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(self._doc))
 
-    def _write_child_session(self, child_id: str, tool_input: Mapping[str, object], *, started_at: int) -> None:
+    def _write_child_session(
+        self,
+        child_id: str,
+        tool_input: Mapping[str, object],
+        child_calls: list[Mapping[str, Any]],
+        *,
+        started_at: int,
+    ) -> None:
         """One user turn seeded from the parent call's ``prompt`` and one assistant reply, appended to
-        the child's document (a ``task_id`` continues an existing one). Created no earlier than the
+        the child's document (a ``task_id`` continues an existing one). The reply carries a completed
+        tool part for each of ``child_calls``, ahead of its text. Created no earlier than the
         parent call's start, so they fall inside that call's window."""
         prompt = tool_input.get("prompt", "")
         child_path = document_path(self._root, child_id)
@@ -220,6 +235,24 @@ class OpenCodeTranscriptWriter:
         )
 
         assistant = self._new_message("assistant", session_id=child_id, created_at=started_at)
+        for call in child_calls:
+            assistant["parts"].append(
+                self._new_part(
+                    assistant,
+                    {
+                        "type": "tool",
+                        "callID": _new_id("call"),
+                        "tool": str(call["tool"]),
+                        "state": {
+                            "status": "completed",
+                            "input": dict(call.get("input", {})),
+                            "output": str(call.get("output", "ok")),
+                            "time": _span(started_at),
+                        },
+                    },
+                    session_id=child_id,
+                )
+            )
         reply_text = "the child session completed its delegated task"
         assistant["parts"].append(
             self._new_part(
