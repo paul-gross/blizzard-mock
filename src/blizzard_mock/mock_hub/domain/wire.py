@@ -175,6 +175,15 @@ class ChunkDetail(BaseModel):
     # The chunk's default harness preference — the `default_model` shape.
     default_harnesses: list[str] = Field(default_factory=list)
     route: RouteView | None = None
+    # The operator-verb affordances the real hub derives from status and node, each
+    # computed the real hub's way from the mock's own status and node.
+    pausable: bool = False
+    status_if_paused: str | None = None
+    completable: bool = False
+    deletable: bool = False
+    graph_editable: bool = False
+    terminal: bool = False
+    current_node_terminal: bool = False
     escalation: ChunkEscalationView | None = None
     questions: list[QuestionView] = Field(default_factory=list)
 
@@ -319,6 +328,7 @@ class WorkItemEntry(BaseModel):
     ref: str
     label: str | None = None
     web_url: str | None = None
+    hub_source: bool = False
     fetched_at: str
     title: str | None = None
     body: str | None = None
@@ -354,6 +364,8 @@ class FindingView(BaseModel):
     source: str = "routine"
     severity: str | None = None
     raised_by_chunk_id: str | None = None
+    # How an exited finding left — ``outflow`` or ``withdrawn``; ``None`` while unexited.
+    exit: str | None = None
 
 
 class AnalyticsCountView(BaseModel):

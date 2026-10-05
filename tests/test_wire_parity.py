@@ -314,8 +314,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "BlockedView": ("BlockedView", frozenset({"unmet_count"})),
     "ChunkDetail": (
         "ChunkDetail",
-        # The runner reads identity, fence, route, escalation, and questions; the rest of
-        # the operator aggregate is optional on the real schema and never mirrored.
+        # The runner reads identity, fence, route, escalation, and questions, and the
+        # operator-verb affordances derive from status and node alone; the rest of the
+        # operator aggregate is optional on the real schema and never mirrored.
         frozenset(
             {
                 "artifacts",

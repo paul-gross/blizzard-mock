@@ -44,8 +44,54 @@ class ChunkStatus(StrEnum):
     STOPPED = "stopped"
 
 
+#: The terminal statuses (mirrors ``chunk_status.TERMINAL_STATUSES``).
+TERMINAL_STATUSES = frozenset({ChunkStatus.STOPPED, ChunkStatus.DONE})
+
+#: The unclaimed statuses deletion and a graph re-pin admit (mirrors ``chunk_status.PRE_CLAIM_STATUSES``).
+PRE_CLAIM_STATUSES = frozenset({ChunkStatus.NOT_READY, ChunkStatus.READY})
+
+#: The statuses an operator pause is legal from (mirrors the real ``ChunkVerb.PAUSE`` legality).
+PAUSABLE_STATUSES = frozenset(ChunkStatus) - TERMINAL_STATUSES - {ChunkStatus.DELIVERING}
+
+
+def status_if_paused(status: ChunkStatus) -> ChunkStatus:
+    """The status a chunk at ``status`` derives once a pause settles — mirrors the real
+    ``ChunkFacts.status_if_paused``: its current status where the pause is refused, or where
+    ``needs_human`` outranks the pause on the real status ladder; ``paused`` otherwise."""
+    if status not in PAUSABLE_STATUSES or status is ChunkStatus.NEEDS_HUMAN:
+        return status
+    return ChunkStatus.PAUSED
+
+
 #: The reserved terminal node id a choice may point at (mirrors ``graph.RESERVED_TERMINAL``).
 TERMINAL = "done"
+
+#: The hub's own reserved work-source name (mirrors ``config.RESERVED_HUB_SOURCE_NAME``).
+RESERVED_HUB_SOURCE_NAME = "hub"
+
+
+class FindingExit(StrEnum):
+    """How an exited finding left (mirrors ``blizzard.foundation.findings.FindingExit``)."""
+
+    OUTFLOW = "outflow"
+    WITHDRAWN = "withdrawn"
+
+
+#: Each exit state's own exit (mirrors the real ``OUTFLOW_KINDS``/``WITHDRAWN_KINDS`` split):
+#: the ground changed, or a person judged the finding rather than the code.
+_FINDING_EXITS: dict[str, FindingExit] = {
+    "resolved": FindingExit.OUTFLOW,
+    "gone-confirmed": FindingExit.OUTFLOW,
+    "wont-fix": FindingExit.WITHDRAWN,
+    "not-a-finding": FindingExit.WITHDRAWN,
+    "superseded": FindingExit.WITHDRAWN,
+}
+
+
+def finding_exit(state: str) -> FindingExit | None:
+    """How a finding in ``state`` exited — ``None`` for a finding that has not exited
+    (mirrors the real ``finding_exit``)."""
+    return _FINDING_EXITS.get(state)
 
 
 class GraphArtifactKind(StrEnum):
