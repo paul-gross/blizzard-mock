@@ -29,7 +29,7 @@ own: `board`, `fleet`), and the `fixture` subgroup (`list`, `apply`).
 
 ## State of this component
 
-**Thirteen `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
+**Fourteen `create` verbs plus `scenario board`/`scenario fleet` live, `fixture`
 still stubbed.** The service tier needs to seed and clean the real hub/runner
 stores, so the workhorse verbs are implemented.
 
