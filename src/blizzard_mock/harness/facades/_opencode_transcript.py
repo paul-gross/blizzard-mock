@@ -33,8 +33,7 @@ PROJECT_DIR_NAME = "mock-opencode"
 #: The pinned OpenCode version these export documents claim.
 _MOCK_VERSION = "1.18.25"
 
-#: The reserved ``task`` input key a script uses to give the child session its own tool calls — a list of
-#: ``{"tool": ..., "input": {...}, "output": ...}`` mappings. It never reaches the recorded tool part's input.
+#: The reserved ``task`` input key holding the child session's own tool calls; never recorded as input.
 CHILD_TOOL_CALLS_KEY = "child_tool_calls"
 
 #: The step-finish "reason" a completed turn reports; any nonempty string is faithful.
