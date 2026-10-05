@@ -1,5 +1,6 @@
 """Capability-matched queue selection — the mock's own reimplementation of
-``blizzard.hub.domain.execution.eligibility.EligibilityCheck``/``select_matched_entry``, over the
+``blizzard.hub.domain.execution.eligibility.EligibilityCheck`` and
+``blizzard.hub.domain.operations.queue.select_matched_entry``, over the
 mock's flat ``ChunkState``/``NodeSpec`` graph shape rather than the real hub's ``Graph``/``Node``.
 
 The mock's seed vocabulary already IS a graph: a ``NodeSpec``'s ``choices[].to`` are its
