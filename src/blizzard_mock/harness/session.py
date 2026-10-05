@@ -49,6 +49,9 @@ class SessionState:
     resumes: list[str] = field(default_factory=list)
     verdicts: list[str] = field(default_factory=list)
     invocations: list[Invocation] = field(default_factory=list)
+    #: Set when the spawn carried the runner selftest's lease identity; a later resume
+    #: arrives without it, so the session remembers it.
+    selftest: bool = False
 
     @property
     def last_ask(self) -> Ask | None:

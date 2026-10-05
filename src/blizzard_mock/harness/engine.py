@@ -36,6 +36,12 @@ STATE_DIR_ENV_VAR = "BLIZZARD_MOCK_HARNESS_STATE_DIR"
 #: Optional command the ``ask`` helper shells out to (the real runner ask path),
 #: e.g. ``"blizzard runner ask"``. Absent in unit tests — the ask is emit-only.
 ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
+#: The runner-injected lease identity, and the value the runner selftest pins on its spawn.
+LEASE_ID_ENV_VAR = "BLIZZARD_LEASE_ID"
+SELFTEST_LEASE_ID = "selftest"
+#: What the selftest responder commits on spawn, and what it later judges by.
+SELFTEST_FILENAME = "SELFTEST.txt"
+
 #: The runner-injected, comma-separated workdirs of the environments the chunk
 #: holds; see :func:`acquired_worktree`.
 ENV_WORKDIRS_ENV_VAR = "BLIZZARD_ENV_WORKDIRS"
@@ -432,6 +438,21 @@ def _script_globals(ctx: RunContext) -> dict[str, object]:
 # -- The exec engine ---------------------------------------------------------- #
 
 
+# The selftest responder: prose prompts from the runner selftest do what a compliant agent would.
+_SELFTEST_SPAWN_SCRIPT = f"""\
+import pathlib
+pathlib.Path({SELFTEST_FILENAME!r}).write_text("ok\\n")
+commit("selftest: trivial edit")
+"""
+_SELFTEST_RESUME_SCRIPT = f"""\
+import subprocess
+tracked = subprocess.run(
+    ["git", "ls-files", "--error-unmatch", {SELFTEST_FILENAME!r}], capture_output=True
+).returncode == 0
+verdict("pass" if tracked else "fail")
+"""
+
+
 def run_prompt(
     prompt: str,
     *,
@@ -504,6 +525,12 @@ def run_prompt(
     else:
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
+        state.selftest = env.get(LEASE_ID_ENV_VAR) == SELFTEST_LEASE_ID
+    # Keyed on the selftest's identity, never its wording, and only after the fence has passed.
+    # A resume (the judge call included) carries no identity, so the session remembers it.
+    if state.selftest and tagged is None:
+        script = _SELFTEST_RESUME_SCRIPT if is_resume else _SELFTEST_SPAWN_SCRIPT
+        script_error = None
     if transcript is None and transcript_factory is not None:
         transcript = transcript_factory(session_id)
     state.turns += 1

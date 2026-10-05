@@ -409,6 +409,16 @@ the facades map that to exit code `2` (distinct from a script error's `1`).
 from test scaffolding. Session state defaults to a `.blizzard-mock-harness/`
 directory beside the marker, overridable via `BLIZZARD_MOCK_HARNESS_STATE_DIR`.
 
+## Runner selftest
+
+`blizzard runner selftest` drives the real adapter with English prompts, not scripts. Past the fence, a spawn whose
+`BLIZZARD_LEASE_ID` is `selftest` (`engine.SELFTEST_LEASE_ID`) and whose prompt carries no `<behavior-script>` tag is
+answered as a compliant agent would: it commits `SELFTEST.txt` (`ok`) in the acquired worktree. The session remembers
+the identity, because a resume — the judge call included — arrives without it; a later prose resume answers
+`<Choice>pass</Choice>` when `SELFTEST.txt` is tracked, else `<Choice>fail</Choice>`. The key is the identity, never the
+prompt's wording. Any other prose prompt is a script error, as before, and the fence is checked first, so the
+responder never runs unfenced.
+
 ## Script helper API
 
 A behavior-script is Python — inside a `<behavior-script>` block, or the whole

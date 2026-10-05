@@ -1620,3 +1620,56 @@ def test_opencode_facade_bare_invocation_prints_usage() -> None:
     with pytest.raises(SystemExit) as exc:
         opencode.main([])
     assert exc.value.code == 0
+
+
+# --------------------------------------------------------------------------- #
+# The runner selftest responder
+# --------------------------------------------------------------------------- #
+
+
+def _selftest_env(repo_env: tuple[Path, dict[str, str]]) -> tuple[Path, dict[str, str]]:
+    cwd, env = repo_env
+    return cwd, {**env, "BLIZZARD_LEASE_ID": "selftest"}
+
+
+def _commits(cwd: Path) -> int:
+    out = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=cwd, capture_output=True, text=True)
+    return int(out.stdout)
+
+
+def test_selftest_spawn_commits_the_canary_file(fenced_repo) -> None:
+    cwd, env = _selftest_env(fenced_repo)
+    before = _commits(cwd)
+    code, _ = _run("Create SELFTEST.txt and commit it.", (cwd, env), session_id="selftest-a")
+    assert code == 0
+    assert (cwd / "SELFTEST.txt").read_text() == "ok\n"
+    assert _commits(cwd) == before + 1
+
+
+def test_selftest_resume_judges_from_repo_state(fenced_repo) -> None:
+    cwd, env = _selftest_env(fenced_repo)
+    _run("Create SELFTEST.txt and commit it.", (cwd, env), session_id="selftest-a")
+    _, result = _run("Assess the task.", (cwd, env), session_id="selftest-a", is_resume=True)
+    assert "<Choice>pass</Choice>" in result.text
+
+
+def test_selftest_judges_fail_without_the_commit(fenced_repo) -> None:
+    cwd, env = _selftest_env(fenced_repo)
+    # The session is a selftest one, but the work never landed.
+    store = engine.SessionStore(engine._state_root(env, cwd))
+    state = store.load_or_create("selftest-b")
+    state.selftest = True
+    store.save(state)
+    _, result = _run("Assess the task.", (cwd, env), session_id="selftest-b", is_resume=True)
+    assert "<Choice>fail</Choice>" in result.text
+
+
+def test_selftest_responder_never_weakens_the_fence(tmp_path: Path) -> None:
+    with pytest.raises(FenceError):
+        engine.run_prompt("Create SELFTEST.txt.", cwd=tmp_path, env={"BLIZZARD_LEASE_ID": "selftest"})
+
+
+def test_non_selftest_prose_is_still_a_script_error(fenced_repo) -> None:
+    code, result = _run("Create SELFTEST.txt and commit it.", fenced_repo)
+    assert code == 1
+    assert result.is_error
