@@ -1,5 +1,6 @@
 """Capability-matched queue selection — the mock's own reimplementation of
-``blizzard.hub.domain.eligibility.EligibilityCheck``/``select_matched_entry``, over the
+``blizzard.hub.domain.execution.eligibility.EligibilityCheck`` and
+``blizzard.hub.domain.operations.queue.select_matched_entry``, over the
 mock's flat ``ChunkState``/``NodeSpec`` graph shape rather than the real hub's ``Graph``/``Node``.
 
 The mock's seed vocabulary already IS a graph: a ``NodeSpec``'s ``choices[].to`` are its
@@ -18,7 +19,7 @@ class QueueMatchPolicy(Enum):
     """The matched fleet peek's hold-or-pass-over policy — applied to the
     capability-eligibility and blocked-dependency dimensions together, never one alone.
     :meth:`of` never raises: an unrecognized wire value reads as :attr:`PASS_OVER`,
-    mirroring ``blizzard.hub.domain.queue.QueueMatchPolicy``."""
+    mirroring ``blizzard.hub.domain.operations.queue.QueueMatchPolicy``."""
 
     HOLD = "hold"
     PASS_OVER = "pass-over"
@@ -92,7 +93,7 @@ def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[R
 
 def capability_ineligible(chunk: ChunkState, node_id: str, capabilities: Sequence[RunnerCapability]) -> bool:
     """Whether ``capabilities`` cannot work ``chunk`` from ``node_id`` — the mock's own
-    mirror of ``blizzard.hub.domain.queue._capability_ineligible``. Asserting no
+    mirror of ``blizzard.hub.domain.operations.queue._capability_ineligible``. Asserting no
     capabilities at all applies no filter, matching the legacy peek's unfiltered
     reach-ahead — a deliberate divergence from :func:`_lineage_satisfied`'s own empty-
     snapshot reading, exactly as the real hub's own divergence is documented."""

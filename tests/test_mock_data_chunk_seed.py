@@ -3,7 +3,7 @@
 Pure, no store: ``compose_chunk`` is a plain function over already-loaded data
 (``bzh:domain-takes-objects``), so every one of the nine derivable statuses is
 exercised directly against the exact ``FactRow`` table set
-``blizzard.hub.domain.work.derive_chunk_status`` reads to arrive there,
+``blizzard.hub.domain.chunk.model.ChunkFacts.status`` reads to arrive there,
 first-match-wins — proving the composed set matches the precedence and never
 includes a fact that would rank higher (e.g. ``--status running`` never emits a
 terminal transition or an escalation).

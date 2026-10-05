@@ -83,7 +83,7 @@ its own entry below owns its flags.
   exactly why `create chunk` needs one of these. Prints the minted graph id.
 - `create chunk --store hub --status <status> [--graph NAME] [--node NAME] [--work-ref SRC#REF]... [--runner-id R] [--epoch N] [--chunk-id ID] [--seed N]`
   — **implemented**, the root verb. Composes and writes the exact fact rows
-  `blizzard.hub.domain.work.derive_chunk_status` reads to arrive at one of the nine
+  `blizzard.hub.domain.chunk.model.ChunkFacts.status` reads to arrive at one of the nine
   derived statuses (`domain/hub/chunk_seed.py`, `bzh:facts-not-status` — never a status
   column). Auto-mints a graph (`create graph`'s own logic) when the store holds
   none, or reuses one by `--graph NAME`. `--status done` travels the graph's own
