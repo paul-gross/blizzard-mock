@@ -18,9 +18,9 @@ from blizzard_mock.mock_runner.domain.gateway import IHubGateway
 from blizzard_mock.mock_runner.domain.levers import RunnerLever
 from blizzard_mock.mock_runner.domain.models import Held
 
-#: The runner-fact kind that advances the hub's fence (``blizzard.wire.facts.LEASE_MINTED``).
+#: The runner-fact kind that advances the hub's fence (``blizzard.foundation.fact_kinds.LEASE_MINTED``).
 LEASE_MINTED = "lease.minted"
-#: The runner-fact kind that records retries-exhausted (``blizzard.wire.facts.ESCALATION_RECORDED``).
+#: The runner-fact kind that records retries-exhausted (``blizzard.foundation.fact_kinds.ESCALATION_RECORDED``).
 ESCALATION_RECORDED = "escalation.recorded"
 #: The remaining fact kinds this driver can push over ``/events`` — not
 #: fence-advancing.
