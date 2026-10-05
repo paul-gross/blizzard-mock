@@ -138,7 +138,7 @@ class GardenProposalOrigin(StrEnum):
 
 
 class RoutineProposalState(StrEnum):
-    """Mirrors ``blizzard.hub.domain.garden_proposals.RoutineProposalState``
+    """Mirrors ``blizzard.hub.domain.garden.proposals.model.RoutineProposalState``
     (value-identical) — the ``?state=`` selector on ``GET
     /chunks/{id}/garden/proposals``."""
 

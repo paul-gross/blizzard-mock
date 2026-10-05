@@ -412,7 +412,7 @@ class MockHubService:
     def peek_matched(
         self, *, runner_id: str | None, capabilities: Sequence[RunnerCapability], policy: str
     ) -> QueuePeekResponse:
-        """The mock's own mirror of ``blizzard.hub.domain.queue.select_matched_entry``, over its
+        """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
         flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
         blocked, policy applied to both the capability and blocked-dependency dimensions before
         selection. ``runner_id`` stands in for the real verb's authenticated principal; naming
@@ -481,7 +481,7 @@ class MockHubService:
     def rekey_route_token(self, chunk_id: str) -> RouteTokenRekeyResponse:
         """Rotate the chunk's live route capability token —
         mirrors the real hub's ``POST /api/fleet/chunks/{id}/route-token``. Why it exists:
-        `blizzard/src/blizzard/hub/domain/claim.py`'s ``ClaimService.rekey``. Deterministic,
+        `blizzard/src/blizzard/hub/domain/execution/claim.py`'s ``ClaimService.rekey``. Deterministic,
         like the claim's own token, but a counter folded in so a re-key never echoes it back."""
         chunk = self._require(chunk_id)
         if not chunk.claimed:

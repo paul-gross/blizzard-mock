@@ -1,7 +1,7 @@
 """Composes one ``artifacts`` row — a chunk's durable output at one node-step
 (``bzh:facts-not-status``).
 
-``kind`` discriminates the payload the way the real ``hub/domain/artifacts.py``
+``kind`` discriminates the payload the way the real ``hub/domain/artifact/model.py``
 does, mirrored independently (no ``blizzard`` import).
 """
 
