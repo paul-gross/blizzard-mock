@@ -32,26 +32,27 @@ A service-tier test points the real runner's `BZ_HUB_URL` at `http://{host}:{por
 ## Hub API surface (the subset a runner calls)
 
 Vendor-native paths + JSON, byte-compatible with the hub's wire models. Liveness stays
-unauthenticated at `/api/*`; every other route lives under `/api/fleet/*` — this mock
-simulates only runner-originating traffic (no board/operator surface at all), so its
-whole hub mirror sits under the fleet prefix. The mock stays warn-tolerant by
-construction — no `require_runner_principal` check, a tokenless call is served exactly
-like an enrolled one — but every received header is still recorded (`GET /_captured`)
-so a test can assert a real runner presented its bearer token. `POST
-/api/fleet/queue/peek` is the one exception: it demands a
-`runner_id` naming an already-registered runner and refuses `401` without one — the
-mock carries no bearer-token registry to resolve a principal from a header, so it takes
-this identity as a query parameter instead (never inside the parity-checked request
-body), mirroring the real hub's own always-raising demand on this one route. A claim, likewise, demands that its `runner_id` names a registered runner
-and refuses `403` otherwise — a live runner re-registers every tick, so its next claim
-follows a registration.
+unauthenticated at `/api/*`; every runner route lives under `/api/fleet/*`, beside the one
+operator route a runner's bootstrap calls (`POST /api/runners`) — this mock simulates only
+runner-originating traffic, no board surface.
+
+A runner is who its bearer token says it is, as at the real hub. Adding a runner mints its
+`rn_` id and token together; the token is the runner's only identity, and no request body
+or query names the caller. Every `/api/fleet/*` route except the identity read resolves the
+`Authorization: Bearer` token before its handler runs and refuses **401** when it is
+missing, unknown, or revoked — tokenless calls are refused, never served. A runner added
+but not yet registered is *never connected*: it may call in, but it holds no workspace
+binding, its own-runner read answers **409**, and a claim from it is refused **403** like
+an unregistered runner's. Registration only updates a runner already added; the name comes
+from the body, and a blank one keeps the held name. Every received header is still
+recorded (`GET /_captured`).
 
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
-| `POST /api/fleet/queue/peek?runner_id=` | The matched fleet peek — at most one entry, capability- and policy-filtered for `runner_id`; **401** without a `runner_id` naming a registered runner |
-| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a runner unregistered or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or incompatible capabilities |
+| `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry, capability- and policy-filtered for the caller |
+| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or incompatible capabilities |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **404** with no live route, **409** when the route sits on an ended chunk |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090); **409** once the chunk has ended (`done` or `stopped`) |
@@ -65,7 +66,10 @@ follows a registration.
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register (id, workspace, federation identity, `env_capacity`) / read the mirrored `RunnerView` — both brakes (D-070/D-043) and its reported per-slug usage collection |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`) → `{runner_id, runner_name, first_registration}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
+| `GET /api/fleet/identity` | The caller's `{runner_id, runner_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
+| `POST /api/runners` | Add a runner under a non-blank `name` → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name |
+| `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added, **409** for a retired runner |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 | `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first |
 
@@ -90,9 +94,9 @@ high-water mark — a replayed seq is re-acked, not re-applied, and an unrecogni
 | `external_subscription_usage.missed` | Upserts the runner's newest reported miss for its `slug`, in its own store, never touching the sample row |
 
 The four runner-scoped kinds — both `runner.locally_*` and the usage sample/miss pair —
-are held per `runner_id` and applied whether or not that runner has registered, so a
-report the outbound buffer replays ahead of its registration is readable once that
-registration lands. A usage sample or miss must carry a non-empty `slug`; its payload is
+are held per runner — the one the pushing token names — and applied whether or not it has
+registered yet, so a report the outbound buffer replays ahead of its first registration is
+readable once that registration lands. A usage sample or miss must carry a non-empty `slug`; its payload is
 coerced at ingest (defaulted `sampled_at`/`missed_at`, unusable windows dropped), so an
 accepted fact can never make a later read raise. Held per `(runner_id, slug)`, one
 subscription's sample never overwrites a sibling's (nor does a miss overwrite a sample,
@@ -128,7 +132,16 @@ to either a sample or a miss.
   full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
   accepted, minted garden proposal answers — an independent lever from `garden_run`/
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
-  chunk answers no such proposal. `POST /_seed/reset` clears all state.
+  chunk answers no such proposal. `POST /_seed/reset` clears all state, runners and their
+  tokens included — as after a reset of a real hub's data, every token a runner holds then
+  answers `unknown`, and `blizzard runner init` re-adds only with `--allow-readd`.
+- `POST /_seed/runners {name, runner_id?, token?}` — add a runner never connected, as
+  `POST /api/runners` does, optionally under a pinned id and token (**409** for a pinned id
+  already added). `POST /_seed/runners/{id}/retire {by}` retires it and revokes its token,
+  so the identity read answers `retired`; `POST /_seed/runners/{id}/token-revocations`
+  revokes the token alone (`revoked` until a rotation); `POST
+  /_seed/runners/{id}/pause?paused=` sets or releases the fleet's brake on it. All three answer
+  **404** for an id never added.
 - `POST /_seed/scopes {slug, description?, retired?, created_at?}` — upsert one scope
   in the global vocabulary; a scenario seeds the end state it wants
   directly rather than replaying create/retire. Seeding the same `slug` twice replaces
@@ -158,7 +171,7 @@ to either a sample or a miss.
 |-------|---------|--------|
 | `delay` | `{ms}` | Sleep `ms` before answering (delay a response) |
 | `drop_ack` | — | Apply the completion's write, then answer 503 — the ack is dropped though the transition landed; the re-flush is idempotent (D-090) |
-| `conflicting_fact` | `{runner_id}` | `GET /chunks/{id}` reports a route held by a *different* runner — a conflicting locator fact |
+| `conflicting_fact` | `{runner_id?}` | `GET /chunks/{id}` reports a route held by a *different* runner — `runner_id`, or a fixed `rn_` id when omitted — a conflicting locator fact |
 | `unreachable` | `remaining?` | All requests → 503; `remaining=N` heals after N calls (go unreachable *mid-lease*) |
 | `unreachable_transcripts` | `remaining?` | `POST /transcripts` alone → 503; every other route (incl. `/events`) stays healthy |
 | `delay_transcripts` | `{ms}` | `POST /transcripts` alone sleeps `ms`; every other route (incl. `/events`) stays fast |

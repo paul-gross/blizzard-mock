@@ -13,24 +13,27 @@ from typing import Any, Protocol
 class IHubGateway(Protocol):
     """The mock runner's client of a hub API. Outbound-only, raw responses."""
 
+    #: ``POST /api/runners`` — the operator add a runner's bootstrap makes when it holds no token.
+    def add_runner(self, *, name: str) -> tuple[int, dict[str, Any]]: ...
+
     def register(
         self,
-        runner_id: str,
         *,
+        name: str,
         workspace_id: str,
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        """``subscriptions`` is forwarded only when supplied — ``None`` omits the key
-        entirely, driving the hub's rosterless fallback."""
+        """Register the runner the bearer token names, under ``name``. ``subscriptions`` is
+        forwarded only when supplied — ``None`` omits the key entirely, driving the hub's
+        rosterless fallback."""
         ...
 
     def peek(self) -> tuple[int, dict[str, Any]]: ...
 
-    #: The matched fleet peek — ``POST /queue/peek``, identified by ``runner_id`` (``None``
-    #: for tokenless); falls back to :meth:`peek`'s legacy ``GET`` on a ``401`` internally.
+    #: The matched fleet peek — ``POST /queue/peek`` under the bearer token, or none when ``enrolled`` is false.
     def peek_matched(
-        self, *, runner_id: str | None, capabilities: list[dict[str, Any]], policy: str
+        self, *, enrolled: bool, capabilities: list[dict[str, Any]], policy: str
     ) -> tuple[int, dict[str, Any]]: ...
     def claim(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
     def submit_completion(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
@@ -41,7 +44,7 @@ class IHubGateway(Protocol):
     def chunk_statuses(self, chunk_ids: list[str]) -> tuple[int, dict[str, Any]]: ...
 
     #: ``POST /chunks/{id}/decisions`` — a runner-config gate decision
-    #: (``DecisionSubmission{from_node_id, epoch, runner_id, artifacts, route_token?}``).
+    #: (``DecisionSubmission{from_node_id, epoch, artifacts, route_token?}``).
     def submit_decision(self, chunk_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]: ...
 
     #: ``GET /questions/{id}`` — the runner's answer poll.

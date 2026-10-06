@@ -77,15 +77,14 @@ def compose_runner_fleet(
     *,
     census: BoardCensus,
     graph_id: str,
-    runner_id: str,
     clock: Clock,
     rng: random.Random,
     escalation_reason: str = ESCALATED,
 ) -> RunnerFleetScenario:
     """Mirror ``census``'s ``waiting_on_human`` and ``needs_human`` chunks into the
-    runner store under ``runner_id`` and epoch 1 — the epoch every ``scenario board``
-    chunk composes under. Raises :class:`RunnerFleetCompositionError` when ``census``
-    carries neither chunk, or for an unknown ``escalation_reason``."""
+    runner store at epoch 1 — the epoch every ``scenario board`` chunk composes under.
+    Raises :class:`RunnerFleetCompositionError` when ``census`` carries neither chunk,
+    or for an unknown ``escalation_reason``."""
     if escalation_reason not in ESCALATION_REASONS:
         raise RunnerFleetCompositionError(
             f"unknown escalation reason {escalation_reason!r} — one of {ESCALATION_REASONS}"
@@ -104,7 +103,6 @@ def compose_runner_fleet(
     # --- waiting_on_human: an active lease, parked on an open ask ---------------
     waiting_lease = compose_lease(
         chunk_id=waiting_entry.chunk_id,
-        runner_id=runner_id,
         epoch=1,
         graph_id=graph_id,
         node_id=census.build_node_id,
@@ -186,7 +184,6 @@ def compose_runner_fleet(
     needs_human_session_id = ids.mint(_SESSION_PREFIX, clock, rng)
     needs_human_lease = compose_lease(
         chunk_id=needs_human_entry.chunk_id,
-        runner_id=runner_id,
         epoch=1,
         graph_id=graph_id,
         node_id=census.build_node_id,
@@ -266,10 +263,10 @@ def compose_runner_fleet(
             kind=ESCALATION_RECORDED,
             chunk_id=needs_human_entry.chunk_id,
             lease_id=needs_human_lease.lease_id,
-            payload={"chunk_id": needs_human_entry.chunk_id, "epoch": 1, "runner_id": runner_id},
+            payload={"chunk_id": needs_human_entry.chunk_id, "epoch": 1},
             created_at=now,
             acked_at=now,
         )
     )
 
-    return RunnerFleetScenario(rows=rows, brake=[compose_local_pause(runner_id=runner_id, set_at=now)])
+    return RunnerFleetScenario(rows=rows, brake=[compose_local_pause(set_at=now)])

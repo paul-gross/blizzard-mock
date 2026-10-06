@@ -12,13 +12,11 @@ from datetime import datetime
 from blizzard_mock.mock_data.domain.facts import FactRow
 
 
-def compose_local_pause(
-    *, runner_id: str, set_at: datetime, set_by: str = "mock-data", reason: str | None = None
-) -> FactRow:
+def compose_local_pause(*, set_at: datetime, set_by: str = "mock-data", reason: str | None = None) -> FactRow:
     """One engaged ``local_pause_facts`` row — ``paused`` derives from the newest one.
     ``reason`` names the cause (a usage limit, the spend ceiling), or ``None`` for a plain
     operator pause — mirrors the real brake's own ``PauseService.engage``."""
     return FactRow(
         table="local_pause_facts",
-        values={"runner_id": runner_id, "paused": True, "set_at": set_at, "set_by": set_by, "reason": reason},
+        values={"paused": True, "set_at": set_at, "set_by": set_by, "reason": reason},
     )

@@ -88,42 +88,38 @@ class ScopeRow:
 
 
 class RunnerRow:
-    """A registered runner's mutable registry row (liveness + the fleet's brake).
+    """An added runner's mutable registry row. Mirrors the real hub's ``runner_registrations`` row.
 
-    Carries only what a registration writes. What the runner reports about itself lives in
-    :class:`ReportedRunnerFacts`, which outlives and predates this row."""
+    ``add`` writes the row never connected; a registration fills the rest. What the runner reports about
+    itself lives in :class:`ReportedRunnerFacts`, which outlives and predates this row."""
 
-    def __init__(
-        self,
-        runner_id: str,
-        *,
-        workspace_id: str,
-        at: datetime,
-        url: str | None = None,
-        redirect_uris: tuple[str, ...] = (),
-        env_capacity: int | None = None,
-        capabilities: tuple[RunnerCapability, ...] = (),
-        declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
-        gates: tuple[str, ...] = (),
-    ) -> None:
+    def __init__(self, runner_id: str, *, name: str, added_at: datetime) -> None:
         self.runner_id = runner_id
-        self.workspace_id = workspace_id
-        self.registered_at = at
-        self.last_seen_at = at
-        # The runner's optional federation identity — reported on every
-        # (re-)registration.
-        self.url = url
-        self.redirect_uris = redirect_uris
-        self.env_capacity = env_capacity
-        # The runner's capability snapshot — reported on every
-        # (re-)registration, replacing the prior snapshot whole.
-        self.capabilities = capabilities
+        # Display only and not unique — the runner owns it, and every registration may replace it.
+        self.name = name
+        self.added_at = added_at
+        self.workspace_id: str | None = None
+        self.registered_at: datetime | None = None
+        self.last_seen_at: datetime | None = None
+        # The runner's optional federation identity — reported on every registration.
+        self.url: str | None = None
+        self.redirect_uris: tuple[str, ...] = ()
+        self.env_capacity: int | None = None
+        # The runner's capability snapshot — reported on every registration, replacing the
+        # prior snapshot whole.
+        self.capabilities: tuple[RunnerCapability, ...] = ()
         # The runner's declared subscription roster, kept distinct from an absent one;
-        # replaced whole on every (re-)registration, the same way `capabilities` is.
-        self.declared_subscriptions = declared_subscriptions
-        # The node names the runner holds for a human decision, replaced whole on every (re-)registration.
-        self.gates = gates
+        # replaced whole on every registration, the same way `capabilities` is.
+        self.declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None
+        # The node names the runner holds for a human decision, replaced whole on every registration.
+        self.gates: tuple[str, ...] = ()
         self.paused = False
+        self.retired_at: datetime | None = None
+        self.retired_by: str | None = None
+
+    def never_connected(self) -> bool:
+        """Added but never registered — the hub knows its id and name, and nothing it reports."""
+        return self.registered_at is None
 
 
 class ClaimDeniedUnregistered(Exception):
@@ -144,9 +140,10 @@ class ClaimDeniedPaused(Exception):
 
 
 def refuse_braked_runner(row: RunnerRow | None, *, runner_id: str) -> RunnerRow:
-    """Refuse a claim from a runner unregistered (:class:`ClaimDeniedUnregistered`) or paused at
-    the hub registry (:class:`ClaimDeniedPaused`); the registration the claim stands on otherwise."""
-    if row is None:
+    """Refuse a claim from a runner unregistered — never added, or added but never connected —
+    (:class:`ClaimDeniedUnregistered`) or paused at the hub registry (:class:`ClaimDeniedPaused`);
+    the registration the claim stands on otherwise."""
+    if row is None or row.never_connected():
         raise ClaimDeniedUnregistered(runner_id=runner_id)
     if row.paused:
         raise ClaimDeniedPaused(runner_id=runner_id)
@@ -160,10 +157,15 @@ class IHubState(Protocol):
     def put_chunk(self, chunk: ChunkState) -> None: ...
     def get_chunk(self, chunk_id: str) -> ChunkState | None: ...
     def list_chunks(self) -> list[ChunkState]: ...
-    def upsert_runner(
+    def add_runner(self, row: RunnerRow, *, token: str) -> None:
+        """Insert a never-connected runner holding ``token`` as its current bearer token."""
+        ...
+
+    def record_registration(
         self,
         runner_id: str,
         *,
+        name: str | None,
         workspace_id: str,
         at: datetime,
         url: str | None = None,
@@ -173,11 +175,23 @@ class IHubState(Protocol):
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
     ) -> bool:
-        """Register/heartbeat a runner; return ``True`` on first registration.
+        """Register/heartbeat an added runner; return ``True`` on its first registration.
 
-        ``url``/``redirect_uris``, ``env_capacity``, ``capabilities``,
-        ``declared_subscriptions``, and ``gates`` are overwritten unconditionally on
-        every call, like ``workspace_id``."""
+        Never inserts — an id no ``add`` wrote raises ``LookupError``. ``name`` replaces the held
+        name unless ``None``; everything else is overwritten on every call."""
+        ...
+
+    def runner_for_token(self, token: str) -> RunnerRow | None:
+        """The runner ``token`` is the current bearer token of, else ``None``."""
+        ...
+
+    def revoked_token_runner_id(self, token: str) -> str | None:
+        """The runner a revoked or rotated-away ``token`` was issued to, else ``None``."""
+        ...
+
+    def replace_token(self, runner_id: str, *, token: str | None) -> None:
+        """Make ``token`` the runner's current bearer token (``None``: it holds none); the token it
+        held until now is revoked."""
         ...
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...
@@ -208,4 +222,7 @@ class IHubState(Protocol):
         """Every seeded scope, newest first — mirrors the real hub's own ``list_all``."""
         ...
 
-    def clear(self) -> None: ...
+    def clear(self) -> None:
+        """Drop every row, the runner registry and its tokens included — a hub data reset, after
+        which every token a runner holds is unknown here."""
+        ...

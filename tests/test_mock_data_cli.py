@@ -31,6 +31,7 @@ from sqlalchemy import (
 )
 
 from blizzard_mock.mock_data.cli import cli
+from blizzard_mock.mock_data.domain.ids import SEED_RUNNER_ID
 
 
 def _runner() -> CliRunner:
@@ -48,9 +49,12 @@ def _hub_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
         "runner_registrations",
         meta,
         Column("runner_id", String, primary_key=True),
-        Column("workspace_id", String, nullable=False),
-        Column("registered_at", DateTime, nullable=False),
-        Column("last_seen_at", DateTime, nullable=False),
+        Column("name", String, nullable=False),
+        Column("added_at", DateTime, nullable=False),
+        Column("added_by", String, nullable=True),
+        Column("workspace_id", String, nullable=True),
+        Column("registered_at", DateTime, nullable=True),
+        Column("last_seen_at", DateTime, nullable=True),
         Column("subscriptions", Text, nullable=True),
     )
     pause_facts = Table(
@@ -100,7 +104,6 @@ def _runner_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
         Column("lease_id", String, primary_key=True),
         Column("chunk_id", String, nullable=False),
         Column("epoch", Integer, nullable=False),
-        Column("runner_id", String, nullable=False),
         Column("pid", Integer, nullable=True),
         Column("process_start_time", String, nullable=True),
         Column("session_id", String, nullable=True),
@@ -389,9 +392,12 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         "runner_registrations",
         meta,
         Column("runner_id", String, primary_key=True),
-        Column("workspace_id", String, nullable=False),
-        Column("registered_at", DateTime, nullable=False),
-        Column("last_seen_at", DateTime, nullable=False),
+        Column("name", String, nullable=False),
+        Column("added_at", DateTime, nullable=False),
+        Column("added_by", String, nullable=True),
+        Column("workspace_id", String, nullable=True),
+        Column("registered_at", DateTime, nullable=True),
+        Column("last_seen_at", DateTime, nullable=True),
         Column("subscriptions", Text, nullable=True),
     )
     Table(
@@ -493,7 +499,6 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("lease_id", String, primary_key=True),
         Column("chunk_id", String, nullable=False),
         Column("epoch", Integer, nullable=False),
-        Column("runner_id", String, nullable=False),
         Column("pid", Integer, nullable=True),
         Column("process_start_time", String, nullable=True),
         Column("session_id", String, nullable=True),
@@ -627,11 +632,18 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         "local_pause_facts",
         meta,
         Column("id", Integer, primary_key=True, autoincrement=True),
-        Column("runner_id", String, nullable=False),
         Column("paused", Boolean, nullable=False),
         Column("set_at", DateTime, nullable=False),
         Column("set_by", String, nullable=False),
         Column("reason", String, nullable=True),
+    )
+    Table(
+        "runner_identity",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=False),
+        Column("runner_name", String, nullable=False),
+        Column("registered_at", DateTime, nullable=False),
     )
     meta.create_all(engine)
     return url, meta
@@ -743,7 +755,9 @@ def test_reset_clears_all_rows(tmp_path: Path) -> None:
     now = datetime.now(UTC)
     with engine.begin() as conn:
         conn.execute(
-            insert(registrations).values(runner_id="r1", workspace_id="ws", registered_at=now, last_seen_at=now)
+            insert(registrations).values(
+                runner_id="r1", name="r1", added_at=now, workspace_id="ws", registered_at=now, last_seen_at=now
+            )
         )
         conn.execute(insert(pause_facts).values(runner_id="r1", paused=True, set_at=now, set_by="t"))
 
@@ -768,9 +782,7 @@ def test_reset_clears_all_rows_in_a_runner_shaped_store(tmp_path: Path) -> None:
     engine = create_engine(url)
     now = datetime.now(UTC)
     with engine.begin() as conn:
-        conn.execute(
-            insert(leases).values(lease_id="lease_1", chunk_id="chunk_1", epoch=1, runner_id="runner-1", created_at=now)
-        )
+        conn.execute(insert(leases).values(lease_id="lease_1", chunk_id="chunk_1", epoch=1, created_at=now))
         conn.execute(
             insert(lease_context).values(
                 lease_id="lease_1",
@@ -801,6 +813,61 @@ def test_create_runner_seeds_the_registry(tmp_path: Path) -> None:
     with create_engine(url).begin() as conn:
         rows = conn.execute(select(registrations.c.runner_id)).all()
     assert [r[0] for r in rows] == ["seeded-1"]
+
+
+def test_create_runner_defaults_to_the_seed_runner_registered_under_its_name(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        row = conn.execute(select(registrations)).one()
+    assert (row.runner_id, row.name, row.added_by) == (SEED_RUNNER_ID, "runner-seed", "mock-data")
+    assert row.registered_at is not None
+    assert row.workspace_id == "workspace-seed"
+
+
+def test_create_runner_names_a_runner_whose_name_another_already_holds(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    for runner_id in ("rn_01JA0000000000000000000001", "rn_01JA0000000000000000000002"):
+        result = _runner().invoke(
+            cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", runner_id, "--name", "twin"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "named 'twin'" in result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(registrations.c.runner_id, registrations.c.name)).all()
+    assert sorted(rows) == [("rn_01JA0000000000000000000001", "twin"), ("rn_01JA0000000000000000000002", "twin")]
+
+
+def test_create_runner_never_connected_leaves_every_connection_column_null(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--never-connected"])
+    assert result.exit_code == 0, result.output
+    assert "never connected" in result.output
+    with create_engine(url).begin() as conn:
+        row = conn.execute(select(registrations)).one()
+    assert (row.workspace_id, row.registered_at, row.last_seen_at) == (None, None, None)
+    assert row.added_at is not None
+
+
+def test_create_runner_never_connected_refuses_a_workspace_binding(tmp_path: Path) -> None:
+    url, _meta, _reg, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli, ["create", "runner", "--store", "hub", "--url", url, "--never-connected", "--workspace-id", "ws"]
+    )
+    assert result.exit_code != 0
+    assert "--never-connected" in result.output
+
+
+@pytest.mark.parametrize("roster", [("--subscription", "max", "Claude Max", "anthropic"), ("--declare-empty-roster",)])
+def test_create_runner_never_connected_refuses_a_declared_roster(tmp_path: Path, roster: tuple[str, ...]) -> None:
+    """Only a registration declares a roster, so a never-connected runner holding one is refused."""
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--never-connected", *roster])
+    assert result.exit_code != 0
+    assert f"{roster[0]} contradicts --never-connected" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations)).all() == []
 
 
 def test_create_runner_paused_lands_a_pause_fact(tmp_path: Path) -> None:
@@ -2226,8 +2293,6 @@ def test_create_lease_runner_store_is_readable_back_through_the_daemons_own_join
             url,
             "--chunk",
             "ch_hub_1",
-            "--runner-id",
-            "r-1",
             "--epoch",
             "3",
             "--node",
@@ -2244,7 +2309,6 @@ def test_create_lease_runner_store_is_readable_back_through_the_daemons_own_join
     assert len(joined) == 1, "the mint must satisfy the daemon's own inner join, not just land a bare `leases` row"
     row = joined[0]
     assert row.epoch == 3
-    assert row.runner_id == "r-1"
     assert row.graph_id == "gr_1"
     assert row.node_id == "deliver"
     assert row.node_name == "deliver"
@@ -2267,8 +2331,6 @@ def test_create_lease_runner_store_seed_pins_created_at_too(tmp_path: Path) -> N
             url,
             "--chunk",
             "ch_1",
-            "--runner-id",
-            "r-1",
             "--seed",
             "3",
         ],
@@ -2280,6 +2342,22 @@ def test_create_lease_runner_store_seed_pins_created_at_too(tmp_path: Path) -> N
     assert rows[0].created_at.replace(tzinfo=UTC) == _SEEDED_CLOCK_ANCHOR
 
 
+@pytest.mark.parametrize("verb", [["lease", "--chunk", "ch_1"], ["runner-pause", "--local"]])
+def test_a_runner_store_verb_refuses_a_runner_id_its_rows_have_no_column_for(tmp_path: Path, verb: list[str]) -> None:
+    url, _meta = _full_runner_store(tmp_path)
+    result = _runner().invoke(cli, ["create", *verb, "--store", "runner", "--url", url, "--runner-id", "rn_x"])
+    assert result.exit_code != 0
+    assert "hub store only" in result.output
+
+
+@pytest.mark.parametrize("verb", [["lease", "--chunk", "ch_1"], ["runner-pause", "--fleet"]])
+def test_a_hub_store_verb_requires_the_runner_id(tmp_path: Path, verb: list[str]) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(cli, ["create", *verb, "--store", "hub", "--url", url])
+    assert result.exit_code != 0
+    assert "--runner-id is required" in result.output
+
+
 def test_create_lease_runner_store_accepts_a_chunk_id_no_hub_store_holds(tmp_path: Path) -> None:
     """The runner schema declares no foreign keys — ``leases.chunk_id`` is a plain
     column — so a lease naming a chunk id no hub knows about is accepted rather than
@@ -2288,7 +2366,7 @@ def test_create_lease_runner_store_accepts_a_chunk_id_no_hub_store_holds(tmp_pat
     url, _meta = _full_runner_store(tmp_path)
     result = _runner().invoke(
         cli,
-        ["create", "lease", "--store", "runner", "--url", url, "--chunk", "ch_nowhere", "--runner-id", "r-1"],
+        ["create", "lease", "--store", "runner", "--url", url, "--chunk", "ch_nowhere"],
     )
     assert result.exit_code == 0, result.output
 
@@ -3132,7 +3210,7 @@ def test_create_event_with_chunk_and_no_lease_falls_back_to_the_placeholder(tmp_
         runner_id = conn.execute(
             select(_table(meta, "event_log").c.runner_id).where(_table(meta, "event_log").c.chunk_id == chunk_id)
         ).scalar()
-    assert runner_id == "mock-data"
+    assert runner_id == SEED_RUNNER_ID
 
 
 def test_create_event_detail_must_parse_as_json(tmp_path: Path) -> None:
@@ -3242,8 +3320,6 @@ def test_create_runner_pause_store_runner_local_lands_into_the_runners_own_table
             "runner",
             "--url",
             url,
-            "--runner-id",
-            "runner-local",
             "--local",
             "--reason",
             "usage limit: claude_code (resets 2026-07-13T17:40Z)",
@@ -3252,20 +3328,16 @@ def test_create_runner_pause_store_runner_local_lands_into_the_runners_own_table
     assert result.exit_code == 0, result.output
     with create_engine(url).begin() as conn:
         rows = conn.execute(select(_table(meta, "local_pause_facts"))).all()
-    assert [(r.runner_id, r.paused, r.reason) for r in rows] == [
-        ("runner-local", True, "usage limit: claude_code (resets 2026-07-13T17:40Z)")
-    ]
+    assert [(r.paused, r.reason) for r in rows] == [(True, "usage limit: claude_code (resets 2026-07-13T17:40Z)")]
 
 
 def test_create_runner_pause_store_runner_local_without_a_reason_lands_none(tmp_path: Path) -> None:
     url, meta = _full_runner_store(tmp_path)
-    result = _runner().invoke(
-        cli, ["create", "runner-pause", "--store", "runner", "--url", url, "--runner-id", "runner-local", "--local"]
-    )
+    result = _runner().invoke(cli, ["create", "runner-pause", "--store", "runner", "--url", url, "--local"])
     assert result.exit_code == 0, result.output
     with create_engine(url).begin() as conn:
         rows = conn.execute(select(_table(meta, "local_pause_facts"))).all()
-    assert [(r.runner_id, r.paused, r.reason) for r in rows] == [("runner-local", True, None)]
+    assert [(r.paused, r.reason) for r in rows] == [(True, None)]
 
 
 def test_create_runner_pause_store_runner_fleet_is_rejected(tmp_path: Path) -> None:
@@ -3356,7 +3428,7 @@ def test_scenario_board_registers_a_runner_per_chunk(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     with create_engine(url).begin() as conn:
         registration_rows = conn.execute(select(_table(meta, "runner_registrations"))).all()
-    assert len(registration_rows) == 6
+    assert len(registration_rows) == 6 + 2  # plus the same-name twin and the never-connected runner
 
 
 def test_scenario_board_populates_a_mixed_event_log(tmp_path: Path) -> None:
@@ -3388,8 +3460,8 @@ def test_scenario_board_stress_adds_the_four_extremes(tmp_path: Path) -> None:
         node_rows = conn.execute(select(_table(meta, "graph_nodes"))).all()
         question_rows = conn.execute(select(_table(meta, "questions"))).all()
 
-    # 1. a runner with a long identity
-    assert any(len(row.runner_id) > 100 for row in registration_rows)
+    # 1. a runner with a long name
+    assert any(len(row.name) > 100 for row in registration_rows)
     # 2. an extra waiting_on_human chunk (base six already carries one at --chunks 6)
     pairs = _scenario_chunk_statuses(result.output)
     assert [status for _chunk_id, status in pairs].count("waiting_on_human") == 2
@@ -3408,8 +3480,8 @@ def test_scenario_board_without_stress_omits_the_extras(tmp_path: Path) -> None:
     assert "stress extras: not included" in result.output
     with create_engine(url).begin() as conn:
         registration_rows = conn.execute(select(_table(meta, "runner_registrations"))).all()
-    assert len(registration_rows) == 6
-    assert all(len(row.runner_id) < 100 for row in registration_rows)
+    assert len(registration_rows) == 6 + 2
+    assert all(len(row.name) < 100 for row in registration_rows)
 
 
 def test_scenario_board_same_seed_is_byte_identical_across_two_fresh_stores(tmp_path: Path) -> None:
@@ -3504,7 +3576,6 @@ def test_scenario_fleet_seeds_both_stores(tmp_path: Path) -> None:
         pause_rows = conn.execute(select(_table(runner_meta, "local_pause_facts"))).all()
         transcript_rows = conn.execute(select(_table(runner_meta, "transcript_segments"))).all()
     assert len(lease_rows) == 2
-    assert all(row.runner_id == "runner-pin" for row in lease_rows)
     assert len(pause_rows) == 1
     assert pause_rows[0].paused
     assert len(transcript_rows) == 2
@@ -3536,19 +3607,87 @@ def test_scenario_fleet_requires_runner_id_without_runner_dir(tmp_path: Path) ->
     assert "--runner-id" in result.output
 
 
-def test_scenario_fleet_reads_the_pinned_runner_id_from_runner_dir(tmp_path: Path) -> None:
-    hub_url, _hub_meta = _full_hub_store(tmp_path)
-    runner_url, runner_meta = _full_runner_store(tmp_path)
+def _registered_runner_dir(tmp_path: Path, runner_url: str, runner_meta: MetaData, runner_id: str) -> Path:
+    """A runner runtime dir whose store recorded ``runner_id`` at a registration."""
+    with create_engine(runner_url).begin() as conn:
+        conn.execute(
+            insert(_table(runner_meta, "runner_identity")),
+            [
+                {
+                    "runner_id": runner_id,
+                    "runner_name": "runner-local",
+                    "registered_at": datetime(2026, 1, 1, tzinfo=UTC),
+                }
+            ],
+        )
     runtime_dir = tmp_path / "runner-runtime"
     runtime_dir.mkdir()
-    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nrunner_id = "runner-local"\n')
+    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nname = "runner-local"\n')
+    return runtime_dir
+
+
+def test_scenario_fleet_reads_the_pinned_runner_id_from_runner_dir(tmp_path: Path) -> None:
+    """The pinned id is the runner store's registered identity — the toml names only a label —
+    and the hub store's registration for it is reused."""
+    registered_id = "rn_01JA0000000000000000000000"
+    hub_url, hub_meta = _full_hub_store(tmp_path)
+    runner_url, runner_meta = _full_runner_store(tmp_path)
+    runtime_dir = _registered_runner_dir(tmp_path, runner_url, runner_meta, registered_id)
+    with create_engine(hub_url).begin() as conn:
+        conn.execute(
+            insert(_table(hub_meta, "runner_registrations")),
+            [
+                {
+                    "runner_id": registered_id,
+                    "name": "runner-local",
+                    "added_at": datetime(2026, 1, 1, tzinfo=UTC),
+                    "workspace_id": "ws-live",
+                    "registered_at": datetime(2026, 1, 1, tzinfo=UTC),
+                    "last_seen_at": datetime(2026, 1, 1, tzinfo=UTC),
+                }
+            ],
+        )
 
     result = _runner().invoke(cli, ["scenario", "fleet", "--hub-url", hub_url, "--runner-dir", str(runtime_dir)])
     assert result.exit_code == 0, result.output
-    assert "runner: 'runner-local'" in result.output
+    assert f"runner: {registered_id!r}" in result.output
+    with create_engine(hub_url).begin() as conn:
+        route_rows = conn.execute(select(_table(hub_meta, "route_created"))).all()
+        registrations = conn.execute(select(_table(hub_meta, "runner_registrations"))).all()
+    assert route_rows
+    assert all(row.runner_id == registered_id for row in route_rows)
+    assert [(row.runner_id, row.workspace_id) for row in registrations] == [(registered_id, "ws-live")]
+
+
+def test_scenario_fleet_refuses_a_runner_dir_id_the_hub_store_does_not_hold(tmp_path: Path) -> None:
+    """An id the hub store does not hold is refused, naming the remedy for each cause — another hub's
+    store, or a re-add after a reset — rather than seeding a fleet the runner can never own."""
+    hub_url, hub_meta = _full_hub_store(tmp_path)
+    runner_url, runner_meta = _full_runner_store(tmp_path)
+    runtime_dir = _registered_runner_dir(tmp_path, runner_url, runner_meta, "rn_01JA0000000000000000000000")
+
+    result = _runner().invoke(cli, ["scenario", "fleet", "--hub-url", hub_url, "--runner-dir", str(runtime_dir)])
+
+    assert result.exit_code != 0
+    assert "pass that hub's store (--hub-url/--hub-dir)" in result.output
+    assert f"blizzard runner init --allow-readd {runtime_dir}" in result.output
+    with create_engine(hub_url).begin() as conn:
+        assert conn.execute(select(_table(hub_meta, "runner_registrations"))).all() == []
+        assert conn.execute(select(_table(hub_meta, "chunks"))).all() == []
     with create_engine(runner_url).begin() as conn:
-        lease_rows = conn.execute(select(_table(runner_meta, "leases"))).all()
-    assert all(row.runner_id == "runner-local" for row in lease_rows)
+        assert conn.execute(select(_table(runner_meta, "local_pause_facts"))).all() == []
+
+
+def test_scenario_fleet_refuses_a_runner_dir_whose_runner_never_registered(tmp_path: Path) -> None:
+    hub_url, _hub_meta = _full_hub_store(tmp_path)
+    runner_url, _runner_meta = _full_runner_store(tmp_path)
+    runtime_dir = tmp_path / "runner-runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nname = "runner-local"\n')
+
+    result = _runner().invoke(cli, ["scenario", "fleet", "--hub-url", hub_url, "--runner-dir", str(runtime_dir)])
+    assert result.exit_code != 0
+    assert "never registered" in result.output
 
 
 def test_scenario_fleet_refuses_runner_id_redundant_with_runner_dir(tmp_path: Path) -> None:
@@ -3772,6 +3911,8 @@ def test_scenario_fleet_reuses_an_already_registered_runner(tmp_path: Path) -> N
             [
                 {
                     "runner_id": "runner-pin",
+                    "name": "runner-local",
+                    "added_at": datetime(2023, 1, 1, tzinfo=UTC),
                     "workspace_id": "ws-existing",
                     "registered_at": datetime(2023, 1, 1, tzinfo=UTC),
                     "last_seen_at": datetime(2023, 1, 1, tzinfo=UTC),

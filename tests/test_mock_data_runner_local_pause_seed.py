@@ -14,18 +14,18 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_compose_local_pause_lands_engaged() -> None:
-    row = compose_local_pause(runner_id="runner-1", set_at=_NOW)
+    row = compose_local_pause(set_at=_NOW)
     assert row.table == "local_pause_facts"
     assert row.values["paused"] is True
-    assert row.values["runner_id"] == "runner-1"
+    assert "runner_id" not in row.values  # the store holds one runner's brake
     assert row.values["set_by"] == "mock-data"
 
 
 def test_compose_local_pause_reason_defaults_to_none() -> None:
-    row = compose_local_pause(runner_id="runner-1", set_at=_NOW)
+    row = compose_local_pause(set_at=_NOW)
     assert row.values["reason"] is None
 
 
 def test_compose_local_pause_carries_a_reason_when_given_one() -> None:
-    row = compose_local_pause(runner_id="runner-1", set_at=_NOW, reason="usage limit: claude_code")
+    row = compose_local_pause(set_at=_NOW, reason="usage limit: claude_code")
     assert row.values["reason"] == "usage limit: claude_code"

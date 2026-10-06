@@ -25,21 +25,27 @@ def _result(resp: httpx.Response) -> tuple[int, dict[str, Any]]:
 
 
 class HttpxHubGateway:
-    """The mock runner's hub gateway over an injected ``httpx.Client``."""
+    """The mock runner's hub gateway over an injected ``httpx.Client``. Every call presents
+    ``token`` as its bearer, per request, so a shared client (a test's in-process hub) can
+    carry several runners' calls."""
 
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(self, client: httpx.Client, *, token: str | None) -> None:
         self._client = client
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    def add_runner(self, *, name: str) -> tuple[int, dict[str, Any]]:
+        return self._post("/api/runners", {"name": name})
 
     def register(
         self,
-        runner_id: str,
         *,
+        name: str,
         workspace_id: str,
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         body: dict[str, Any] = {
-            "runner_id": runner_id,
+            "name": name,
             "workspace_id": workspace_id,
             "capabilities": capabilities or [],
         }
@@ -53,18 +59,14 @@ class HttpxHubGateway:
         return self._get(f"{_API}/queue/peek")
 
     def peek_matched(
-        self, *, runner_id: str | None, capabilities: list[dict[str, Any]], policy: str
+        self, *, enrolled: bool, capabilities: list[dict[str, Any]], policy: str
     ) -> tuple[int, dict[str, Any]]:
         path = f"{_API}/queue/peek"
-        params = {"runner_id": runner_id} if runner_id is not None else None
+        headers = self._headers if enrolled else {}
         try:
-            resp = self._client.post(path, json={"capabilities": capabilities, "policy": policy}, params=params)
+            resp = self._client.post(path, json={"capabilities": capabilities, "policy": policy}, headers=headers)
         except httpx.HTTPError as exc:
             return 0, {"error": f"POST {path} failed: {exc}"}
-        if resp.status_code == 401:
-            # No identity, or one the hub does not resolve — the legacy verb serves this
-            # caller instead, exactly as the real runner's own client falls back.
-            return self._get(path)
         return _result(resp)
 
     def claim(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -93,12 +95,12 @@ class HttpxHubGateway:
 
     def _get(self, path: str, *, params: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
         try:
-            return _result(self._client.get(path, params=params))
+            return _result(self._client.get(path, params=params, headers=self._headers))
         except httpx.HTTPError as exc:
             return 0, {"error": f"GET {path} failed: {exc}"}
 
     def _post(self, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         try:
-            return _result(self._client.post(path, json=body))
+            return _result(self._client.post(path, json=body, headers=self._headers))
         except httpx.HTTPError as exc:
             return 0, {"error": f"POST {path} failed: {exc}"}

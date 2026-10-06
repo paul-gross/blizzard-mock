@@ -13,11 +13,18 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.levers import Lever, LeverParams
-from blizzard_mock.mock_hub.api.deps import AnswerControlBody, StopControlBody, get_captured, get_service
+from blizzard_mock.mock_hub.api.deps import (
+    AnswerControlBody,
+    RunnerRetireControlBody,
+    RunnerSeedControlBody,
+    StopControlBody,
+    get_captured,
+    get_service,
+)
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
 from blizzard_mock.mock_hub.domain.models import ChunkSpec, ScopeSpec, SystemArtifactSpec
-from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound
+from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound, UnknownRunner
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
 levers_router = APIRouter(prefix="/_levers", tags=["control"])
@@ -75,6 +82,54 @@ def seed_stop(body: StopControlBody, service: Annotated[MockHubService, Depends(
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     return {"stopped": True, "chunk_id": body.chunk_id}
+
+
+@seed_router.post("/runners", status_code=201)
+def seed_runner(body: RunnerSeedControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — adds a runner never connected, exactly as ``POST /api/runners``
+    does, except that a scenario may pin its id and bearer token. A pinned id already added
+    is refused ``409``."""
+    try:
+        return service.add_runner(name=body.name, runner_id=body.runner_id, token=body.token)
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@seed_router.post("/runners/{runner_id}/retire")
+def seed_retire_runner(
+    runner_id: str, body: RunnerRetireControlBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Test-control only — plays the operator's retire verb: the runner is retired and its token
+    revoked, so the identity route answers that token ``retired``."""
+    try:
+        service.retire(runner_id, by=body.by)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"retired": True, "runner_id": runner_id}
+
+
+@seed_router.post("/runners/{runner_id}/token-revocations")
+def seed_revoke_runner_token(runner_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — plays the operator's revoke-token verb: the runner stays added, and its
+    token answers ``revoked`` until a rotation issues another."""
+    try:
+        service.revoke_token(runner_id)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"revoked": True, "runner_id": runner_id}
+
+
+@seed_router.post("/runners/{runner_id}/pause")
+def seed_pause_runner(
+    runner_id: str, service: Annotated[MockHubService, Depends(get_service)], paused: bool = True
+) -> object:
+    """Test-control only — sets the fleet's brake on the runner (``?paused=false`` releases it), so a
+    claim from it is refused as paused."""
+    try:
+        service.set_paused(runner_id, paused=paused)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"paused": paused, "runner_id": runner_id}
 
 
 @levers_router.get("")

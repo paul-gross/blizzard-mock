@@ -26,7 +26,6 @@ class RunnerLeaseSeed:
 def compose_lease(
     *,
     chunk_id: str,
-    runner_id: str,
     epoch: int,
     graph_id: str,
     node_id: str,
@@ -48,7 +47,6 @@ def compose_lease(
                 "lease_id": lease_id,
                 "chunk_id": chunk_id,
                 "epoch": epoch,
-                "runner_id": runner_id,
                 "pid": None,
                 "process_start_time": None,
                 "session_id": session_id,

@@ -23,10 +23,12 @@ from blizzard_mock.clock import FixedClock
 from blizzard_mock.harness_identity import OPENCODE_HARNESS_ID
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
 from blizzard_mock.mock_hub.domain.service import MockHubService
+from blizzard_mock.mock_runner.app import bootstrap_token
 from blizzard_mock.mock_runner.app import create_app as create_runner_app
 from blizzard_mock.mock_runner.domain.models import Held
 from blizzard_mock.mock_runner.domain.service import MockRunnerService
 from blizzard_mock.mock_runner.internal.httpx_gateway import HttpxHubGateway
+from tests.fleet_client import FleetClient, add_runner
 
 _SPEC = {
     "entry": "build",
@@ -50,12 +52,15 @@ _SPEC = {
 
 @pytest.fixture
 def stack() -> tuple[TestClient, TestClient]:
-    """A mock hub + a mock runner driving it in-process (no network)."""
+    """A mock hub + a mock runner driving it in-process (no network). The driver holds the token
+    of a runner added at the hub under the pinned id ``runner-mock``; the test's own hub client
+    presents that runner's token on its fleet reads."""
     hub_app = create_hub_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
-    hub_client = TestClient(hub_app)
-    # The driver's gateway talks to the hub app over the same in-process sync TestClient
-    # (a real ``httpx.Client``) — no sockets, no network.
-    gateway = HttpxHubGateway(hub_client)
+    hub_client = FleetClient(hub_app, default_runner_id="runner-mock")
+    token = add_runner(hub_client.service, "runner-mock")
+    # The driver's gateway talks to the hub app over its own in-process sync TestClient (a real
+    # ``httpx.Client``) — no sockets, no network — presenting only the headers it sets itself.
+    gateway = HttpxHubGateway(TestClient(hub_app), token=token)
     runner_app = create_runner_app(gateway=gateway, clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
     return hub_client, TestClient(runner_app)
 
@@ -173,34 +178,57 @@ def test_drive_peek_matched_hold_yields_nothing_at_an_unusable_head(stack: tuple
     assert body["response"]["entries"] == []
 
 
-def test_drive_peek_matched_falls_back_to_the_legacy_peek_when_tokenless(
-    stack: tuple[TestClient, TestClient],
-) -> None:
-    """``enrolled=False`` presents no identity at all — the matched verb's 401 is served
-    off the legacy, unfiltered peek instead, internally, mirroring the real runner's own
-    ``IHubClient.peek_queue``."""
+def test_drive_peek_matched_is_refused_when_tokenless(stack: tuple[TestClient, TestClient]) -> None:
+    """``enrolled=False`` presents no token, so the hub refuses the matched verb 401 — and, like the
+    real runner's ``IHubClient.peek_queue``, the driver sends no other peek after it."""
     hub, runner = stack
-    chunk_id = _seed(hub)
+    _seed(hub)
     assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
+    hub.post("/_captured/reset")
 
-    resp = runner.post("/_drive/peek-matched", json={"enrolled": False})
-    body = resp.json()
-    assert body["status"] == 200, body
-    assert [e["chunk_id"] for e in body["response"]["entries"]] == [chunk_id]
+    body = runner.post("/_drive/peek-matched", json={"enrolled": False}).json()
+
+    assert body["status"] == 401, body
+    sent = [(r["method"], r["path"]) for r in hub.get("/_captured").json()["requests"]]
+    assert sent == [("POST", "/api/fleet/queue/peek")]
 
 
-def test_drive_peek_matched_falls_back_to_the_legacy_peek_for_an_unregistered_runner(
+def test_drive_peek_matched_answers_a_driver_that_has_not_registered_yet(
     stack: tuple[TestClient, TestClient],
 ) -> None:
-    """A driver that never registered presents an identity the hub has never heard of —
-    the same 401-then-legacy-fallback path as the tokenless case above."""
+    """The matched peek needs only a token the hub issued — an added runner that has never
+    registered is answered, as the real verb answers any resolved principal."""
     hub, runner = stack
     chunk_id = _seed(hub)
 
-    resp = runner.post("/_drive/peek-matched", json={})
-    body = resp.json()
+    body = runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY}).json()
+
     assert body["status"] == 200, body
     assert [e["chunk_id"] for e in body["response"]["entries"]] == [chunk_id]
+
+
+def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[TestClient, TestClient]) -> None:
+    """The driver sends no id — its token names it — and holds the one the hub answers."""
+    _hub, runner = stack
+    service: MockRunnerService = runner.app.state.service  # type: ignore[attr-defined]
+    assert service.runner_id is None
+
+    reply = runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()
+
+    assert reply["response"] == {"runner_id": "runner-mock", "runner_name": "runner-mock", "first_registration": True}
+    assert service.runner_id == "runner-mock"
+
+
+def test_a_driver_with_no_token_adds_itself_at_the_hub() -> None:
+    """With no token configured, the driver adds itself through ``POST /api/runners`` before it
+    serves, as ``blizzard runner init`` does, and presents the minted token from then on."""
+    hub_app = create_hub_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
+    plain = TestClient(hub_app)
+
+    token = bootstrap_token(plain, name="r-fresh")
+
+    identity = plain.get("/api/fleet/identity", headers={"Authorization": f"Bearer {token}"}).json()
+    assert identity["runner_name"] == "r-fresh" and identity["runner_id"].startswith("rn_")
 
 
 def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient, TestClient]) -> None:
