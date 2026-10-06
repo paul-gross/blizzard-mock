@@ -33,7 +33,9 @@ class RegisterBody(BaseModel):
     default?, available?}`` shape, letting a test drive a chosen capability snapshot without a
     real harness adapter behind it."""
 
-    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    #: Left out, the driver reports one default binding, as a live runner always reports at least one;
+    #: an explicit ``[]`` reports none, which the hub matches to nothing.
+    capabilities: list[dict[str, Any]] | None = None
     #: The runner's declared subscription roster, settable directly, mirroring ``capabilities``.
     subscriptions: list[dict[str, Any]] | None = None
 

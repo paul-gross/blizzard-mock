@@ -18,6 +18,8 @@ from blizzard_mock.mock_runner.domain.gateway import IHubGateway
 from blizzard_mock.mock_runner.domain.levers import RunnerLever
 from blizzard_mock.mock_runner.domain.models import Held
 
+#: What a driver that supplies no snapshot reports — one default binding, since an empty snapshot works nothing.
+DEFAULT_CAPABILITIES: list[dict[str, Any]] = [{"harness_id": "claude_code", "default": True}]
 #: The runner-fact kind that advances the hub's fence (``blizzard.foundation.fact_kinds.LEASE_MINTED``).
 LEASE_MINTED = "lease.minted"
 #: The runner-fact kind that records retries-exhausted (``blizzard.foundation.fact_kinds.ESCALATION_RECORDED``).
@@ -96,7 +98,7 @@ class MockRunnerService:
         status, body = self._gw.register(
             self._runner_id,
             workspace_id=self._workspace_id,
-            capabilities=capabilities or [],
+            capabilities=DEFAULT_CAPABILITIES if capabilities is None else capabilities,
             subscriptions=subscriptions,
         )
         return {"status": status, "response": body}
