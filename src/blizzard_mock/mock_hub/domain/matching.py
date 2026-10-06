@@ -94,11 +94,9 @@ def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[R
 def capability_ineligible(chunk: ChunkState, node_id: str, capabilities: Sequence[RunnerCapability]) -> bool:
     """Whether ``capabilities`` cannot work ``chunk`` from ``node_id`` — the mock's own
     mirror of ``blizzard.hub.domain.operations.queue._capability_ineligible``. Asserting no
-    capabilities at all applies no filter, matching the legacy peek's unfiltered
-    reach-ahead — a deliberate divergence from :func:`_lineage_satisfied`'s own empty-
-    snapshot reading, exactly as the real hub's own divergence is documented."""
+    capabilities at all is eligible for nothing, as on the real hub."""
     if not capabilities:
-        return False
+        return True
     return not all(
         _lineage_satisfied(chunk, node_id, capabilities) for node_id in _reachable_runner_node_ids(chunk, node_id)
     )
