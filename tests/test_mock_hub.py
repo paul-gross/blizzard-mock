@@ -37,6 +37,7 @@ from blizzard_mock.mock_hub.domain.state import (
     ClaimDeniedPaused,
     ClaimDeniedUnregistered,
     DeclaredSubscription,
+    RunnerCapability,
     RunnerRow,
     refuse_braked_runner,
 )
@@ -79,7 +80,14 @@ def _claim(client: TestClient, body: dict) -> httpx.Response:
     test registered stays put and no extra request lands in ``/_captured``."""
     service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
     if service.runner_view(body["runner_id"]) is None:
-        service.register(body["runner_id"], workspace_id="ws")
+        service.register(
+            body["runner_id"],
+            workspace_id="ws",
+            capabilities=(
+                RunnerCapability(harness_id="claude_code", default=True),
+                RunnerCapability(harness_id="claude", tiers=("blizzard:basic",)),
+            ),
+        )
     return client.post("/api/fleet/routes", json=body)
 
 
@@ -653,16 +661,16 @@ def test_matched_peek_hold_returns_a_usable_head_normally(client: TestClient) ->
     assert entries[0]["position"] == 0
 
 
-def test_matched_peek_no_capabilities_asserted_applies_no_capability_filter(client: TestClient) -> None:
-    """An empty ``capabilities`` list applies no capability filter — the head entry is
-    returned unfiltered, even though it names a harness the (empty) snapshot cannot
-    satisfy."""
-    head = _seed_harness_chunk(client, "special_harness")
+def test_matched_peek_no_capabilities_asserted_matches_no_entry(client: TestClient) -> None:
+    """An empty ``capabilities`` list is eligible for nothing — no entry is returned, even
+    for a chunk that names no harness."""
+    _seed(client)
+    _seed_harness_chunk(client, "special_harness")
     _register(client)
 
     resp = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={})
     assert resp.status_code == 200, resp.text
-    assert [e["chunk_id"] for e in resp.json()["entries"]] == [head]
+    assert resp.json()["entries"] == []
 
 
 def test_matched_peek_an_unrecognized_policy_value_round_trips_as_pass_over(client: TestClient) -> None:
@@ -682,17 +690,27 @@ def test_matched_peek_an_unrecognized_policy_value_round_trips_as_pass_over(clie
 def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capability_one(client: TestClient) -> None:
     blocked = _seed(client)
     workable = _seed(client)
-    _register(client)
+    _register_with_capabilities(client, _DEFAULT_CAPABILITY)
     client.post("/_levers/dependency_unmet", json={"chunk_id": blocked, "payload": {"prerequisite_chunk_id": "ch_x"}})
 
-    pass_over = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={})
+    pass_over = client.post(
+        "/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY}
+    )
     assert [e["chunk_id"] for e in pass_over.json()["entries"]] == [workable]
 
-    hold = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
+    hold = client.post(
+        "/api/fleet/queue/peek",
+        params={"runner_id": "r1"},
+        json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
+    )
     assert hold.json()["entries"] == []
 
     # the peek's own read never consumes the lever (mirrors GET /queue/peek).
-    still_blocked = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"policy": "hold"})
+    still_blocked = client.post(
+        "/api/fleet/queue/peek",
+        params={"runner_id": "r1"},
+        json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
+    )
     assert still_blocked.json()["entries"] == []
 
 
@@ -759,15 +777,16 @@ def test_claim_allowed_when_stored_capabilities_satisfy_the_chunk(client: TestCl
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "r1"
 
 
-def test_claim_with_no_registered_capabilities_is_never_revalidated(client: TestClient) -> None:
-    """A registration reporting no capabilities at all skips the check entirely — the
-    previous-minor / never-re-registered case never meets a denial it has no branch for."""
-    chunk_id = _seed_harness_chunk(client, "special_harness")
+def test_claim_with_no_registered_capabilities_is_refused(client: TestClient) -> None:
+    """A registration reporting no capabilities at all is eligible for nothing — the
+    previous-minor / never-re-registered runner is refused like any incompatible one."""
+    chunk_id = _seed(client)
     _register(client)  # no capabilities field at all
 
-    claimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
-    assert claimed.status_code == 201, claimed.text
+    assert denied.status_code == 409, denied.text
+    assert denied.json()["incompatible_runner_id"] == "r1"
 
 
 def test_claim_denied_once_capabilities_regress_between_registration_and_claim(client: TestClient) -> None:

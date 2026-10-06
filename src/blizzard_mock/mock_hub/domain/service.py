@@ -270,7 +270,7 @@ class ClaimIncompatible(Exception):
     """The claiming runner's *currently stored* capabilities can no longer run every
     statically reachable runner-owned lineage from the chunk's current node — refused
     outright, mirroring :class:`DependencyUnmet`'s shape. A registration
-    reporting no capabilities is never checked (see :meth:`MockHubService.claim`)."""
+    reporting no capabilities is refused here too."""
 
     def __init__(self, runner_id: str) -> None:
         super().__init__(f"runner {runner_id}'s capabilities no longer satisfy the chunk")
@@ -455,11 +455,9 @@ class MockHubService:
         if blocked is not None:
             self._levers.consume(blocked)
             raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
-        # No capabilities at all is never revalidated.
-        if registration.capabilities:
-            node_id = chunk.current_node_id or chunk.entry
-            if matching.capability_ineligible(chunk, node_id, registration.capabilities):
-                raise ClaimIncompatible(runner_id)
+        node_id = chunk.current_node_id or chunk.entry
+        if matching.capability_ineligible(chunk, node_id, registration.capabilities):
+            raise ClaimIncompatible(runner_id)
         chunk.claimed = True
         chunk.route_runner_id = runner_id
         chunk.route_workspace_id = workspace_id

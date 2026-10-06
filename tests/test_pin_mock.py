@@ -243,7 +243,7 @@ def test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token
     chunk_id = hub.post("/_seed/chunk", json=_HUB_SPEC).json()["chunk_id"]
     runner.post("/_levers/omit_route_token", json={"chunk_id": chunk_id})
 
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": [{"harness_id": "claude_code", "default": True}]})
     claimed = runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
     token = claimed["response"]["route_token"]
 

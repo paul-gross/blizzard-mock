@@ -67,7 +67,7 @@ def _seed(hub: TestClient) -> str:
 def _claim(runner: TestClient, chunk_id: str) -> dict:
     """Claim as a live runner does: registered first, since the hub refuses an unregistered
     claimant."""
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     return runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
 
 
@@ -84,7 +84,7 @@ def _held(runner: TestClient, chunk_id: str) -> Held | None:
 def test_driver_claims_and_completes_over_the_wire(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
     chunk_id = _seed(hub)
-    assert runner.post("/_drive/register").json()["status"] == 201
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
     assert runner.post("/_drive/peek").json()["response"]["entries"][0]["chunk_id"] == chunk_id
 
     claim = _claim(runner, chunk_id)
@@ -153,7 +153,7 @@ def test_drive_peek_matched_returns_the_capability_matched_entry(stack: tuple[Te
     hub, runner = stack
     _seed_harness_chunk(hub, "special_harness")
     workable = _seed(hub)
-    assert runner.post("/_drive/register").json()["status"] == 201
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
 
     resp = runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY})
     body = resp.json()
@@ -165,7 +165,7 @@ def test_drive_peek_matched_hold_yields_nothing_at_an_unusable_head(stack: tuple
     hub, runner = stack
     _seed_harness_chunk(hub, "special_harness")
     _seed(hub)
-    assert runner.post("/_drive/register").json()["status"] == 201
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
 
     resp = runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"})
     body = resp.json()
@@ -181,7 +181,7 @@ def test_drive_peek_matched_falls_back_to_the_legacy_peek_when_tokenless(
     ``IHubClient.peek_queue``."""
     hub, runner = stack
     chunk_id = _seed(hub)
-    assert runner.post("/_drive/register").json()["status"] == 201
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
 
     resp = runner.post("/_drive/peek-matched", json={"enrolled": False})
     body = resp.json()
@@ -247,7 +247,7 @@ def test_drive_claim_next_reaches_past_a_marked_head_by_default(stack: tuple[Tes
         json={"chunk_id": blocked_id, "payload": {"prerequisite_chunk_id": "ch_prereq"}},
     )
 
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     claim = runner.post("/_drive/claim-next", json={}).json()
 
     assert claim["claimed"] is True
@@ -410,7 +410,7 @@ def test_the_lease_report_rides_the_batched_events_push(stack: tuple[TestClient,
     the hub's fence advances."""
     hub, runner = stack
     chunk_id = _seed(hub)
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     hub.post("/_captured/reset")
     claim = runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()
     paths = [r["path"] for r in hub.get("/_captured").json()["requests"]]
@@ -612,7 +612,7 @@ def test_drive_poll_answer_reflects_an_operator_answer(stack: tuple[TestClient, 
 
 def test_drive_pause_sets_the_runners_local_pause_brake(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     out = runner.post("/_drive/pause", json={"by": "operator", "reason": "investigating"}).json()
     assert out["status"] == 200
     view = hub.get("/api/fleet/runners/runner-mock").json()
@@ -623,7 +623,7 @@ def test_drive_pause_sets_the_runners_local_pause_brake(stack: tuple[TestClient,
 
 def test_drive_resume_clears_the_runners_local_pause_brake(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     runner.post("/_drive/pause", json={"by": "operator"})
     out = runner.post("/_drive/resume", json={"by": "operator"}).json()
     assert out["status"] == 200
@@ -633,7 +633,7 @@ def test_drive_resume_clears_the_runners_local_pause_brake(stack: tuple[TestClie
 
 def test_drive_report_external_usage_lands_the_named_slugs_sample(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     out = runner.post(
         "/_drive/report-external-usage",
         json={"slug": "openai", "name": "OpenAI Plan", "sampled_at": "2026-07-13T00:00:00Z", "windows": []},
@@ -650,7 +650,7 @@ def test_drive_report_external_usage_raw_slug_lever_pushes_an_unnarrowed_slug(
     """The malformed-slug lever reaches the hub's intake unnarrowed, so the hub is what
     rejects it — the drive plane's own `slug: str` never gets the chance."""
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     out = runner.post(
         "/_drive/report-external-usage",
         json={"raw_slug": 123, "sampled_at": "2026-07-13T00:00:00Z", "windows": []},
@@ -666,7 +666,7 @@ def test_drive_report_external_usage_miss_lands_a_lapsed_condition(stack: tuple[
     """The miss-half sibling drive verb — a miss with no prior sample
     renders as a miss-only, ``credential_lapsed`` row."""
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     out = runner.post(
         "/_drive/report-external-usage-miss",
         json={
@@ -690,7 +690,7 @@ def test_drive_report_external_usage_miss_raw_slug_lever_pushes_an_unnarrowed_sl
 ) -> None:
     """Mirrors the sampled drive verb's own malformed-slug lever."""
     hub, runner = stack
-    runner.post("/_drive/register")
+    runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
     out = runner.post(
         "/_drive/report-external-usage-miss",
         json={"raw_slug": 123, "missed_at": "2026-07-13T00:00:00Z", "reason": "credential_lapsed"},
