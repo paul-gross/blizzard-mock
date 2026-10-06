@@ -1293,6 +1293,52 @@ def test_create_garden_proposal_work_ref_requires_accepted_minted(tmp_path: Path
     assert "accepted-minted" in result.output
 
 
+def test_create_garden_proposal_prints_only_the_proposal_id(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "garden-proposal",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--routine",
+            "triage",
+            "--class",
+            "hygiene",
+            "--closure",
+            "accepted-minted",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        proposal_id = conn.execute(select(_table(meta, "garden_proposals").c.proposal_id)).scalar_one()
+    assert result.stdout == f"{proposal_id}\n"
+
+
+def test_create_garden_proposal_refuses_a_runner_store_with_no_stdout_id(tmp_path: Path) -> None:
+    url, _meta = _full_hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        [
+            "create",
+            "garden-proposal",
+            "--store",
+            "runner",
+            "--url",
+            url,
+            "--routine",
+            "triage",
+            "--class",
+            "hygiene",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "lives in the hub store" in result.output
+
+
 # --- create artifact (implemented) --------------------------------------------
 
 
