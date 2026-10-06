@@ -91,7 +91,7 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
         _await_health(hub_port)
 
         runner_dir = tmp_path / "runner"
-        env = {**os.environ, "BZ_HUB_URL": f"http://127.0.0.1:{hub_port}", "BZ_RUNNER_GATES": "build,review"}
+        env = {**_scrubbed_env(), "BZ_HUB_URL": f"http://127.0.0.1:{hub_port}", "BZ_RUNNER_GATES": "build,review"}
         init = subprocess.run(
             [str(runner_bin), "init", str(runner_dir)], env=env, capture_output=True, text=True, timeout=30
         )
@@ -113,6 +113,11 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     runners = service._state.list_runners()  # the only read-back this feature exposes
     assert len(runners) == 1, f"expected exactly one registered runner, got {runners!r}"
     row = runners[0]
+    # `runner init` added the runner at this hub — the hub minted its id and token — and the
+    # tick registered it under the scaffold's default name with the token init wrote.
+    assert row.runner_id.startswith("rn_")
+    assert (row.name, row.never_connected()) == ("runner-local", False)
+    assert _env_token(runner_dir) is not None
     assert row.gates == ("build", "review")
 
     # `known_harnesses` now binds two adapters (the OpenCode binding joined
@@ -133,3 +138,76 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     # OpenCode ships no built-in tier table: with no operator `[opencode.models.aliases]`
     # configured, it resolves nothing yet, still registering with an empty tier set.
     assert opencode.tiers == ()
+
+
+def _scrubbed_env() -> dict[str, str]:
+    """The test process's environment minus any ambient runner token — a process-env token
+    outranks ``<dir>/.env``, so one leaking in from a dev shell would decide what init does."""
+    return {key: value for key, value in os.environ.items() if key != "BZ_HUB_TOKEN"}
+
+
+def _env_token(runner_dir: Path) -> str | None:
+    """The ``BZ_HUB_TOKEN`` line ``runner init`` wrote into ``<dir>/.env``, if any."""
+    env_file = runner_dir / ".env"
+    if not env_file.exists():
+        return None
+    for line in env_file.read_text().splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() == "BZ_HUB_TOKEN":
+            return value.strip().strip('"')
+    return None
+
+
+def test_runner_init_reuses_its_token_and_re_adds_after_a_hub_reset_only_with_allow_readd(tmp_path: Path) -> None:
+    """``runner init`` against the mock hub, as against a real one on ``auth.mode = "none"``: after the hub's
+    data is reset a re-run stops, adding nothing and leaving ``.env`` byte-for-byte as it was, until
+    ``--allow-readd`` adds a fresh runner and replaces the token."""
+    runner_bin = _require_runner_bin()
+    hub_port = _free_port()
+    hub_url = f"http://127.0.0.1:{hub_port}"
+    app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
+    service: MockHubService = app.state.service
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=hub_port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    runner_dir = tmp_path / "runner"
+    env = {**_scrubbed_env(), "BZ_HUB_URL": hub_url}
+
+    def init(*flags: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(runner_bin), "init", str(runner_dir), *flags], env=env, capture_output=True, text=True, timeout=30
+        )
+
+    try:
+        _await_health(hub_port)
+
+        first = init()
+        assert first.returncode == 0, first.stderr
+        token = _env_token(runner_dir)
+        [added] = service._state.list_runners()
+        assert token is not None and service.identity(token).runner_id == added.runner_id
+
+        again = init()
+        assert again.returncode == 0, again.stderr
+        assert _env_token(runner_dir) == token
+        assert [r.runner_id for r in service._state.list_runners()] == [added.runner_id]
+
+        service.reset()  # the hub's data is reset: the token init wrote is unknown here now
+        env_before = (runner_dir / ".env").read_bytes()
+
+        refused = init()
+        assert refused.returncode != 0
+        assert hub_url in refused.stderr + refused.stdout
+        assert "--allow-readd" in refused.stderr + refused.stdout
+        assert (runner_dir / ".env").read_bytes() == env_before
+        assert service._state.list_runners() == []
+
+        readded = init("--allow-readd")
+        assert readded.returncode == 0, readded.stderr
+        [fresh] = service._state.list_runners()
+        fresh_token = _env_token(runner_dir)
+        assert fresh_token is not None and fresh_token != token
+        assert service.identity(fresh_token).runner_id == fresh.runner_id != added.runner_id
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

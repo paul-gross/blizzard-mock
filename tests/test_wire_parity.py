@@ -366,8 +366,13 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RouteClaimResponse": ("RouteClaimResponse", frozenset()),
     "RouteTokenRekeyResponse": ("RouteTokenRekeyResponse", frozenset()),
     "RouteView": ("RouteView", frozenset()),
+    "RunnerAddResponse": ("RunnerAddResponse", frozenset()),
     "RunnerCapabilityView": ("RunnerCapability", frozenset()),
+    "RunnerEnrollmentResponse": ("RunnerEnrollmentResponse", frozenset()),
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
+    "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
+    "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
+    "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
     "ScopeView": ("ScopeView", frozenset()),
     "SubscriptionUsageView": ("SubscriptionUsageView", frozenset()),
@@ -386,7 +391,9 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 #: Request-body mirrors, invisible to ``_mirror_models`` since they live in ``mock_hub.api.deps``.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "QueuePeekBody": ("QueuePeekRequest", frozenset()),
+    "RunnerAddBody": ("RunnerAddRequest", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
+    "RunnerRegistrationBody": ("RunnerRegistrationRequest", frozenset()),
     "RunnerSubscriptionDeclarationBody": ("RunnerSubscriptionDeclaration", frozenset()),
     "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
     "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),

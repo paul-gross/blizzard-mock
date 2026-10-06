@@ -58,10 +58,17 @@ its own entry below owns its flags.
   exists. Store-agnostic: it never imports `blizzard`, so it works against
   whatever the daemon's Alembic tree migrated. The workhorse — every service
   scenario starts from a clean store.
-- `create runner --store hub --runner-id R [--paused] [--workspace-id W] [--subscription SLUG NAME PROVIDER]... [--declare-empty-roster] [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
-  **implemented**. Seeds one registered runner into the hub fleet registry
-  (`runner_registrations`), and with `--paused` also lands a pause fact
-  (`runner_pause_facts`) the runner reads back on its pull. Reflection-based.
+- `create runner --store hub [--runner-id R] [--name N] [--never-connected | --workspace-id W] [--paused] [--subscription SLUG NAME PROVIDER]... [--declare-empty-roster] [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
+  **implemented**. Seeds one runner the hub added into its fleet registry
+  (`runner_registrations`, `domain/hub/runner_registration_seed.py`) under `--runner-id` —
+  default the fixed `rn_` seed runner every verb's `--runner-id` defaults to, so a `create
+  runner` and a later `create chunk` pair up — and `--name` (default `runner-seed`; a label,
+  not a key, so two runners may share one). It lands registered under `--workspace-id`
+  (default `workspace-seed`); `--never-connected` lands it added but never registered —
+  workspace, first registration, last contact and roster all `NULL` — and is refused alongside
+  `--workspace-id`, `--subscription` or `--declare-empty-roster`, since a runner binds its
+  workspace and declares its roster only when it registers. With `--paused` it also lands a pause fact (`runner_pause_facts`) the
+  runner reads back on its pull. Reflection-based.
   `--subscription` (repeatable) declares the roster on the same
   row, in the exact JSON shape the hub store reads. Omitting `--subscription`
   entirely stores `NULL`, matching an unregistered-roster runner; `--declare-empty-roster`
@@ -129,12 +136,14 @@ its own entry below owns its flags.
   column set — so it requires `--node`/`--epoch`/`--lease-id` explicitly (no
   defaulting source exists against a runner store) and refuses `--runner-id`,
   naming the column; the hub side likewise refuses `--lease-id`/`--generation`.
-- `create lease --store {hub,runner} --chunk ID --runner-id R [--epoch N]` —
+- `create lease --store {hub,runner} --chunk ID [--runner-id R] [--epoch N]` —
   **implemented, store-polymorphic**. `--store hub` lands one `lease_facts` row plus,
   while the epoch is unowned, its `epoch_owners` row (`domain/hub/lease_seed.py`) — the
   same rows `create chunk --status running/delivering` composes internally, so the seeded
   runner owns the epoch and the hub admits its writes there. An epoch another runner or the
-  hub already owns is refused, naming the owner. `--store runner` lands one
+  hub already owns is refused, naming the owner; `--runner-id` names the minting runner and
+  is required there. `--store runner` refuses `--runner-id` — a runner store's leases are
+  all its own runner's, with no runner column — and lands one
   `leases` row *plus* its `lease_context` sibling, always together
   (`domain/runner/lease_seed.py`, `[--node NAME] [--graph-id ID] [--retries-max N]
   [--seed N]`): the daemon's own lease reads (`list_active_leases`,
@@ -186,17 +195,19 @@ its own entry below owns its flags.
   on stdout.
 - `create event --store hub --kind K --severity {info,warning,critical} --message M [--chunk ID] [--runner-id R] [--node NAME] [--detail JSON]`
   — **implemented**. Lands one `event_log` row (`domain/hub/event_seed.py`), the
-  operational event feed. `--runner-id` (NOT NULL on the real table) defaults to
-  `--chunk`'s newest lease's runner, or the `"mock-data"` placeholder absent
-  either. `--detail` is opaque JSON, round-tripped only — validated to parse, never
+  operational event feed. `--runner-id` defaults to `--chunk`'s newest lease's runner,
+  or the fixed `rn_` seed runner absent either; an empty `--runner-id ""` lands a
+  hub-authored row (`NULL`). `--detail` is opaque JSON, round-tripped only — validated to parse, never
   interpreted.
-- `create runner-pause --store hub --runner-id R (--local | --fleet) [--reason TEXT]` —
+- `create runner-pause --store {hub,runner} [--runner-id R] (--local | --fleet) [--reason TEXT]` —
   **implemented**. Lands one pause fact, engaged (`domain/hub/runner_pause_seed.py`):
   `--local` on the runner's own brake (`runner_local_pause_facts`, `--reason`
   nullable there), `--fleet` on the fleet's brake (`runner_pause_facts`, which has
   **no** `reason` column — `--fleet --reason` fails loud naming the missing column
   rather than silently dropping it). Exactly one of `--local`/`--fleet` is
-  required.
+  required, and `--runner-id` with `--store hub`. `--store runner` takes `--local` only,
+  into the runner's own `local_pause_facts` — the brake its own panel reads, with no runner
+  column, so `--runner-id` is refused there.
 - `create transcript-segment --store runner --chunk ID --node ID --lease-id ID --session-id ID [--harness-id ID] [--epoch N] [--generation N] [--cursor TOKEN] [--shipped-bytes N] [--shipped-turns N] [--normalizer-version V] [--harness-version V] [--finalized] [--seed N]` —
   **implemented, runner-only**. Lands one `transcript_segments` row
   (`domain/runner/transcript_segment_seed.py`) — no hub counterpart exists. Its
@@ -208,8 +219,8 @@ its own entry below owns its flags.
 - `scenario board [--chunks N] [--stress] [--seed S] [--url ... | --dir ...]` —
   **implemented**. One command, one ready-to-view board (`domain/hub/scenario_seed.py`),
   built on the hub-store `create` verbs' own composers for every per-concept row;
-  only the `--stress` graph-node extension and the `runner_registrations` row are
-  composed in that module itself. Mints a graph, spreads `N` chunks (default 6) across the nine
+  only the `--stress` graph-node extension and the runner roster are composed in that
+  module itself. Mints a graph, spreads `N` chunks (default 6) across the nine
   derived statuses by a fixed, deterministic algorithm (see the module
   docstring), lands a varying cost spread with at least one cost-partial usage
   fact, an artifact spread (the `ready` chunk, an open `waiting_on_human`
@@ -217,9 +228,12 @@ its own entry below owns its flags.
   detail page's Artifacts tab and its Node history tab's per-step artifact panel
   both render something on more than one chunk), a ceiling-paused runner (`runner_local_pause_facts`,
   not a `--cause cap` escalation — the module docstring explains why), a
-  runner per chunk, and a mixed-severity event log. `--stress` layers on five
+  runner per chunk under a hub-minted `rn_` id and a `runner-NN` name, beside two
+  chunkless runners — one registered under the first chunk runner's name, so two runners
+  share a name under distinct ids, and one added but never connected — and a
+  mixed-severity event log. `--stress` layers on five
   deliberately extreme properties across three additional rows (see the module
-  docstring): a runner with a long identity, a chunk landed on a deliberately
+  docstring): a runner with a long name, a chunk landed on a deliberately
   long custom node name that also carries a deliberately long artifact name,
   and a second `waiting_on_human` chunk carrying two extra independent
   question trails (multi-question). `--seed` seeds id-minting *and* pins the
@@ -232,8 +246,9 @@ its own entry below owns its flags.
   Always the hub store; prints the store it wrote to and a per-chunk, per-status
   summary census, including the artifact count.
 - `scenario fleet [--chunks N] [--stress] [--seed S] (--hub-url ... | --hub-dir ...) (--runner-url ... | --runner-dir ...) [--runner-id ID]`
-  — **implemented**. `scenario board` seeded into the hub store, then mirrored into
-  the runner store under one pinned runner id — the same chunk ids, so the runner's
+  — **implemented**. `scenario board` seeded into the hub store with every chunk pinned to
+  one runner's hub-minted id — and no twin or never-connected runner — then mirrored into
+  that runner's store — the same chunk ids, so the runner's
   own local panel renders leases, asks, escalations, takeovers, environments, and
   facts alongside the seeded board (`domain/runner/scenario_seed.py`); the mirrored
   `usage_facts` and `transcript_segments` are seeded for store-level coherence
@@ -248,8 +263,11 @@ its own entry below owns its flags.
   and `--runner-url|--runner-dir` are each **required explicitly** — neither falls
   back to `$DATABASE_URL`, since one env var cannot name two stores. `--runner-id`
   is required when only `--runner-url` names the runner store; given `--runner-dir`,
-  the pinned id is read from its `blizzard-runner.toml` `runner_id` instead (the two
-  are mutually exclusive, refused together). A `--chunks` too small for the runner
+  the pinned id is read from its runner store's identity row (`runner_identity`, which
+  the runner writes at each registration) instead — refused for a runner that has never
+  registered — and the two are mutually exclusive, refused together. A `--runner-id` the
+  hub store holds no registration for lands one under the `runner-seed` name; a `--runner-dir`
+  id it holds none for is refused instead, naming the re-add to run first. A `--chunks` too small for the runner
   half's mirror, or either store target that can't even be opened, is refused
   before either store is written. Writes the runner half's own local-pause brake
   first — before the hub half's `ready` chunks can land — then the hub half, then
@@ -260,9 +278,14 @@ its own entry below owns its flags.
   byte-identically, sharing one `Clock`/`Random` pair across them. See
   `blizzard-context:/tooling/store-seeding.md`
   for the requirement this composes around — `--runner-dir` has no
-  `blizzard-runner.toml` to resolve `db_url`/`runner_id` from until the runner
-  runtime has been brought up at least once — and never clear the mirrored
-  runner's local pause from the panel afterward.
+  `blizzard-runner.toml` to resolve `db_url` from, nor an identity row to pin, until the
+  runner has registered with this hub at least once. A reset of the hub store makes the
+  runner's token unknown there, so the runner re-adds itself (`blizzard runner init
+  --allow-readd`, under a new id) before this verb can pin it; a runner that has not
+  re-registered since still holds the id the reset discarded, which this verb refuses —
+  as it refuses an id the runner registered with another hub, whose store
+  `--hub-url`/`--hub-dir` should name instead.
+  Never clear the mirrored runner's local pause from the panel afterward.
 - The `fixture` subgroup — **stubbed** (clean "not implemented" exit). Named,
   versioned scenarios composing several concepts *and* stores (hub, forge, git)
   at once land in a later phase — `scenario board` stays within the hub store

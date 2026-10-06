@@ -75,7 +75,7 @@ def compose_chunk(
     chunk_id: str | None = None,
     node_name: str | None = None,
     work_refs: Sequence[tuple[str, str]] = (),
-    runner_id: str = "runner-seed",
+    runner_id: str = ids.SEED_RUNNER_ID,
     epoch: int = 1,
     workspace_id: str = _DEFAULT_WORKSPACE_ID,
     mirrored: bool = False,

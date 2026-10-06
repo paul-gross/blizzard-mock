@@ -29,7 +29,6 @@ def _fleet(chunks: int = 6, *, seed: int = 1, escalation_reason: str = "escalate
     fleet = compose_runner_fleet(
         census=census,
         graph_id=hub.graph_id,
-        runner_id=_RUNNER_ID,
         clock=clock,
         rng=rng,
         escalation_reason=escalation_reason,
@@ -47,14 +46,14 @@ def test_refuses_a_census_with_too_few_chunks_to_reach_both_dormant_shapes() -> 
     hub = compose_board_scenario(chunks=1, clock=clock, rng=rng, runner_id=_RUNNER_ID)
     assert hub.census is not None
     with pytest.raises(RunnerFleetCompositionError, match="waiting_on_human/needs_human"):
-        compose_runner_fleet(census=hub.census, graph_id=hub.graph_id, runner_id=_RUNNER_ID, clock=clock, rng=rng)
+        compose_runner_fleet(census=hub.census, graph_id=hub.graph_id, clock=clock, rng=rng)
 
 
-def test_mirrors_exactly_two_leases_under_the_pinned_runner() -> None:
+def test_mirrors_exactly_two_leases_naming_no_runner() -> None:
     _census, fleet = _fleet()
     lease_rows = _rows_for(fleet.rows, "leases")
     assert len(lease_rows) == 2
-    assert {row.values["runner_id"] for row in lease_rows} == {_RUNNER_ID}
+    assert all("runner_id" not in row.values for row in lease_rows)
 
 
 def test_every_lease_carries_its_lease_context_sibling() -> None:
@@ -131,7 +130,7 @@ def test_the_runners_local_pause_lands_engaged() -> None:
     _census, fleet = _fleet()
     pause_rows = _rows_for(fleet.brake, "local_pause_facts")
     assert len(pause_rows) == 1
-    assert pause_rows[0].values["runner_id"] == _RUNNER_ID
+    assert "runner_id" not in pause_rows[0].values
     assert pause_rows[0].values["paused"] is True
 
 

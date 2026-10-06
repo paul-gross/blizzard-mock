@@ -118,6 +118,8 @@ class ApplyResponse(BaseModel):
 
 class RouteView(BaseModel):
     runner_id: str
+    # The holder's name — display only, absent when the registry holds no such runner.
+    runner_name: str | None = None
     workspace_id: str
     environment_ids: list[str] = Field(default_factory=list)
 
@@ -139,6 +141,7 @@ class QuestionView(BaseModel):
     session_id: str | None = None
     harness_id: str | None = None
     runner_id: str
+    runner_name: str | None = None
     epoch: int
     question: str
     options: list[str] = Field(default_factory=list)
@@ -252,6 +255,7 @@ class RunnerCapabilityView(BaseModel):
 
 class RunnerView(BaseModel):
     runner_id: str
+    runner_name: str | None = None
     workspace_id: str
     registered_at: str
     last_seen_at: str
@@ -267,12 +271,53 @@ class RunnerView(BaseModel):
     subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
     # The runner's reported capability snapshot — every harness/tier it can execute right now.
     capabilities: list[RunnerCapabilityView] = Field(default_factory=list)
-    # Retired — the mock never retires a runner, so these hold their defaults.
+    # Retired runners hold no token, so a fleet read only ever renders these at their defaults.
     retired: bool = False
     retired_at: str | None = None
     retired_by: str | None = None
     # The node names the runner declared it holds for a human decision.
     gates: list[str] = Field(default_factory=list)
+
+
+class RunnerRegistrationResponse(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerRegistrationResponse`` — the id the caller's token
+    names, the name the registration recorded, and whether it was the first since the add."""
+
+    runner_id: str
+    runner_name: str | None = None
+    first_registration: bool
+
+
+class RunnerAddResponse(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerAddResponse`` — the minted id and its bearer token,
+    returned once."""
+
+    runner_id: str
+    runner_name: str
+    token: str
+
+
+class RunnerEnrollmentResponse(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerEnrollmentResponse`` — a rotated token, returned once."""
+
+    runner_id: str
+    token: str
+
+
+class RunnerIdentityView(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerIdentityView`` — whom a bearer token names."""
+
+    runner_id: str
+    runner_name: str
+
+
+class RunnerIdentityRefusal(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerIdentityRefusal`` — the identity route's typed 401.
+    ``reason`` is one of ``missing``/``unknown``/``revoked``/``retired``; ``runner_id`` names the
+    runner a revoked or retired token was issued to."""
+
+    reason: str
+    runner_id: str | None = None
 
 
 class RunnerFactAck(BaseModel):
@@ -281,6 +326,8 @@ class RunnerFactAck(BaseModel):
     applied: list[int] = Field(default_factory=list)
     already_applied: list[int] = Field(default_factory=list)
     rejected: list[int] = Field(default_factory=list)
+    # The subset of `rejected` refused for a chunk with no live route — the mock refuses none so.
+    route_ended: list[int] = Field(default_factory=list)
 
 
 class TranscriptSegmentAck(BaseModel):
@@ -316,6 +363,7 @@ class WorkItemAuthorView(BaseModel):
     user_id: str | None = None
     login: str | None = None
     runner_id: str | None = None
+    runner_name: str | None = None
     chunk_id: str | None = None
     node_name: str | None = None
 
@@ -413,6 +461,7 @@ class ScopeView(BaseModel):
     description: str
     created_at: str
     retired: bool = False
+    revision: int | None = None
 
 
 class GardenProposalClosureView(BaseModel):

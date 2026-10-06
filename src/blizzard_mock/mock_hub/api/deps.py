@@ -7,16 +7,36 @@ field-for-field including required-ness."""
 
 from __future__ import annotations
 
-from fastapi import Request
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel, Field, StringConstraints
 
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
-from blizzard_mock.mock_hub.domain.service import MockHubService
+from blizzard_mock.mock_hub.domain.service import MockHubService, UnresolvableRunner
 
 
 def get_service(request: Request) -> MockHubService:
     service: MockHubService = request.app.state.service
     return service
+
+
+def presented_bearer(request: Request) -> str | None:
+    """The bearer token an ``Authorization: Bearer <token>`` header presents, else ``None``."""
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+def get_principal(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
+    """The calling runner's id, resolved from its bearer token — the one identity a fleet call
+    carries. A missing, revoked or unknown token is refused ``401`` before any handler runs, as
+    the real fleet router's gate does; a body ``runner_id`` is never read."""
+    try:
+        return service.principal(presented_bearer(request))
+    except UnresolvableRunner as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 def get_captured(request: Request) -> ICaptureStore:
@@ -57,8 +77,7 @@ class RunnerSubscriptionDeclarationBody(MirroredWireBody):
 class QueuePeekBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.queue.QueuePeekRequest`` field-for-field. ``capabilities``
     reuses :class:`RunnerCapabilityBody` for its element shape. Carries no ``runner_id``
-    — the real verb answers for the authenticated principal alone; the mock resolves
-    identity out-of-band (a ``runner_id`` query parameter), never inside this body."""
+    — the verb answers for the bearer token's principal alone."""
 
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
     policy: str = "pass-over"
@@ -66,7 +85,6 @@ class QueuePeekBody(MirroredWireBody):
 
 class RouteClaimBody(BaseModel):
     chunk_id: str
-    runner_id: str
     workspace_id: str = "workspace-mock"
     environment_ids: list[str] = Field(default_factory=list)
 
@@ -74,7 +92,6 @@ class RouteClaimBody(BaseModel):
 class CompletionBody(BaseModel):
     choice: str
     epoch: int
-    runner_id: str = "runner-mock"
     from_node_id: str
     check_results: list[dict[str, object]] = Field(default_factory=list)
     artifacts: list[dict[str, object]] = Field(default_factory=list)
@@ -83,12 +100,15 @@ class CompletionBody(BaseModel):
 class DecisionBody(BaseModel):
     from_node_id: str
     epoch: int
-    runner_id: str = "runner-mock"
     artifacts: list[dict[str, object]] = Field(default_factory=list)
 
 
-class RunnerRegistrationBody(BaseModel):
-    runner_id: str
+class RunnerRegistrationBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerRegistrationRequest`` field-for-field. It carries
+    no identity — the bearer token names the runner — only the ``name`` it declares, which a
+    blank or absent value leaves as the hub holds it."""
+
+    name: str | None = None
     workspace_id: str = "workspace-mock"
     # The runner's configured environment-pool size — None when it reports none.
     env_capacity: int | None = None
@@ -111,7 +131,6 @@ class RunnerFactBody(BaseModel):
 
 
 class RunnerFactBatchBody(BaseModel):
-    runner_id: str
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
@@ -187,12 +206,30 @@ class TranscriptSegmentRecordBody(MirroredWireBody):
 
 
 class TranscriptSegmentBatchBody(MirroredWireBody):
-    runner_id: str
     records: list[TranscriptSegmentRecordBody] = Field(default_factory=list)
 
 
-class PauseBody(BaseModel):
-    paused: bool = True
+class RunnerAddBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerAddRequest`` field-for-field — stripped, and a blank
+    name refused ``422``."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class RunnerSeedControlBody(BaseModel):
+    """``POST /_seed/runners`` — test-control only; adds a runner never connected, as
+    ``POST /api/runners`` does, but may pin its id and token so a scenario can name both."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = "runner-mock"
+    runner_id: str | None = None
+    token: str | None = None
+
+
+class RunnerRetireControlBody(BaseModel):
+    """``POST /_seed/runners/{runner_id}/retire`` — test-control only; plays the operator's
+    retire verb, which revokes the runner's token in the same pass."""
+
+    by: str = "operator"
 
 
 class AnswerControlBody(BaseModel):

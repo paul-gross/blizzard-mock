@@ -39,7 +39,7 @@ def compose_question(
     options: Sequence[str] = (),
     node_id: str | None = None,
     session_id: str | None = None,
-    runner_id: str = "runner-seed",
+    runner_id: str = ids.SEED_RUNNER_ID,
     epoch: int = 1,
     answer: str | None = None,
     answered_by: str | None = None,

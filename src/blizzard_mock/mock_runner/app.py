@@ -31,8 +31,8 @@ def create_app(
 ) -> FastAPI:
     """Build a fully wired mock-runner app.
 
-    ``gateway`` is injected by tests (an in-process mock hub); the CLI passes ``None`` and
-    an ``httpx.Client`` to ``config.hub_url`` is opened here and closed on shutdown.
+    ``gateway`` is injected by tests (an in-process mock hub, its token already set); the CLI passes
+    ``None`` and an ``httpx.Client`` to ``config.hub_url`` is opened here and closed on shutdown.
     """
     cfg = config or MockRunnerConfig()
     log = structlog.get_logger("blizzard_mock.mock_runner")
@@ -42,7 +42,7 @@ def create_app(
     owned_client: httpx.Client | None = None
     if gateway is None:
         owned_client = httpx.Client(base_url=cfg.hub_url, timeout=30.0)
-        gateway = HttpxHubGateway(owned_client)
+        gateway = HttpxHubGateway(owned_client, token=cfg.token or bootstrap_token(owned_client, name=cfg.name))
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -53,7 +53,7 @@ def create_app(
                 owned_client.close()
 
     app = FastAPI(title="blizzard-mock runner", version="0.1.0", lifespan=_lifespan)
-    service = MockRunnerService(gateway, levers, the_clock, runner_id=cfg.runner_id, workspace_id=cfg.workspace_id)
+    service = MockRunnerService(gateway, levers, the_clock, name=cfg.name, workspace_id=cfg.workspace_id)
     app.state.service = service
     app.state.levers = levers
 
@@ -61,5 +61,15 @@ def create_app(
     app.include_router(drive_router)
     app.include_router(levers_router)
 
-    log.info("mock runner app created", hub_url=cfg.hub_url, runner_id=cfg.runner_id)
+    log.info("mock runner app created", hub_url=cfg.hub_url, name=cfg.name)
     return app
+
+
+def bootstrap_token(client: httpx.Client, *, name: str) -> str:
+    """Add this driver at the hub under ``name`` and return the bearer token the hub minted —
+    the hub must be up and admit an unauthenticated add, as on ``auth.mode = "none"``."""
+    status, body = HttpxHubGateway(client, token=None).add_runner(name=name)
+    token = body.get("token")
+    if status != 201 or not isinstance(token, str):
+        raise RuntimeError(f"adding runner {name!r} at the hub failed ({status}): {body}")
+    return token

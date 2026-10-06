@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -48,9 +49,36 @@ def test_config_missing_db_url_falls_back_to_the_runner_default_too(tmp_path: Pa
     assert resolve_db_url(tmp_path, store="runner") == f"sqlite:///{(tmp_path / 'data' / 'runner.db').resolve()}"
 
 
-def test_resolves_the_runner_id_from_a_written_runner_toml(tmp_path: Path) -> None:
-    (tmp_path / "blizzard-runner.toml").write_text('db_url = "sqlite:///runner.db"\nrunner_id = "runner-local"\n')
-    assert resolve_runner_id(tmp_path) == "runner-local"
+def _runner_store(tmp_path: Path, *rows: tuple[str, str]) -> None:
+    """A runner runtime whose store carries the identity table (hand-made, as the runner's
+    migration shapes it) holding ``rows`` of ``(runner_id, runner_name)``, oldest first."""
+    db = tmp_path / "runner.db"
+    (tmp_path / "blizzard-runner.toml").write_text(f'db_url = "sqlite:///{db}"\n')
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE runner_identity (id INTEGER PRIMARY KEY AUTOINCREMENT, runner_id TEXT NOT NULL, "
+            "runner_name TEXT NOT NULL, registered_at TEXT NOT NULL)"
+        )
+        conn.executemany(
+            "INSERT INTO runner_identity (runner_id, runner_name, registered_at) VALUES (?, ?, '2026-07-13')", rows
+        )
+
+
+def test_resolves_the_runner_id_from_the_runner_store_identity_row(tmp_path: Path) -> None:
+    _runner_store(tmp_path, ("rn_01OLDER0000000000000000000", "runner-local"), ("rn_01NEWER0000000000000000000", "r"))
+    assert resolve_runner_id(tmp_path) == "rn_01NEWER0000000000000000000"
+
+
+def test_a_runner_that_never_registered_fails_saying_so(tmp_path: Path) -> None:
+    _runner_store(tmp_path)
+    with pytest.raises(RuntimeConfigError, match="never registered"):
+        resolve_runner_id(tmp_path)
+
+
+def test_an_unmigrated_runner_store_fails_naming_the_identity_table(tmp_path: Path) -> None:
+    (tmp_path / "blizzard-runner.toml").write_text(f'db_url = "sqlite:///{tmp_path / "runner.db"}"\n')
+    with pytest.raises(RuntimeConfigError, match="runner_identity"):
+        resolve_runner_id(tmp_path)
 
 
 def test_missing_runner_toml_fails_naming_the_file(tmp_path: Path) -> None:
@@ -59,9 +87,3 @@ def test_missing_runner_toml_fails_naming_the_file(tmp_path: Path) -> None:
     message = str(excinfo.value)
     assert "blizzard-runner.toml" in message
     assert str(tmp_path) in message
-
-
-def test_runner_toml_missing_runner_id_fails_naming_the_key(tmp_path: Path) -> None:
-    (tmp_path / "blizzard-runner.toml").write_text('db_url = "sqlite:///runner.db"\n')
-    with pytest.raises(RuntimeConfigError, match="runner_id"):
-        resolve_runner_id(tmp_path)

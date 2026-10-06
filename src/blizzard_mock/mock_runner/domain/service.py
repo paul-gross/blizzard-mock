@@ -52,12 +52,15 @@ class MockRunnerService:
     """The composition-root-wired driver every mock-runner control route delegates to."""
 
     def __init__(
-        self, gateway: IHubGateway, levers: ILeverStore, clock: Clock, *, runner_id: str, workspace_id: str
+        self, gateway: IHubGateway, levers: ILeverStore, clock: Clock, *, name: str, workspace_id: str
     ) -> None:
         self._gw = gateway
         self._levers = levers
         self._clock = clock
-        self._runner_id = runner_id
+        self._name = name
+        #: The hub-minted id the latest successful registration answered — ``None`` until one
+        #: has, as the real runner's identity row is. Nothing sends it: the token is the identity.
+        self._runner_id: str | None = None
         self._workspace_id = workspace_id
         self._held: dict[str, Held] = {}
         #: The fact lane's one monotonic sequence, shared by every kind this driver pushes: the hub keeps
@@ -74,7 +77,7 @@ class MockRunnerService:
         return self._levers
 
     @property
-    def runner_id(self) -> str:
+    def runner_id(self) -> str | None:
         return self._runner_id
 
     def reset(self) -> None:
@@ -96,11 +99,14 @@ class MockRunnerService:
         is left out."""
         self._apply_delay(None)
         status, body = self._gw.register(
-            self._runner_id,
+            name=self._name,
             workspace_id=self._workspace_id,
             capabilities=DEFAULT_CAPABILITIES if capabilities is None else capabilities,
             subscriptions=subscriptions,
         )
+        registered_id = body.get("runner_id")
+        if status in (200, 201) and isinstance(registered_id, str):
+            self._runner_id = registered_id
         return {"status": status, "response": body}
 
     def peek(self) -> dict[str, Any]:
@@ -111,14 +117,10 @@ class MockRunnerService:
     def peek_matched(
         self, *, capabilities: list[dict[str, Any]] | None = None, policy: str = "pass-over", enrolled: bool = True
     ) -> dict[str, Any]:
-        """The matched fleet peek — ``POST /queue/peek`` under this driver's runner id,
-        falling back to the legacy ``GET`` on a ``401`` (:class:`IHubGateway.peek_matched`'s
-        fallback). ``enrolled=False`` drives the tokenless case, served off the legacy
-        peek exactly as an unenrolled real runner is served today."""
+        """The matched fleet peek — ``POST /queue/peek`` under this driver's bearer token.
+        ``enrolled=False`` drives the tokenless case, which the hub refuses ``401``."""
         self._apply_delay(None)
-        status, body = self._gw.peek_matched(
-            runner_id=self._runner_id if enrolled else None, capabilities=capabilities or [], policy=policy
-        )
+        status, body = self._gw.peek_matched(enrolled=enrolled, capabilities=capabilities or [], policy=policy)
         return {"status": status, "response": body}
 
     def claim(self, chunk_id: str, environment_ids: list[str]) -> dict[str, Any]:
@@ -127,7 +129,6 @@ class MockRunnerService:
         status, body = self._gw.claim(
             {
                 "chunk_id": chunk_id,
-                "runner_id": self._runner_id,
                 "workspace_id": self._workspace_id,
                 "environment_ids": environment_ids,
             }
@@ -208,7 +209,6 @@ class MockRunnerService:
         submission: dict[str, Any] = {
             "choice": choice,
             "epoch": epoch,
-            "runner_id": self._runner_id,
             "from_node_id": from_node,
             "check_results": check_results or [],
             "artifacts": artifacts or [],
@@ -283,7 +283,6 @@ class MockRunnerService:
         payload = {
             "chunk_id": chunk_id,
             "epoch": held.epoch,
-            "runner_id": self._runner_id,
             "takeover_command": takeover_command,
             "wrapped_takeover_command": wrapped_takeover_command,
             "cause": cause,
@@ -304,7 +303,6 @@ class MockRunnerService:
         body: dict[str, Any] = {
             "from_node_id": held.from_node_id,
             "epoch": held.epoch,
-            "runner_id": self._runner_id,
             "artifacts": [],
         }
         if held.route_token is not None:
@@ -334,7 +332,6 @@ class MockRunnerService:
             "chunk_id": chunk_id,
             "session_id": f"mock-session-{chunk_id}",
             "harness_id": harness_id if harness_id is not None else CLAUDE_CODE_HARNESS_ID,
-            "runner_id": self._runner_id,
             "epoch": held.epoch,
             "question": question,
             "options": options or [],
@@ -342,7 +339,6 @@ class MockRunnerService:
         }
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": QUESTION_ASKED, "payload": payload}],
             }
         )
@@ -384,7 +380,7 @@ class MockRunnerService:
             "record_truncated": record_truncated,
             "turns": turn_list,
         }
-        status, response = self._gw.push_transcripts({"runner_id": self._runner_id, "records": [record]})
+        status, response = self._gw.push_transcripts({"records": [record]})
         return {"drove": True, "status": status, "response": response}
 
     def poll_answer(self, question_id: str) -> dict[str, Any]:
@@ -403,7 +399,6 @@ class MockRunnerService:
             payload["reason"] = reason
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": RUNNER_LOCALLY_PAUSED, "payload": payload}],
             }
         )
@@ -417,7 +412,6 @@ class MockRunnerService:
         payload: dict[str, Any] = {"at": self._clock.now().isoformat(), "by": by}
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": RUNNER_LOCALLY_RESUMED, "payload": payload}],
             }
         )
@@ -451,7 +445,6 @@ class MockRunnerService:
             payload["detail"] = detail
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": EVENT_RECORDED, "payload": payload}],
             }
         )
@@ -477,7 +470,6 @@ class MockRunnerService:
             payload["name"] = name
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED, "payload": payload}],
             }
         )
@@ -502,7 +494,6 @@ class MockRunnerService:
             payload["name"] = name
         status, response = self._gw.push_facts(
             {
-                "runner_id": self._runner_id,
                 "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_MISSED, "payload": payload}],
             }
         )
@@ -526,7 +517,7 @@ class MockRunnerService:
     def _report_lease(self, held: Held) -> None:
         """Advance the hub's fence for the held chunk with a ``lease.minted`` fact via
         ``/events``. Never lever-distorted (pinned by tests/test_pin_mock.py)."""
-        payload: dict[str, Any] = {"chunk_id": held.chunk_id, "epoch": held.epoch, "runner_id": self._runner_id}
+        payload: dict[str, Any] = {"chunk_id": held.chunk_id, "epoch": held.epoch}
         self._push_fact(LEASE_MINTED, self._stamped(held, payload))
 
     @staticmethod
@@ -540,9 +531,7 @@ class MockRunnerService:
     def _push_fact(self, kind: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """Push one fact on the fact lane's next sequence number."""
         self._runner_seq += 1
-        return self._gw.push_facts(
-            {"runner_id": self._runner_id, "facts": [{"seq": self._runner_seq, "kind": kind, "payload": payload}]}
-        )
+        return self._gw.push_facts({"facts": [{"seq": self._runner_seq, "kind": kind, "payload": payload}]})
 
     def _apply_delay(self, chunk_id: str | None) -> None:
         lever = self._levers.find(RunnerLever.DELAY.value, chunk_id)

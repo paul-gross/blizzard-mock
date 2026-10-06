@@ -1,15 +1,14 @@
-"""The hub-mirror routes — the ``/api`` surface a runner consumes (D-012).
+"""The hub-mirror routes — the ``/api`` surface a runner consumes.
 
 Vendor-native paths and JSON matching the real hub's OpenAPI subset.
 Controllers hold only the ``MockHubService`` (``bzh:controller-read-only``).
-``router`` is unauthenticated liveness; ``fleet_router`` is everything else.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.mock_hub.api.deps import (
@@ -17,10 +16,13 @@ from blizzard_mock.mock_hub.api.deps import (
     DecisionBody,
     QueuePeekBody,
     RouteClaimBody,
+    RunnerAddBody,
     RunnerFactBatchBody,
     RunnerRegistrationBody,
     TranscriptSegmentBatchBody,
+    get_principal,
     get_service,
+    presented_bearer,
 )
 from blizzard_mock.mock_hub.domain.models import (
     ClaimConflict,
@@ -39,8 +41,11 @@ from blizzard_mock.mock_hub.domain.service import (
     NoAnsweredProposal,
     NoRunContext,
     QuestionNotFound,
+    RunnerNeverConnected,
+    RunnerRetired,
+    RunnerTokenRefused,
     SystemArtifactNotFound,
-    UnresolvableRunner,
+    UnknownRunner,
 )
 from blizzard_mock.mock_hub.domain.state import (
     ClaimDeniedPaused,
@@ -53,9 +58,16 @@ from blizzard_mock.mock_hub.domain.state import (
 #: hub.
 router = APIRouter(prefix="/api", tags=["hub"])
 
-#: The runner-facing hub mirror — every route below is
-#: runner-originating traffic, moved under ``/api/fleet`` as a block.
-fleet_router = APIRouter(prefix="/api/fleet", tags=["hub"])
+#: The runner-facing hub mirror — every route answers only a caller whose bearer token names a runner.
+fleet_router = APIRouter(prefix="/api/fleet", tags=["hub"], dependencies=[Depends(get_principal)])
+
+#: ``GET /api/fleet/identity`` alone — outside the gate, since it is how a runner learns why its token is refused.
+identity_router = APIRouter(prefix="/api/fleet", tags=["hub"])
+
+#: The operator verbs a runner's bootstrap calls, unauthenticated.
+operator_router = APIRouter(prefix="/api", tags=["hub"])
+
+Principal = Annotated[str, Depends(get_principal)]
 
 
 @router.get("/health")
@@ -74,33 +86,23 @@ def peek_queue(service: Annotated[MockHubService, Depends(get_service)]) -> obje
 
 
 @fleet_router.post("/queue/peek")
-def peek_matched_queue(
-    body: QueuePeekBody,
-    service: Annotated[MockHubService, Depends(get_service)],
-    runner_id: Annotated[str | None, Query()] = None,
-) -> object:
-    """The matched fleet peek — at most one ready entry the named ``runner_id`` can both
-    work and claim, ``body.policy`` applied to both. ``runner_id`` is a query parameter,
-    not a body field, since ``QueuePeekBody`` carries no caller identity
-    (:class:`QueuePeekBody`'s docstring). See :meth:`MockHubService.peek_matched` for
-    matching and auth-failure semantics."""
-    try:
-        return service.peek_matched(
-            runner_id=runner_id,
-            capabilities=tuple(
-                RunnerCapability(
-                    harness_id=c.harness_id,
-                    version=c.version,
-                    tiers=tuple(c.tiers),
-                    default=c.default,
-                    available=c.available,
-                )
-                for c in body.capabilities
-            ),
-            policy=body.policy,
-        )
-    except UnresolvableRunner:
-        return JSONResponse(status_code=401, content={"detail": "no resolvable runner token"})
+def peek_matched_queue(body: QueuePeekBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The matched fleet peek — at most one ready entry the caller's reported capabilities can
+    both work and claim, ``body.policy`` applied to both. See
+    :meth:`MockHubService.peek_matched` for the matching."""
+    return service.peek_matched(
+        capabilities=tuple(
+            RunnerCapability(
+                harness_id=c.harness_id,
+                version=c.version,
+                tiers=tuple(c.tiers),
+                default=c.default,
+                available=c.available,
+            )
+            for c in body.capabilities
+        ),
+        policy=body.policy,
+    )
 
 
 @fleet_router.get("/system-artifacts")
@@ -124,11 +126,13 @@ def list_scopes(service: Annotated[MockHubService, Depends(get_service)]) -> obj
 
 
 @fleet_router.post("/routes", status_code=201)
-def claim_route(body: RouteClaimBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+def claim_route(
+    body: RouteClaimBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
     try:
         return service.claim(
             body.chunk_id,
-            runner_id=body.runner_id,
+            runner_id=runner_id,
             workspace_id=body.workspace_id,
             environment_ids=body.environment_ids,
         )
@@ -412,17 +416,19 @@ def submit_decision(
 
 
 @fleet_router.post("/events")
-def push_facts(body: RunnerFactBatchBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    return service.ingest_facts(body.runner_id, [f.model_dump() for f in body.facts])
+def push_facts(
+    body: RunnerFactBatchBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    return service.ingest_facts(runner_id, [f.model_dump() for f in body.facts])
 
 
 @fleet_router.post("/transcripts")
 def push_transcripts(
-    body: TranscriptSegmentBatchBody, service: Annotated[MockHubService, Depends(get_service)]
+    body: TranscriptSegmentBatchBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
 ) -> object:
     """The transcript lane's own push — distinct from :func:`push_facts`,
     mirroring the real hub's ``POST /api/fleet/transcripts``."""
-    return service.ingest_transcripts(body.runner_id, [r.model_dump() for r in body.records])
+    return service.ingest_transcripts(runner_id, [r.model_dump() for r in body.records])
 
 
 @fleet_router.get("/chunks/{chunk_id}/transcript-segments")
@@ -436,14 +442,18 @@ def get_lease_transcript_segments(
 
 
 @fleet_router.post("/runners", status_code=201)
-def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+def register_runner(
+    body: RunnerRegistrationBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Register the caller — the runner its bearer token names — under the name it declares."""
     subscriptions = (
         tuple(DeclaredSubscription(slug=d.slug, name=d.name, provider=d.provider) for d in body.subscriptions)
         if body.subscriptions is not None
         else None
     )
-    first = service.register(
-        body.runner_id,
+    return service.register(
+        runner_id,
+        name=body.name,
         workspace_id=body.workspace_id,
         url=body.url,
         redirect_uris=tuple(body.redirect_uris),
@@ -461,15 +471,51 @@ def register_runner(body: RunnerRegistrationBody, service: Annotated[MockHubServ
         subscriptions=subscriptions,
         gates=tuple(body.gates),
     )
-    return {"runner_id": body.runner_id, "first_registration": first}
 
 
 @fleet_router.get("/runners/{runner_id}")
-def get_runner(runner_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    view = service.runner_view(runner_id)
+def get_runner(runner_id: str, caller: Principal, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The caller's own declarative state — 403 when the path names another runner, 409 before
+    its first registration."""
+    if runner_id != caller:
+        return JSONResponse(
+            status_code=403, content={"detail": f"token belongs to runner {caller!r}, not {runner_id!r}"}
+        )
+    try:
+        view = service.runner_view(runner_id)
+    except RunnerNeverConnected as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
     if view is None:
         return JSONResponse(status_code=404, content={"detail": f"unknown runner {runner_id}"})
     return view
+
+
+@identity_router.get("/identity")
+def get_runner_identity(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The id and name of the runner the presented bearer token names, or a typed 401 saying why
+    the hub refuses it. Registers nothing and records no liveness."""
+    try:
+        return service.identity(presented_bearer(request))
+    except RunnerTokenRefused as exc:
+        return JSONResponse(status_code=401, content={"reason": exc.reason, "runner_id": exc.runner_id})
+
+
+@operator_router.post("/runners", status_code=201)
+def add_runner(body: RunnerAddBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Add a runner under the initial ``name`` — its id and bearer token are minted together and
+    the token returned once; it stays never connected until it registers with that token."""
+    return service.add_runner(name=body.name)
+
+
+@operator_router.post("/runners/{runner_id}/enrollments", status_code=201)
+def enroll_runner(runner_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Rotate the runner's bearer token — 404 for a runner never added, 409 for a retired one."""
+    try:
+        return service.enroll(runner_id)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except RunnerRetired as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @fleet_router.get("/questions/{question_id}")

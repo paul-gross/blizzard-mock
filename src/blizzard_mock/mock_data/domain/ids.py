@@ -1,20 +1,20 @@
 """Prefixed-ULID id minting for seeded rows.
 
-Id format: `blizzard/src/blizzard/foundation/ids.py` — re-implemented independently,
-no ``blizzard`` import. The random tail is seedable, so ``--seed`` reproduces
-byte-identical ids.
+The minting itself is :mod:`blizzard_mock.ids`'s, shared with the mock hub; this module
+holds the seeders' id-prefix registry. The random tail is seedable, so ``--seed``
+reproduces byte-identical ids.
 """
 
 from __future__ import annotations
 
-import random
+# Re-exported, so a seeder names one module for both the minting and the prefixes.
+from blizzard_mock.ids import RUNNER_PREFIX as RUNNER_PREFIX
+from blizzard_mock.ids import mint as mint
+from blizzard_mock.ids import seeded_rng as seeded_rng
+from blizzard_mock.ids import ulid as ulid
 
-from blizzard_mock.clock import Clock
-
-_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-_TIME_CHARS = 10  # 48 bits of millisecond timestamp
-_RAND_CHARS = 16  # 80 bits of randomness
-_ULID_CHARS = _TIME_CHARS + _RAND_CHARS
+#: The runner every seeder attributes its rows to when none is named — fixed across invocations.
+SEED_RUNNER_ID = "rn_01HK153X00KN8V0ED48ZHQNMA9"
 
 # The id-prefix registry — kept in step by hand with the real one (no import),
 # so a composer mints an id that looks native alongside a real one.
@@ -34,28 +34,3 @@ HUB_EXEC_SLOT_PREFIX = "hes"
 MIGRATION_PREFIX = "mg"
 USER_PREFIX = "usr"
 GARDEN_PROPOSAL_PREFIX = "gprop"
-
-
-def seeded_rng(seed: int | None) -> random.Random:
-    """A ``random.Random`` seeded for reproducible minting, or system-random when ``seed`` is ``None``."""
-    return random.Random(seed)
-
-
-def _encode(value: int, length: int) -> str:
-    chars = []
-    for _ in range(length):
-        value, rem = divmod(value, 32)
-        chars.append(_CROCKFORD[rem])
-    return "".join(reversed(chars))
-
-
-def ulid(clock: Clock, rng: random.Random) -> str:
-    """A bare 26-char Crockford-base32 ULID stamped from ``clock``, randomized by ``rng``."""
-    millis = int(clock.now().timestamp() * 1000)
-    randomness = rng.getrandbits(_RAND_CHARS * 5)
-    return _encode(millis, _TIME_CHARS) + _encode(randomness, _RAND_CHARS)
-
-
-def mint(prefix: str, clock: Clock, rng: random.Random) -> str:
-    """Mint a prefixed ULID — ``<prefix>_<ulid>``."""
-    return f"{prefix}_{ulid(clock, rng)}"

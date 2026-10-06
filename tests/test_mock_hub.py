@@ -37,10 +37,10 @@ from blizzard_mock.mock_hub.domain.state import (
     ClaimDeniedPaused,
     ClaimDeniedUnregistered,
     DeclaredSubscription,
-    RunnerCapability,
     RunnerRow,
     refuse_braked_runner,
 )
+from tests.fleet_client import FleetClient, register_runner, runner_token
 
 _SPEC = {
     "entry": "build",
@@ -65,7 +65,7 @@ _SPEC = {
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
+    return FleetClient(create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
 
 
 def _seed(client: TestClient) -> str:
@@ -79,15 +79,7 @@ def _claim(client: TestClient, body: dict) -> httpx.Response:
     claimant. Registers through the service rather than the wire, so a capability snapshot a
     test registered stays put and no extra request lands in ``/_captured``."""
     service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
-    if service.runner_view(body["runner_id"]) is None:
-        service.register(
-            body["runner_id"],
-            workspace_id="ws",
-            capabilities=(
-                RunnerCapability(harness_id="claude_code", default=True),
-                RunnerCapability(harness_id="claude", tiers=("blizzard:basic",)),
-            ),
-        )
+    register_runner(service, body["runner_id"])
     return client.post("/api/fleet/routes", json=body)
 
 
@@ -714,16 +706,26 @@ def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capabil
     assert still_blocked.json()["entries"] == []
 
 
-def test_matched_peek_refuses_401_without_a_runner_id(client: TestClient) -> None:
+def test_matched_peek_refuses_401_without_a_token(client: TestClient) -> None:
     _seed(client)
-    resp = client.post("/api/fleet/queue/peek", json={})
+    resp = TestClient(client.app).post("/api/fleet/queue/peek", json={})
     assert resp.status_code == 401, resp.text
+    assert resp.json() == {"detail": "missing or malformed Authorization header"}
 
 
-def test_matched_peek_refuses_401_for_an_unregistered_runner_id(client: TestClient) -> None:
+def test_matched_peek_refuses_401_for_a_token_the_hub_never_issued(client: TestClient) -> None:
     _seed(client)
-    resp = client.post("/api/fleet/queue/peek", params={"runner_id": "ghost"}, json={})
+    resp = client.post("/api/fleet/queue/peek", headers={"Authorization": "Bearer ghost"}, json={})
     assert resp.status_code == 401, resp.text
+    assert resp.json() == {"detail": "bearer token does not resolve to a known runner"}
+
+
+def test_matched_peek_answers_an_added_runner_that_has_never_registered(client: TestClient) -> None:
+    """Like the real verb, the peek needs only a resolved principal — no registration."""
+    chunk_id = _seed(client)
+    resp = client.post("/api/fleet/queue/peek", params={"runner_id": "fresh"}, json={"capabilities": []})
+    assert resp.status_code == 200, resp.text
+    assert [e["chunk_id"] for e in resp.json()["entries"]] in ([], [chunk_id])
 
 
 def test_matched_peek_leaves_the_legacy_verb_unfiltered(client: TestClient) -> None:
@@ -881,7 +883,11 @@ async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> N
     from httpx import ASGITransport, AsyncClient
 
     app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    token = runner_token("r1")
+    app.state.service.add_runner(name="r1", runner_id="r1", token=token)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as ac:
         await ac.post("/_levers/delay_transcripts", json={"payload": {"ms": 300}})
         started = time.monotonic()
         fast_finished_at = None
@@ -922,9 +928,11 @@ def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> N
 
 
 def test_captured_records_the_authorization_header_on_an_api_call(client: TestClient) -> None:
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service.add_runner(name="r1", runner_id="r1", token="tok-123")
     resp = client.post(
         "/api/fleet/runners",
-        json={"runner_id": "r1", "workspace_id": "ws"},
+        json={"workspace_id": "ws"},
         headers={"Authorization": "Bearer tok-123"},
     )
     assert resp.status_code == 201
@@ -938,7 +946,7 @@ def test_captured_records_the_authorization_header_on_an_api_call(client: TestCl
 
 
 def test_captured_omits_a_request_with_no_authorization_header(client: TestClient) -> None:
-    client.get("/api/fleet/queue/peek")
+    TestClient(client.app).get("/api/fleet/queue/peek")
     entry = client.get("/_captured").json()["requests"][0]
     assert "authorization" not in entry["headers"]
 
@@ -3493,8 +3501,18 @@ def test_an_unregistered_runner_is_braked() -> None:
     assert str(refused.value) == "runner ghost is not registered at the hub"
 
 
+def test_an_added_runner_that_never_registered_is_braked_as_unregistered() -> None:
+    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+
+    with pytest.raises(ClaimDeniedUnregistered) as refused:
+        refuse_braked_runner(row, runner_id="r1")
+
+    assert refused.value.runner_id == "r1"
+
+
 def test_a_runner_paused_at_the_hub_is_braked() -> None:
-    row = RunnerRow("r1", workspace_id="ws", at=_HUB_INSTANT)
+    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+    row.registered_at = _HUB_INSTANT
     row.paused = True
 
     with pytest.raises(ClaimDeniedPaused) as refused:
@@ -3504,7 +3522,8 @@ def test_a_runner_paused_at_the_hub_is_braked() -> None:
 
 
 def test_a_registered_runner_is_not_braked() -> None:
-    row = RunnerRow("r1", workspace_id="ws", at=_HUB_INSTANT)
+    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+    row.registered_at = _HUB_INSTANT
 
     assert refuse_braked_runner(row, runner_id="r1") is row
 
@@ -3943,3 +3962,156 @@ def test_chunk_findings_carry_each_exited_finding_exit(client: TestClient) -> No
         ("not-a-finding", "withdrawn"),
         ("superseded", "withdrawn"),
     ]
+
+
+# --- runner identity: hub-minted ids, bearer tokens ---------------------------
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _add(client: TestClient, name: str = "r-claude") -> dict:
+    added = TestClient(client.app).post("/api/runners", json={"name": name})
+    assert added.status_code == 201, added.text
+    return added.json()
+
+
+def test_add_mints_a_runner_id_and_token_and_leaves_the_runner_never_connected(client: TestClient) -> None:
+    added = _add(client, "  r-claude  ")
+
+    assert added["runner_id"].startswith("rn_") and len(added["runner_id"]) == len("rn_") + 26
+    assert added["runner_name"] == "r-claude"
+    assert added["token"]
+    readback = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"]))
+    assert readback.status_code == 409
+    assert readback.json() == {"detail": f"runner {added['runner_id']} has not registered"}
+
+
+def test_add_refuses_a_blank_name_422(client: TestClient) -> None:
+    assert TestClient(client.app).post("/api/runners", json={"name": "   "}).status_code == 422
+
+
+def test_two_runners_added_under_one_name_get_distinct_ids(client: TestClient) -> None:
+    first, second = _add(client, "twin"), _add(client, "twin")
+
+    assert first["runner_id"] != second["runner_id"]
+    assert first["token"] != second["token"]
+
+
+def test_registration_takes_the_runner_from_its_token_and_records_its_name(client: TestClient) -> None:
+    added = _add(client, "initial")
+
+    first = client.post(
+        "/api/fleet/runners",
+        json={"runner_id": "someone-else", "name": "r-claude", "workspace_id": "ws"},
+        headers=_bearer(added["token"]),
+    )
+    renamed = client.post(
+        "/api/fleet/runners", json={"name": "r-renamed", "workspace_id": "ws"}, headers=_bearer(added["token"])
+    )
+    kept = client.post("/api/fleet/runners", json={"name": "  ", "workspace_id": "ws"}, headers=_bearer(added["token"]))
+
+    assert first.status_code == 201
+    assert first.json() == {"runner_id": added["runner_id"], "runner_name": "r-claude", "first_registration": True}
+    assert renamed.json() == {"runner_id": added["runner_id"], "runner_name": "r-renamed", "first_registration": False}
+    assert kept.json()["runner_name"] == "r-renamed"
+    view = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"])).json()
+    assert (view["runner_id"], view["runner_name"]) == (added["runner_id"], "r-renamed")
+
+
+def test_a_fleet_call_without_a_token_the_hub_issued_is_refused_401(client: TestClient) -> None:
+    plain = TestClient(client.app)
+
+    tokenless = plain.post("/api/fleet/runners", json={"workspace_id": "ws"})
+    unknown = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer("never-issued"))
+
+    assert (tokenless.status_code, tokenless.json()) == (401, {"detail": "missing or malformed Authorization header"})
+    assert (unknown.status_code, unknown.json()) == (
+        401,
+        {"detail": "bearer token does not resolve to a known runner"},
+    )
+
+
+def test_a_runner_reads_only_its_own_registry_row(client: TestClient) -> None:
+    register_runner(client.app.state.service, "r1")  # type: ignore[attr-defined]
+    register_runner(client.app.state.service, "r2")  # type: ignore[attr-defined]
+
+    other = client.get("/api/fleet/runners/r2", headers=_bearer(runner_token("r1")))
+
+    assert other.status_code == 403
+    assert other.json() == {"detail": "token belongs to runner 'r1', not 'r2'"}
+
+
+def test_identity_answers_a_current_token_with_its_runner_and_no_side_effects(client: TestClient) -> None:
+    added = _add(client, "r-claude")
+
+    answer = TestClient(client.app).get("/api/fleet/identity", headers=_bearer(added["token"]))
+
+    assert answer.status_code == 200
+    assert answer.json() == {"runner_id": added["runner_id"], "runner_name": "r-claude"}
+    still = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"]))
+    assert still.status_code == 409  # the identity read registered nothing
+
+
+def test_identity_tells_a_missing_an_unknown_a_revoked_and_a_retired_token_apart(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    rotated, retired = _add(client, "rotated"), _add(client, "retired")
+    fresh = plain.post(f"/api/runners/{rotated['runner_id']}/enrollments")
+    assert fresh.status_code == 201 and fresh.json()["runner_id"] == rotated["runner_id"]
+    assert plain.post(f"/_seed/runners/{retired['runner_id']}/retire", json={}).status_code == 200
+
+    def refusal(headers: dict[str, str]) -> tuple[int, dict]:
+        resp = plain.get("/api/fleet/identity", headers=headers)
+        return resp.status_code, resp.json()
+
+    assert refusal({}) == (401, {"reason": "missing", "runner_id": None})
+    assert refusal(_bearer("never-issued")) == (401, {"reason": "unknown", "runner_id": None})
+    assert refusal(_bearer(rotated["token"])) == (401, {"reason": "revoked", "runner_id": rotated["runner_id"]})
+    assert refusal(_bearer(retired["token"])) == (401, {"reason": "retired", "runner_id": retired["runner_id"]})
+    assert refusal(_bearer(fresh.json()["token"]))[0] == 200
+
+
+def test_a_revoked_token_is_refused_on_every_fleet_call(client: TestClient) -> None:
+    added = _add(client)
+    assert TestClient(client.app).post(f"/_seed/runners/{added['runner_id']}/token-revocations").status_code == 200
+
+    refused = client.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(added["token"]))
+
+    assert (refused.status_code, refused.json()) == (401, {"detail": "bearer token has been revoked"})
+
+
+def test_the_seed_pause_brakes_a_runner_until_released_and_refuses_an_id_never_added(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    register_runner(client.app.state.service, "r1")  # type: ignore[attr-defined]
+    plain = TestClient(client.app)
+
+    assert plain.post("/_seed/runners/r1/pause").json() == {"paused": True, "runner_id": "r1"}
+    braked = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    assert (braked.status_code, braked.json()["detail"]) == (403, "runner is paused at the hub")
+    assert plain.post("/_seed/runners/r1/pause", params={"paused": "false"}).json()["paused"] is False
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+
+    unknown = plain.post("/_seed/runners/rn_never_added/pause")
+    assert (unknown.status_code, unknown.json()) == (404, {"detail": "unknown runner rn_never_added"})
+
+
+def test_enrolling_a_retired_or_unknown_runner_is_refused(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    retired = _add(client)
+    plain.post(f"/_seed/runners/{retired['runner_id']}/retire", json={})
+
+    assert plain.post(f"/api/runners/{retired['runner_id']}/enrollments").status_code == 409
+    assert plain.post("/api/runners/rn_unknown/enrollments").status_code == 404
+
+
+def test_a_hub_reset_leaves_every_token_a_runner_holds_unknown(client: TestClient) -> None:
+    added = _add(client)
+    plain = TestClient(client.app)
+
+    plain.post("/_seed/reset")
+
+    assert plain.get("/api/fleet/identity", headers=_bearer(added["token"])).json() == {
+        "reason": "unknown",
+        "runner_id": None,
+    }

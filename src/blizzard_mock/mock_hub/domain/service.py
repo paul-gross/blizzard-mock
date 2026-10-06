@@ -8,6 +8,8 @@ are consulted here; transport-edge levers live in the middleware.
 from __future__ import annotations
 
 import json
+import random
+import secrets
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -16,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from blizzard_mock.clock import Clock
+from blizzard_mock.ids import RUNNER_PREFIX, mint
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
@@ -50,6 +53,7 @@ from blizzard_mock.mock_hub.domain.state import (
     IHubState,
     ReportedRunnerFacts,
     RunnerCapability,
+    RunnerRow,
     ScopeRow,
     SubscriptionUsageMiss,
     refuse_braked_runner,
@@ -80,8 +84,12 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteClaimResponse,
     RouteTokenRekeyResponse,
     RouteView,
+    RunnerAddResponse,
     RunnerCapabilityView,
+    RunnerEnrollmentResponse,
     RunnerFactAck,
+    RunnerIdentityView,
+    RunnerRegistrationResponse,
     RunnerView,
     ScopeView,
     SubscriptionUsageView,
@@ -103,6 +111,15 @@ USAGE_RECORDED = "usage.recorded"
 EVENT_RECORDED = "event.recorded"
 EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED = "external_subscription_usage.sampled"
 EXTERNAL_SUBSCRIPTION_USAGE_MISSED = "external_subscription_usage.missed"
+
+#: The runner a ``conflicting_fact`` lever names when its payload names none — never one this hub added.
+OTHER_RUNNER_ID = "rn_00000000000000000000000000"
+
+#: The identity verdict's refusal reasons — restated from the real ``RunnerTokenRefusalReason``.
+TOKEN_MISSING = "missing"
+TOKEN_UNKNOWN = "unknown"
+TOKEN_REVOKED = "revoked"
+TOKEN_RETIRED = "retired"
 
 #: The one miss reason surfaced as a per-slug `condition` — restated from the real hub, not imported.
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
@@ -251,10 +268,42 @@ class SystemArtifactNotFound(Exception):
 
 
 class UnresolvableRunner(Exception):
-    """The matched fleet peek's caller named no ``runner_id``, or one no registration
-    knows — mirrors the real hub's ``401`` for an
-    unresolvable principal, raised in every mode the mock supports (the mock carries no
-    ``warn``/``enforce`` toggle at all, so this is the one check unconditionally on)."""
+    """A fleet call's bearer token names no runner — absent, revoked, or never issued here.
+    Mirrors the real fleet gate's ``401``; there is no tokenless fleet call."""
+
+
+class RunnerTokenRefused(Exception):
+    """The identity verdict refused a bearer token — ``reason`` is one of the ``TOKEN_*``
+    reasons, and ``runner_id`` names the runner a revoked or retired token was issued to."""
+
+    def __init__(self, reason: str, *, runner_id: str | None = None) -> None:
+        super().__init__(f"runner token refused: {reason}")
+        self.reason = reason
+        self.runner_id = runner_id
+
+
+class UnknownRunner(Exception):
+    """No runner with that id was ever added here."""
+
+    def __init__(self, runner_id: str) -> None:
+        super().__init__(f"unknown runner {runner_id}")
+        self.runner_id = runner_id
+
+
+class RunnerNeverConnected(Exception):
+    """A read of a runner's declarative state found it added but never registered."""
+
+    def __init__(self, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} has not registered")
+        self.runner_id = runner_id
+
+
+class RunnerRetired(Exception):
+    """A retired runner's token cannot be rotated — reinstating it is the one way back."""
+
+    def __init__(self, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} is retired")
+        self.runner_id = runner_id
 
 
 class DependencyUnmet(Exception):
@@ -280,10 +329,14 @@ class ClaimIncompatible(Exception):
 class MockHubService:
     """The composition-root-wired service every mock-hub route delegates to."""
 
-    def __init__(self, state: IHubState, levers: ILeverStore, clock: Clock) -> None:
+    def __init__(
+        self, state: IHubState, levers: ILeverStore, clock: Clock, *, rng: random.Random | None = None
+    ) -> None:
         self._state = state
         self._levers = levers
         self._clock = clock
+        #: The random tail of every minted runner id — system-random unless a test pins it.
+        self._rng = rng or random.Random()
         #: Per-runner fact high-water mark — a seq at/under this mark is
         #: re-acked as ``already_applied`` rather than re-applied.
         self._fact_high_water: dict[str, int] = {}
@@ -409,16 +462,12 @@ class MockHubService:
             return None
         return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
-    def peek_matched(
-        self, *, runner_id: str | None, capabilities: Sequence[RunnerCapability], policy: str
-    ) -> QueuePeekResponse:
+    def peek_matched(self, *, capabilities: Sequence[RunnerCapability], policy: str) -> QueuePeekResponse:
         """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
         flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
         blocked, policy applied to both the capability and blocked-dependency dimensions before
-        selection. ``runner_id`` stands in for the real verb's authenticated principal; naming
-        none raises :class:`UnresolvableRunner`, the mock's ``401`` in every mode."""
-        if not runner_id or self._state.get_runner(runner_id) is None:
-            raise UnresolvableRunner(runner_id or "")
+        selection. Like the real verb it answers any resolved principal, registered or not — the
+        fleet router has already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         for position, chunk in enumerate(ready):
@@ -503,9 +552,10 @@ class MockHubService:
             conflict = self._levers.find(HubLever.CONFLICTING_FACT.value, chunk_id)
             if conflict is not None:
                 self._levers.consume(conflict)
-                runner_id = str(conflict.payload.get("runner_id", "other-runner"))
+                runner_id = str(conflict.payload.get("runner_id", OTHER_RUNNER_ID))
             route = RouteView(
                 runner_id=runner_id,
+                runner_name=self._runner_name(runner_id),
                 workspace_id=chunk.route_workspace_id or "",
                 environment_ids=chunk.route_environment_ids,
             )
@@ -567,7 +617,7 @@ class MockHubService:
                 conflict = self._levers.find(HubLever.CONFLICTING_FACT.value, chunk_id)
                 if conflict is not None:
                     self._levers.consume(conflict)
-                    route_runner_id = str(conflict.payload.get("runner_id", "other-runner"))
+                    route_runner_id = str(conflict.payload.get("runner_id", OTHER_RUNNER_ID))
             views.append(
                 ChunkStatusView(
                     chunk_id=chunk.chunk_id,
@@ -1006,10 +1056,71 @@ class MockHubService:
 
     # -- registry ----------------------------------------------------------
 
+    def add_runner(self, *, name: str, runner_id: str | None = None, token: str | None = None) -> RunnerAddResponse:
+        """Add a runner under the initial ``name``, never connected — the hub mints its id and
+        bearer token together (``POST /api/runners``). ``runner_id``/``token`` let a scenario
+        pin either instead; ids are opaque, so a literal one is as good as a minted one."""
+        added_id = runner_id or mint(RUNNER_PREFIX, self._clock, self._rng)
+        issued = token or f"mock-runner-token-{secrets.token_urlsafe(18)}"
+        self._state.add_runner(RunnerRow(added_id, name=name, added_at=self._clock.now()), token=issued)
+        return RunnerAddResponse(runner_id=added_id, runner_name=name, token=issued)
+
+    def enroll(self, runner_id: str) -> RunnerEnrollmentResponse:
+        """Rotate the runner's bearer token — the one it held until now is revoked."""
+        row = self._added(runner_id)
+        if row.retired_at is not None:
+            raise RunnerRetired(runner_id)
+        token = f"mock-runner-token-{secrets.token_urlsafe(18)}"
+        self._state.replace_token(runner_id, token=token)
+        return RunnerEnrollmentResponse(runner_id=runner_id, token=token)
+
+    def revoke_token(self, runner_id: str) -> None:
+        """Revoke the runner's bearer token — it stays added and must be enrolled afresh."""
+        self._state.replace_token(self._added(runner_id).runner_id, token=None)
+
+    def retire(self, runner_id: str, *, by: str = "operator") -> None:
+        """Retire the runner, revoking its token in the same pass, as the real hub does."""
+        row = self._added(runner_id)
+        row.retired_at = self._clock.now()
+        row.retired_by = by
+        self._state.replace_token(runner_id, token=None)
+
+    def identity(self, token: str | None) -> RunnerIdentityView:
+        """Whom ``token`` names, or :class:`RunnerTokenRefused` saying why not — the real
+        ``refuse_runner_token`` ladder: a token issued to a runner retired now answers
+        ``retired`` whether or not it is still current, a revoked one ``revoked``, any other
+        ``unknown``. Reads only: no registration, no liveness."""
+        if token is None:
+            raise RunnerTokenRefused(TOKEN_MISSING)
+        current = self._state.runner_for_token(token)
+        if current is not None:
+            if current.retired_at is not None:
+                raise RunnerTokenRefused(TOKEN_RETIRED, runner_id=current.runner_id)
+            return RunnerIdentityView(runner_id=current.runner_id, runner_name=current.name)
+        revoked_id = self._state.revoked_token_runner_id(token)
+        revoked_for = self._state.get_runner(revoked_id) if revoked_id is not None else None
+        if revoked_for is None:
+            raise RunnerTokenRefused(TOKEN_UNKNOWN)
+        reason = TOKEN_RETIRED if revoked_for.retired_at is not None else TOKEN_REVOKED
+        raise RunnerTokenRefused(reason, runner_id=revoked_for.runner_id)
+
+    def principal(self, token: str | None) -> str:
+        """The id of the runner ``token`` is the current token of — the one identity a fleet call
+        carries — else :class:`UnresolvableRunner` with the real gate's reason."""
+        if token is None:
+            raise UnresolvableRunner("missing or malformed Authorization header")
+        row = self._state.runner_for_token(token)
+        if row is not None:
+            return row.runner_id
+        if self._state.revoked_token_runner_id(token) is not None:
+            raise UnresolvableRunner("bearer token has been revoked")
+        raise UnresolvableRunner("bearer token does not resolve to a known runner")
+
     def register(
         self,
         runner_id: str,
         *,
+        name: str | None = None,
         workspace_id: str,
         url: str | None = None,
         redirect_uris: tuple[str, ...] = (),
@@ -1017,9 +1128,12 @@ class MockHubService:
         capabilities: tuple[RunnerCapability, ...] = (),
         subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
-    ) -> bool:
-        return self._state.upsert_runner(
+    ) -> RunnerRegistrationResponse:
+        """Register the runner ``runner_id`` names — always the caller's own, resolved from its
+        token. A blank or absent ``name`` keeps the held one."""
+        first = self._state.record_registration(
             runner_id,
+            name=(name or "").strip() or None,
             workspace_id=workspace_id,
             at=self._clock.now(),
             url=url,
@@ -1029,19 +1143,28 @@ class MockHubService:
             declared_subscriptions=subscriptions,
             gates=gates,
         )
+        return RunnerRegistrationResponse(
+            runner_id=runner_id, runner_name=self._added(runner_id).name, first_registration=first
+        )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
+        """The runner's own declarative state, ``None`` when no such runner was added;
+        :class:`RunnerNeverConnected` before its first registration."""
         row = self._state.get_runner(runner_id)
         if row is None:
             return None
+        registered_at = row.registered_at
+        if registered_at is None:
+            raise RunnerNeverConnected(runner_id)
         # Reported facts are merged in at the read, so one that arrived before this
         # registration surfaces the moment the registration lands.
         reported = self._state.reported_facts(runner_id)
         return RunnerView(
             runner_id=row.runner_id,
-            workspace_id=row.workspace_id,
-            registered_at=row.registered_at.isoformat(),
-            last_seen_at=row.last_seen_at.isoformat(),
+            runner_name=row.name,
+            workspace_id=row.workspace_id or "",
+            registered_at=registered_at.isoformat(),
+            last_seen_at=(row.last_seen_at or registered_at).isoformat(),
             online=True,
             hub_paused=row.paused,
             locally_paused=reported.locally_paused,
@@ -1203,10 +1326,19 @@ class MockHubService:
             return False
         return sample is None or sample.sampled_at is None or miss.missed_at > datetime.fromisoformat(sample.sampled_at)
 
-    def set_paused(self, runner_id: str, paused: bool) -> None:
+    def _added(self, runner_id: str) -> RunnerRow:
         row = self._state.get_runner(runner_id)
-        if row is not None:
-            row.paused = paused
+        if row is None:
+            raise UnknownRunner(runner_id)
+        return row
+
+    def _runner_name(self, runner_id: str | None) -> str | None:
+        """The registry's current name for ``runner_id``, ``None`` when it holds no such runner."""
+        row = self._state.get_runner(runner_id) if runner_id else None
+        return row.name if row is not None else None
+
+    def set_paused(self, runner_id: str, paused: bool) -> None:
+        self._added(runner_id).paused = paused
 
     def pop_drop_ack(self, chunk_id: str) -> bool:
         """True (consuming the lever) if ``drop_ack`` is armed for the chunk.
@@ -1283,6 +1415,7 @@ class MockHubService:
             session_id=question.session_id,
             harness_id=question.harness_id,
             runner_id=question.runner_id,
+            runner_name=self._runner_name(question.runner_id),
             epoch=question.epoch,
             question=question.question,
             options=list(question.options),

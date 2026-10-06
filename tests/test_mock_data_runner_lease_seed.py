@@ -19,7 +19,6 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 def test_compose_lease_always_lands_both_rows() -> None:
     seeded = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=2,
         graph_id="gr_1",
         node_id="build",
@@ -36,7 +35,6 @@ def test_compose_lease_always_lands_both_rows() -> None:
 def test_compose_lease_shares_one_minted_lease_id_across_both_rows() -> None:
     seeded = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=1,
         graph_id="gr_1",
         node_id="build",
@@ -55,7 +53,6 @@ def test_compose_lease_shares_one_minted_lease_id_across_both_rows() -> None:
 def test_compose_lease_lands_null_pid_session_before_any_spawn_return() -> None:
     seeded = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=1,
         graph_id="gr_1",
         node_id="build",
@@ -74,7 +71,6 @@ def test_compose_lease_lands_null_pid_session_before_any_spawn_return() -> None:
 def test_compose_lease_lands_the_supplied_node_context() -> None:
     seeded = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=4,
         graph_id="gr_1",
         node_id="deliver",
@@ -94,7 +90,6 @@ def test_compose_lease_lands_the_supplied_node_context() -> None:
 def test_compose_lease_same_seed_mints_the_same_id() -> None:
     first = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=1,
         graph_id="gr_1",
         node_id="build",
@@ -106,7 +101,6 @@ def test_compose_lease_same_seed_mints_the_same_id() -> None:
     )
     second = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=1,
         graph_id="gr_1",
         node_id="build",
@@ -124,7 +118,6 @@ def test_compose_lease_accepts_a_supplied_session_id_with_no_pid() -> None:
     ``pid``/``process_start_time`` still land ``NULL`` even when ``session_id`` is given."""
     seeded = compose_lease(
         chunk_id="ch_1",
-        runner_id="r-1",
         epoch=1,
         graph_id="gr_1",
         node_id="build",

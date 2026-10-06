@@ -42,9 +42,9 @@ class RegisterBody(BaseModel):
 
 class PeekMatchedBody(BaseModel):
     """POST /_drive/peek-matched — the matched fleet peek: ``POST {hub}/api/fleet/queue/peek``
-    under this driver's identity, falling back to the legacy ``GET`` on a ``401``.
-    ``capabilities`` is the same raw snapshot shape as ``RegisterBody``'s. ``enrolled=False``
-    drives the tokenless case: no identity presented, so the matched verb refuses."""
+    under this driver's bearer token. ``capabilities`` is the same raw snapshot shape as
+    ``RegisterBody``'s. ``enrolled=False`` drives the tokenless case: no token presented, so
+    the hub refuses it ``401``."""
 
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
     policy: str = "pass-over"

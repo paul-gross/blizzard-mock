@@ -24,6 +24,7 @@ from blizzard_mock.mock_data.domain.hub.chunk_seed import (
     PAUSED,
     READY,
 )
+from blizzard_mock.mock_data.domain.hub.runner_registration_seed import SEED_RUNNER_NAME
 from blizzard_mock.mock_data.domain.hub.scenario_seed import ScenarioCompositionError, compose_board_scenario
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -170,6 +171,48 @@ def test_every_seeded_route_claims_a_workspace_its_own_runner_is_registered_unde
         assert route.values["workspace_id"] == registrations[runner_id]
 
 
+# --- runner roster -----------------------------------------------------------
+
+
+def test_every_registered_runner_carries_a_hub_minted_id_and_a_name() -> None:
+    registrations = _rows_for(_compose(6, stress=True).rows, "runner_registrations")
+    assert registrations
+    for row in registrations:
+        assert str(row.values["runner_id"]).startswith("rn_")
+        assert len(str(row.values["runner_id"])) == len("rn_") + 26
+        assert row.values["name"]
+        assert row.values["added_at"] == _NOW
+
+
+def test_two_registered_runners_share_a_name_under_distinct_ids() -> None:
+    registrations = _rows_for(_compose(1).rows, "runner_registrations")
+    ids_by_name: dict[object, set[object]] = {}
+    for row in registrations:
+        if row.values["registered_at"] is not None:
+            ids_by_name.setdefault(row.values["name"], set()).add(row.values["runner_id"])
+    assert [len(ids) for ids in ids_by_name.values() if len(ids) > 1] == [2]
+
+
+def test_one_runner_is_added_but_never_connected() -> None:
+    scenario = _compose(6)
+    never = [row for row in _rows_for(scenario.rows, "runner_registrations") if row.values["registered_at"] is None]
+    assert len(never) == 1
+    assert (never[0].values["workspace_id"], never[0].values["last_seen_at"]) == (None, None)
+    attributed = {row.values["runner_id"] for row in _rows_for(scenario.rows, "lease_facts")}
+    assert never[0].values["runner_id"] not in attributed
+    assert scenario.census is not None
+    assert never[0].values["runner_id"] in scenario.census.runner_ids
+
+
+def test_the_registration_event_names_the_runner_by_name_and_carries_its_id() -> None:
+    rows = _compose(6).rows
+    names = {row.values["runner_id"]: row.values["name"] for row in _rows_for(rows, "runner_registrations")}
+    (event,) = [row for row in _rows_for(rows, "event_log") if row.values["kind"] == "runner.registered"]
+    runner_id = event.values["runner_id"]
+    assert str(runner_id).startswith("rn_")
+    assert event.values["message"] == f"runner {names[runner_id]!r} registered"
+
+
 # --- ceiling-paused runner ----------------------------------------------------
 
 
@@ -194,11 +237,11 @@ def test_stress_off_by_default() -> None:
     assert scenario.census.chunk_count == 6
 
 
-def test_stress_adds_a_long_identity_runner() -> None:
+def test_stress_adds_a_long_named_runner() -> None:
     scenario = _compose(6, stress=True)
     registration_rows = _rows_for(scenario.rows, "runner_registrations")
-    long_ids = [row.values["runner_id"] for row in registration_rows if len(str(row.values["runner_id"])) > 100]
-    assert long_ids, "expected a deliberately long runner_id among the registrations"
+    long_names = [row.values["name"] for row in registration_rows if len(str(row.values["name"])) > 100]
+    assert long_names, "expected a deliberately long runner name among the registrations"
 
 
 def test_stress_adds_a_waiting_on_human_chunk() -> None:
@@ -284,6 +327,7 @@ def test_pinned_runner_id_attributes_every_chunk_to_one_runner() -> None:
     registrations = _rows_for(scenario.rows, "runner_registrations")
     assert len(registrations) == 1
     assert registrations[0].values["runner_id"] == "runner-pin"
+    assert registrations[0].values["name"] == SEED_RUNNER_NAME
 
 
 def test_register_runner_false_omits_the_pinned_runners_registration_row() -> None:

@@ -32,6 +32,7 @@ from blizzard_mock.mock_hub.app import create_app as create_hub_app
 from blizzard_mock.mock_runner.app import create_app as create_runner_app
 from blizzard_mock.mock_runner.domain.gateway import IHubGateway
 from blizzard_mock.mock_runner.internal.httpx_gateway import HttpxHubGateway
+from tests.fleet_client import FleetClient
 
 # --------------------------------------------------------------------------- #
 # harness engine: where the SessionEnd hook fires
@@ -172,7 +173,8 @@ _HUB_SPEC: dict[str, Any] = {
 
 @pytest.fixture
 def hub_client() -> TestClient:
-    return TestClient(create_hub_app(clock=RunnerFixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
+    """Fleet reads carry a runner's bearer token, the way the real hub requires."""
+    return FleetClient(create_hub_app(clock=RunnerFixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
 
 
 def test_a_chunk_spec_naming_neither_default_expresses_no_preference(hub_client: TestClient) -> None:
@@ -237,7 +239,8 @@ def test_the_lease_report_stamps_the_held_route_token_even_with_omit_route_token
     route token even while a route-token lever is armed for the driven completion."""
     clock = RunnerFixedClock(datetime(2026, 7, 13, tzinfo=UTC))
     hub = TestClient(create_hub_app(clock=clock))
-    gateway = _RecordingGateway(HttpxHubGateway(hub))
+    added = hub.post("/api/runners", json={"name": "runner-mock"}).json()
+    gateway = _RecordingGateway(HttpxHubGateway(hub, token=added["token"]))
     runner = TestClient(create_runner_app(gateway=cast(IHubGateway, gateway), clock=clock))
 
     chunk_id = hub.post("/_seed/chunk", json=_HUB_SPEC).json()["chunk_id"]

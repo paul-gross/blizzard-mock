@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
 from random import Random
 
 from blizzard_mock.clock import Clock
@@ -40,6 +39,7 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import (
 )
 from blizzard_mock.mock_data.domain.hub.question_seed import compose_question
 from blizzard_mock.mock_data.domain.hub.runner_pause_seed import compose_runner_pause
+from blizzard_mock.mock_data.domain.hub.runner_registration_seed import SEED_RUNNER_NAME, compose_runner_registration
 from blizzard_mock.mock_data.domain.hub.usage_seed import RESUME, SPAWN, compose_usage
 
 #: The nine statuses, board-interesting-first — the priority list
@@ -62,16 +62,19 @@ DEFAULT_CHUNKS = 6
 
 _USAGE_MODEL = "claude-mock-scenario"
 _CEILING_PAUSE_REASON = "spend ceiling $50.00 reached over the trailing 24h (spend $52.30)"
-_DEFAULT_EVENT_RUNNER_ID = "mock-data"
 
 #: The workspace a pinned runner's chunks route under when this composer also mints
 #: its registration; ``register_runner=False`` leaves the standing one authoritative.
 _PINNED_WORKSPACE_ID = "workspace-fleet"
 
+#: The unpinned roster's two chunkless runners: a same-name twin and one added but never connected.
+_TWIN_WORKSPACE_ID = "workspace-twin"
+_NEVER_CONNECTED_RUNNER_NAME = "runner-never-connected"
+
 #: Deliberately long strings for ``--stress``'s overflow-UI extremes — long
 #: enough to blow past any reasonable column/badge width.
-_STRESS_LONG_RUNNER_ID = "runner-" + (
-    "-".join(["extremely", "long", "runner", "identity", "for", "narrow", "viewport", "checks"]) * 3
+_STRESS_LONG_RUNNER_NAME = "runner-" + (
+    "-".join(["extremely", "long", "runner", "name", "for", "narrow", "viewport", "checks"]) * 3
 )
 _STRESS_LONG_NODE_NAME = "custom-" + (
     "-".join(["a", "very", "long", "graph", "node", "name", "for", "overflow", "checks"]) * 3
@@ -99,8 +102,7 @@ class BoardCensus:
 
     chunk_entries: list[ChunkCensusEntry]
     status_counts: Mapping[str, int]
-    #: The distinct runner ids this board's chunks are attributed to — one entry per
-    #: runner, not one per chunk.
+    #: Every runner this board names, chunkless ones included — one entry per runner, not one per chunk.
     runner_ids: list[str]
     usage_fact_count: int
     cost_partial_count: int
@@ -131,12 +133,19 @@ class BoardScenario:
     census: BoardCensus | None = None
 
 
-def _runner_registration_row(runner_id: str, workspace_id: str, now: datetime) -> FactRow:
-    """The same ``runner_registrations`` row shape ``create runner`` builds inline."""
-    return FactRow(
-        table="runner_registrations",
-        values={"runner_id": runner_id, "workspace_id": workspace_id, "registered_at": now, "last_seen_at": now},
-    )
+def _compose_roster_extras(*, twin_name: str, clock: Clock, rng: Random) -> tuple[list[FactRow], list[str]]:
+    """The unpinned roster's two chunkless runners — a registered one sharing
+    ``twin_name`` under its own id, and one added but never connected."""
+    now = clock.now()
+    twin_id = ids.mint(ids.RUNNER_PREFIX, clock, rng)
+    never_connected_id = ids.mint(ids.RUNNER_PREFIX, clock, rng)
+    rows = [
+        compose_runner_registration(runner_id=twin_id, name=twin_name, added_at=now, workspace_id=_TWIN_WORKSPACE_ID),
+        compose_runner_registration(
+            runner_id=never_connected_id, name=_NEVER_CONNECTED_RUNNER_NAME, added_at=now, workspace_id=None
+        ),
+    ]
+    return rows, [twin_id, never_connected_id]
 
 
 def _status_node_id(status: str, graph: GraphContext) -> str:
@@ -178,13 +187,17 @@ class _StressExtras:
 
 
 def _compose_stress_extras(*, graph: GraphContext, clock: Clock, rng: Random) -> _StressExtras:
-    """The five ``--stress`` extremes: a long-identity runner, a chunk landed on a
+    """The five ``--stress`` extremes: a long-named runner, a chunk landed on a
     long custom node name carrying a deliberately long artifact name, and one
     ``waiting_on_human`` chunk carrying two extra independent question trails."""
     rows: list[FactRow] = []
     now = clock.now()
-    long_runner_id = _STRESS_LONG_RUNNER_ID
-    rows.append(_runner_registration_row(long_runner_id, "workspace-stress", now))
+    long_runner_id = ids.mint(ids.RUNNER_PREFIX, clock, rng)
+    rows.append(
+        compose_runner_registration(
+            runner_id=long_runner_id, name=_STRESS_LONG_RUNNER_NAME, added_at=now, workspace_id="workspace-stress"
+        )
+    )
 
     waiting_seed = compose_chunk(status=WAITING_ON_HUMAN, graph=graph, clock=clock, rng=rng, runner_id=long_runner_id)
     rows.extend(waiting_seed.rows)
@@ -239,13 +252,14 @@ def compose_board_scenario(
     stress: bool = False,
     graph_name: str | None = None,
     runner_id: str | None = None,
+    runner_name: str = SEED_RUNNER_NAME,
     register_runner: bool = True,
 ) -> BoardScenario:
     """Compose one whole scenario board: a graph, ``chunks`` chunks spread across the
     nine statuses, a cost and artifact spread, a ceiling-paused runner, a runner per
-    chunk, a mixed event log, and the ``stress=True`` extremes. ``runner_id`` pins
-    every chunk to one runner; ``register_runner=False`` skips its registration row
-    when the composition root already found a live one. See ``mock_data/README.md``."""
+    chunk beside a same-name twin and a never-connected runner, a mixed event log, and
+    the ``stress=True`` extremes. ``runner_id`` pins every chunk to one runner, registered
+    under ``runner_name`` unless ``register_runner=False``. See ``mock_data/README.md``."""
     if chunks < 1:
         raise ScenarioCompositionError(f"--chunks must be at least 1, got {chunks}")
 
@@ -262,9 +276,11 @@ def compose_board_scenario(
     #: ``runner_ids``, which holds one entry per distinct runner.
     chunk_runner_ids: list[str] = []
     runner_workspaces: dict[str, str] = {}
+    runner_names: dict[str, str] = {}
     for i in range(chunks):
         status = STATUS_ORDER[i % len(STATUS_ORDER)]
-        chunk_runner_id = runner_id if pinned else f"runner-{i:02d}"
+        chunk_runner_id = runner_id if pinned else ids.mint(ids.RUNNER_PREFIX, clock, rng)
+        runner_names.setdefault(chunk_runner_id, runner_name if pinned else f"runner-{i:02d}")
         chunk_workspace_id = _PINNED_WORKSPACE_ID if pinned else f"workspace-{i:02d}"
         seeded_chunk = compose_chunk(
             status=status,
@@ -283,7 +299,15 @@ def compose_board_scenario(
     for rid, workspace_id in runner_workspaces.items():
         if not register_runner and rid == runner_id:
             continue  # the composition root already found a live registration for it
-        rows.append(_runner_registration_row(rid, workspace_id, now))
+        rows.append(
+            compose_runner_registration(runner_id=rid, name=runner_names[rid], added_at=now, workspace_id=workspace_id)
+        )
+    roster_extra_ids: list[str] = []
+    if not pinned:
+        extra_rows, roster_extra_ids = _compose_roster_extras(
+            twin_name=runner_names[chunk_runner_ids[0]], clock=clock, rng=rng
+        )
+        rows.extend(extra_rows)
 
     usage_fact_count = 0
     cost_partial_count = 0
@@ -384,7 +408,7 @@ def compose_board_scenario(
         compose_event(
             kind="runner.registered",
             severity=INFO,
-            message=f"runner {chunk_runner_ids[0]!r} registered",
+            message=f"runner {runner_names[chunk_runner_ids[0]]!r} registered",
             runner_id=chunk_runner_ids[0],
             recorded_at=now,
         )
@@ -405,7 +429,7 @@ def compose_board_scenario(
                 kind="chunk.escalated",
                 severity=CRITICAL,
                 message="chunk parked for human takeover",
-                runner_id=_DEFAULT_EVENT_RUNNER_ID,
+                runner_id=chunk_runner_ids[chunk_entries.index(needs_human_entry)],
                 chunk_id=needs_human_entry.chunk_id,
                 recorded_at=now,
             )
@@ -415,12 +439,12 @@ def compose_board_scenario(
             kind="scenario.seeded",
             severity=INFO,
             message=f"scenario board seeded {chunks} chunk(s)",
-            runner_id=_DEFAULT_EVENT_RUNNER_ID,
+            runner_id=None,
             recorded_at=now,
         )
     )
 
-    distinct_runner_ids = list(runner_workspaces.keys())
+    distinct_runner_ids = [*runner_workspaces.keys(), *roster_extra_ids]
     if stress:
         extras = _compose_stress_extras(graph=graph, clock=clock, rng=rng)
         rows.extend(extras.rows)

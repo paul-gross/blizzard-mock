@@ -21,7 +21,14 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
 | Control-API host | `--host` | `BZ_MOCK_RUNNER_HOST` | `127.0.0.1` |
 | Control-API port | `--port` | `BZ_MOCK_RUNNER_PORT` | `8431` |
 | Hub to drive | `--hub-url` | `BZ_HUB_URL` | `http://127.0.0.1:8421` |
-| Runner id | `--runner-id` | `BZ_MOCK_RUNNER_ID` | `runner-mock` |
+| Bearer token | `--token` | `BZ_HUB_TOKEN` | none — added at the hub on start |
+| Runner name | `--name` | `BZ_MOCK_RUNNER_NAME` | `runner-mock` |
+
+The token is the driver's only identity: every hub call presents it as
+`Authorization: Bearer`, and no request body names the runner. Started without one, the
+driver adds itself at the hub (`POST {hub}/api/runners` under its name) before serving, as
+`blizzard runner init` adds a runner that holds no token, and presents the minted token from
+then on. Its hub-minted id is learned from its first registration's reply.
 
 ## Surface
 
@@ -33,7 +40,7 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
   |-------|--------|
   | `POST /_drive/register` | `POST {hub}/api/fleet/runners` — join the fleet |
   | `POST /_drive/peek` | `GET {hub}/api/fleet/queue/peek` |
-  | `POST /_drive/peek-matched` `{capabilities?, policy?, enrolled?}` | `POST {hub}/api/fleet/queue/peek` under this driver's own identity, capabilities and policy asserted directly (an empty `capabilities` matches nothing, as on the real hub); falls back to the legacy `GET` on a `401` internally. `enrolled=false` presents no identity, driving the tokenless case the mock hub always refuses |
+  | `POST /_drive/peek-matched` `{capabilities?, policy?, enrolled?}` | `POST {hub}/api/fleet/queue/peek` under this driver's own identity, capabilities and policy asserted directly (an empty `capabilities` matches nothing, as on the real hub); a refusal is reported as is — like the real runner, the driver sends no other peek after it. `enrolled=false` presents no identity, driving the tokenless case the mock hub always refuses `401` |
   | `POST /_drive/claim` `{chunk_id}` | `POST {hub}/api/fleet/routes`; on success records the held lease and pushes a `lease.minted` fact via `POST {hub}/api/fleet/events` (advances the hub's fence, D-044), stamped with the claim's own route token |
   | `POST /_drive/claim-next` `{environment_ids?, strict?}` | Peeks, selects, and claims in one call — the mock's structural sibling of the real runner's own selection seam. `strict` (default `false`) reaches past a `blocked` head for the first unmarked entry; `true` holds at a `blocked` head and claims nothing |
   | `POST /_drive/complete` `{chunk_id, choice, artifacts?}` | Submits the held node-step's epoch-fenced completion; advances the held lease on `next`. `artifacts` (optional, default `[]`) are the submission's `produces:` artifacts (`SubmittedArtifact` dicts — `{name, kind, content, attached}`), letting a service test drive the hub's `produces_mode=enforce` backstop over the wire |

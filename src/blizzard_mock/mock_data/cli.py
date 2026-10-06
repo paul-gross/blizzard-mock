@@ -61,6 +61,7 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import (
 from blizzard_mock.mock_data.domain.hub.lease_seed import compose_epoch_owner_row, compose_lease_row
 from blizzard_mock.mock_data.domain.hub.question_seed import QuestionCompositionError, compose_question
 from blizzard_mock.mock_data.domain.hub.runner_pause_seed import RunnerPauseCompositionError, compose_runner_pause
+from blizzard_mock.mock_data.domain.hub.runner_registration_seed import SEED_RUNNER_NAME, compose_runner_registration
 from blizzard_mock.mock_data.domain.hub.runner_subscription_seed import (
     compose_declared_roster,
     compose_subscription_miss,
@@ -73,7 +74,7 @@ from blizzard_mock.mock_data.domain.hub.scenario_seed import (
 )
 from blizzard_mock.mock_data.domain.hub.usage_seed import KINDS as USAGE_KINDS
 from blizzard_mock.mock_data.domain.hub.usage_seed import UsageCompositionError, compose_usage
-from blizzard_mock.mock_data.domain.ids import seeded_rng
+from blizzard_mock.mock_data.domain.ids import SEED_RUNNER_ID, seeded_rng
 from blizzard_mock.mock_data.domain.runner.lease_seed import ESCALATED, ESCALATION_REASONS
 from blizzard_mock.mock_data.domain.runner.lease_seed import compose_lease as compose_runner_lease
 from blizzard_mock.mock_data.domain.runner.local_pause_seed import compose_local_pause
@@ -120,7 +121,7 @@ _COMPOSITION_ERRORS = (
 
 #: Fallback ``event_log.runner_id`` when ``create event`` gets
 #: neither ``--runner-id`` nor a ``--chunk`` whose lease history names one.
-_DEFAULT_EVENT_RUNNER_ID = "mock-data"
+_DEFAULT_EVENT_RUNNER_ID = SEED_RUNNER_ID
 
 #: Fixed clock instant any ``--seed``\ ed verb pins to, so two invocations at
 #: the same seed compose byte-identical timestamps and ids.
@@ -271,7 +272,7 @@ def _resolve_usage_defaults(
                 else str(require_column(newest, "runner_id", table="lease_facts"))
             )
     resolved_epoch = resolved_epoch if resolved_epoch is not None else 1
-    resolved_runner = resolved_runner if resolved_runner is not None else "runner-seed"
+    resolved_runner = resolved_runner if resolved_runner is not None else SEED_RUNNER_ID
 
     resolved_node = node_name
     if resolved_node is None:
@@ -335,7 +336,7 @@ def _resolve_artifact_defaults(
 
 
 def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_id: str | None) -> str | None:
-    """Default to the chunk's newest lease or mock-data runner.
+    """Default to the chunk's newest lease, else the seed runner.
 
     An explicit empty string selects a hub-authored row (null runner_id)."""
     if runner_id == "":
@@ -402,8 +403,15 @@ def create() -> None:
 @click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
-@click.option("--runner-id", "runner_id", default="runner-seed", help="The runner id.")
-@click.option("--workspace-id", "workspace_id", default="workspace-seed", help="The workspace binding.")
+@click.option("--runner-id", "runner_id", default=SEED_RUNNER_ID, help="The runner's hub-minted id.")
+@click.option("--name", "name", default=SEED_RUNNER_NAME, help="The runner's display name — not unique.")
+@click.option("--workspace-id", "workspace_id", default=None, help="The workspace binding (default: workspace-seed).")
+@click.option(
+    "--never-connected",
+    is_flag=True,
+    default=False,
+    help="Added but never registered — no workspace binding, first registration, or last contact.",
+)
 @click.option("--paused", is_flag=True, default=False, help="Also land a pause fact.")
 @click.option(
     "--subscription",
@@ -440,33 +448,41 @@ def create_runner(
     url: str | None,
     runtime_dir: str | None,
     runner_id: str,
-    workspace_id: str,
+    name: str,
+    workspace_id: str | None,
+    never_connected: bool,
     paused: bool,
     subscriptions: tuple[tuple[str, str, str], ...],
     samples: tuple[tuple[str, int], ...],
     misses: tuple[tuple[str, int, str], ...],
     declare_empty_roster: bool,
 ) -> None:
-    """Seed one registered runner into the hub's fleet registry.
+    """Seed one runner the hub added into its fleet registry — registered unless ``--never-connected``.
 
     With ``--paused``, also lands a pause fact. ``--subscription`` declares the roster
     on the same row; ``--sample``/``--miss`` land per-slug usage rows at a chosen age.
     """
     if subscriptions and declare_empty_roster:
         raise click.UsageError("--declare-empty-roster is redundant with --subscription, which already declares one")
+    if never_connected and workspace_id is not None:
+        raise click.UsageError("--workspace-id contradicts --never-connected — a runner binds one when it registers")
+    if never_connected and (subscriptions or declare_empty_roster):
+        flag = "--subscription" if subscriptions else "--declare-empty-roster"
+        raise click.UsageError(f"{flag} contradicts --never-connected — a runner declares its roster when it registers")
     _require_store("runner", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     now = SystemClock().now()
-    names_by_slug = {slug: name for slug, name, _provider in subscriptions}
-    registration_values: dict[str, object] = {
-        "runner_id": runner_id,
-        "workspace_id": workspace_id,
-        "registered_at": now,
-        "last_seen_at": now,
-    }
-    if subscriptions or declare_empty_roster:
-        registration_values["subscriptions"] = compose_declared_roster(subscriptions)
-    rows = [FactRow(table="runner_registrations", values=registration_values)]
+    names_by_slug = {slug: slug_name for slug, slug_name, _provider in subscriptions}
+    declared_roster = compose_declared_roster(subscriptions) if subscriptions or declare_empty_roster else None
+    rows = [
+        compose_runner_registration(
+            runner_id=runner_id,
+            name=name,
+            added_at=now,
+            workspace_id=None if never_connected else (workspace_id or "workspace-seed"),
+            subscriptions=declared_roster,
+        )
+    ]
     if paused:
         rows.append(
             FactRow(
@@ -497,7 +513,8 @@ def create_runner(
         service.seed(rows)
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"created runner {runner_id!r} in the hub store (paused={paused})")
+    connection = ", never connected" if never_connected else ""
+    click.echo(f"created runner {runner_id!r} named {name!r} in the hub store (paused={paused}{connection})")
 
 
 @create.command("graph")
@@ -539,7 +556,7 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
     help="The graph node the chunk's transition lands on (--status done: the node it lands from).",
 )
 @click.option("--work-ref", "work_refs", multiple=True, metavar="SOURCE#REF", help="A work ref to attach — repeatable.")
-@click.option("--runner-id", "runner_id", default="runner-seed", help="The runner id attributed to the chunk's facts.")
+@click.option("--runner-id", "runner_id", default=SEED_RUNNER_ID, help="The runner id attributed to the chunk's facts.")
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch attributed to the chunk's facts.")
 @click.option("--chunk-id", "chunk_id", default=None, help="Override the minted chunk id.")
 @click.option(
@@ -851,7 +868,12 @@ def create_usage(
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
 @click.option("--chunk", "chunk_id", required=True, help="The chunk to lease.")
-@click.option("--runner-id", "runner_id", required=True, help="The runner minting the lease.")
+@click.option(
+    "--runner-id",
+    "runner_id",
+    default=None,
+    help="The runner minting the lease (hub store only, and required there — a runner store's leases are all its own).",
+)
 @click.option("--epoch", "epoch", type=int, default=1, help="The fencing epoch.")
 @click.option(
     "--node",
@@ -883,7 +905,7 @@ def create_lease(
     url: str | None,
     runtime_dir: str | None,
     chunk_id: str,
-    runner_id: str,
+    runner_id: str | None,
     epoch: int,
     node_name: str | None,
     graph_id: str | None,
@@ -899,6 +921,11 @@ def create_lease(
     service = _seed_service(_resolve_url(store, url, runtime_dir))
 
     if store == "runner":
+        if runner_id is not None:
+            raise click.UsageError(
+                "--runner-id has no column on the runner store's leases (--store runner) — every lease there "
+                "is the store's own runner's; hub store only"
+            )
         resolved_node = node_name if node_name is not None else "build"
         resolved_graph_id = graph_id if graph_id is not None else "graph-seed"
         resolved_retries_max = retries_max if retries_max is not None else 3
@@ -906,7 +933,6 @@ def create_lease(
         rng = seeded_rng(seed)
         seeded = compose_runner_lease(
             chunk_id=chunk_id,
-            runner_id=runner_id,
             epoch=epoch,
             graph_id=resolved_graph_id,
             node_id=resolved_node,
@@ -920,10 +946,7 @@ def create_lease(
             service.seed(seeded.rows)
         except _COMPOSITION_ERRORS as exc:
             raise click.ClickException(str(exc)) from exc
-        click.echo(
-            f"created lease {seeded.lease_id!r} for chunk {chunk_id!r} (epoch={epoch}, runner_id={runner_id!r}) "
-            "in the runner store"
-        )
+        click.echo(f"created lease {seeded.lease_id!r} for chunk {chunk_id!r} (epoch={epoch}) in the runner store")
         return
 
     for flag, value in (("--node", node_name), ("--graph-id", graph_id), ("--retries-max", retries_max)):
@@ -931,6 +954,8 @@ def create_lease(
             raise click.UsageError(f"{flag} has no column on the hub's lease_facts (--store hub) — runner store only")
     if seed is not None:
         raise click.UsageError("--seed mints nothing on the hub's lease_facts (--store hub) — runner store only")
+    if runner_id is None:
+        raise click.UsageError("--runner-id is required with --store hub — lease_facts names the runner minting it")
     now = SystemClock().now()
     rows = [compose_lease_row(chunk_id=chunk_id, epoch=epoch, runner_id=runner_id, minted_at=now)]
     owner = compose_epoch_owner_row(chunk_id=chunk_id, epoch=epoch, runner_id=runner_id, recorded_at=now)
@@ -1071,7 +1096,7 @@ def create_bounce(
     help="Confirm the full resumed trail landed (requires --delivered; lands no additional fact row).",
 )
 @click.option("--node", "node_name", default=None, help="The node id the worker parked at.")
-@click.option("--runner-id", "runner_id", default="runner-seed", help="The runner holding the parked session.")
+@click.option("--runner-id", "runner_id", default=SEED_RUNNER_ID, help="The runner holding the parked session.")
 @click.option("--epoch", "epoch", type=int, default=1, help="The parked lease's fencing epoch.")
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
@@ -1306,7 +1331,8 @@ def create_garden_proposal(
     "--runner-id",
     "runner_id",
     default=None,
-    help="The reporting runner (default: --chunk's newest lease, else 'mock-data'; '' for a hub-authored row).",
+    help="The reporting runner (default: --chunk's newest lease, else the fixed seed runner's id; '' for a "
+    "hub-authored row).",
 )
 @click.option("--node", "node_name", default=None, help="The node name this event concerns, if any.")
 @click.option("--detail", "detail", default=None, help="Opaque JSON text, round-tripped only — must parse as JSON.")
@@ -1348,7 +1374,12 @@ def create_event(
 @click.option("--store", "store", type=_STORE_CHOICES, required=True, help="Which store to create into.")
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
-@click.option("--runner-id", "runner_id", required=True, help="The runner to pause.")
+@click.option(
+    "--runner-id",
+    "runner_id",
+    default=None,
+    help="The runner to pause (hub store only, and required there — a runner store's brake is its own runner's).",
+)
 @click.option(
     "--local", "local", is_flag=True, default=False, help="The runner's own local brake (runner_local_pause_facts)."
 )
@@ -1359,7 +1390,13 @@ def create_event(
     "--reason", "reason", default=None, help="Only valid with --local — runner_pause_facts has no reason column."
 )
 def create_runner_pause(
-    store: str, url: str | None, runtime_dir: str | None, runner_id: str, local: bool, fleet: bool, reason: str | None
+    store: str,
+    url: str | None,
+    runtime_dir: str | None,
+    runner_id: str | None,
+    local: bool,
+    fleet: bool,
+    reason: str | None,
 ) -> None:
     """Land one pause fact, engaged — exactly one of ``--local``/``--fleet`` is
     required. ``--fleet --reason`` fails loud (``runner_pause_facts`` has no
@@ -1373,16 +1410,24 @@ def create_runner_pause(
         raise click.UsageError("pass exactly one of --local or --fleet")
     if store == "runner" and fleet:
         raise click.UsageError("--fleet has no meaning against --store runner — pass --local")
+    if store == "runner" and runner_id is not None:
+        raise click.UsageError(
+            "--runner-id has no column on the runner store's local_pause_facts (--store runner) — the brake "
+            "there is the store's own runner's; hub store only"
+        )
+    if store == "hub" and runner_id is None:
+        raise click.UsageError("--runner-id is required with --store hub — the pause fact names the runner it brakes")
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     try:
-        if store == "runner":
-            row = compose_local_pause(runner_id=runner_id, reason=reason, set_at=SystemClock().now())
+        if runner_id is None:
+            row = compose_local_pause(reason=reason, set_at=SystemClock().now())
         else:
             row = compose_runner_pause(runner_id=runner_id, local=local, reason=reason, set_at=SystemClock().now())
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"created {'local' if local else 'fleet'} pause fact for runner {runner_id!r}")
+    subject = f"runner {runner_id!r}" if runner_id is not None else "the runner store's own runner"
+    click.echo(f"created {'local' if local else 'fleet'} pause fact for {subject}")
 
 
 @create.command("transcript-segment")
@@ -1494,8 +1539,9 @@ def scenario() -> None:
 def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress: bool, seed: int | None) -> None:
     """Seed one whole, ready-to-view board: a synthetic graph, ``--chunks``
     chunks spread across all nine derived statuses, a cost spread, an artifact
-    spread, a ceiling-paused runner, a runner per chunk, and a mixed-severity
-    event log. Always the hub store. Prints the store it wrote to and a census."""
+    spread, a ceiling-paused runner, a runner per chunk beside a same-name twin and a
+    never-connected runner, and a mixed-severity event log. Always the hub store.
+    Prints the store it wrote to and a census."""
     resolved_url = _resolve_url("hub", url, runtime_dir)
     service = _seed_service(resolved_url)
     clock = _seeded_clock(seed)
@@ -1530,13 +1576,14 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
     "--runner-dir",
     "runner_dir",
     default=None,
-    help="A runner runtime dir — reads its blizzard-runner.toml `db_url` (sugar) and `runner_id` (the pinned runner).",
+    help="A runner runtime dir — reads its blizzard-runner.toml `db_url` (sugar) and its store's registered "
+    "identity (the pinned runner).",
 )
 @click.option(
     "--runner-id",
     "runner_id",
     default=None,
-    help="The pinned runner id — required with --runner-url; read from --runner-dir's blizzard-runner.toml otherwise.",
+    help="The pinned runner's hub-minted id — required with --runner-url; read from --runner-dir's store otherwise.",
 )
 @click.option(
     "--chunks", "chunks", type=int, default=DEFAULT_CHUNKS, show_default=True, help="How many chunks to seed."
@@ -1564,8 +1611,8 @@ def scenario_fleet(
     escalation_reason: str,
     seed: int | None,
 ) -> None:
-    """Seed one coherent fleet: a scenario board in the hub store, mirrored into the
-    runner store under one pinned runner id (``domain/runner/scenario_seed.py``).
+    """Seed one coherent fleet: a scenario board in the hub store pinned to one runner's
+    id, mirrored into that runner's store (``domain/runner/scenario_seed.py``).
     Both store targets are named explicitly; input-only refusals land before either
     store is written, and each write failure names which half had already landed.
     The flag-by-flag contract is ``mock_data/README.md``'s own."""
@@ -1597,6 +1644,13 @@ def scenario_fleet(
         # A live pinned runner re-registers itself every tick; reuse that row
         # rather than colliding on runner_registrations' PK.
         register_runner = not hub_service.query("runner_registrations", {"runner_id": pinned_runner_id})
+        if register_runner and runner_dir:
+            raise click.ClickException(
+                f"the hub store holds no runner {pinned_runner_id!r}, the id {runner_dir} last registered "
+                "under; nothing landed. If it registered with another hub, pass that hub's store "
+                "(--hub-url/--hub-dir). If this hub's data was reset, re-add it with "
+                f"`blizzard runner init --allow-readd {runner_dir}`, let it register once, then re-run"
+            )
         board = compose_board_scenario(
             chunks=chunks,
             clock=clock,
@@ -1610,7 +1664,6 @@ def scenario_fleet(
         fleet = compose_runner_fleet(
             census=census,
             graph_id=board.graph_id,
-            runner_id=pinned_runner_id,
             clock=clock,
             rng=rng,
             escalation_reason=escalation_reason,
