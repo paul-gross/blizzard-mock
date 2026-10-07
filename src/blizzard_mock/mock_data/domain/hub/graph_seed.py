@@ -26,6 +26,7 @@ DELIVER_NODE_NAME = "deliver"
 
 _APPROVED_CHOICE_NAME = "approved"
 _LANDED_CHOICE_NAME = "landed"
+_FAILURE_CHOICE_NAME = "failure"  # the reserved choice every hub node authors
 _RESERVED_TERMINAL = "done"  # mirrors the hub's reserved terminal, independently
 
 
@@ -83,6 +84,7 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
     deliver_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     approved_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
     landed_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
+    failure_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
     now = clock.now()
 
     definition_yaml = (
@@ -104,6 +106,9 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
         f"        {_LANDED_CHOICE_NAME}:\n"
         "          description: Delivered.\n"
         f"          to: {_RESERVED_TERMINAL}\n"
+        f"        {_FAILURE_CHOICE_NAME}:\n"
+        "          description: Delivery failed, back to build.\n"
+        f"          to: {BUILD_NODE_NAME}\n"
     )
 
     rows = [
@@ -158,6 +163,15 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
             },
         ),
         FactRow(
+            table="graph_choices",
+            values={
+                "choice_id": failure_choice_id,
+                "node_id": deliver_id,
+                "name": _FAILURE_CHOICE_NAME,
+                "description": "Delivery failed, back to build.",
+            },
+        ),
+        FactRow(
             table="graph_edges",
             values={
                 "edge_id": f"{build_id}:{approved_choice_id}",
@@ -173,6 +187,15 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
                 "from_node_id": deliver_id,
                 "choice_id": landed_choice_id,
                 "to_node_name": _RESERVED_TERMINAL,
+            },
+        ),
+        FactRow(
+            table="graph_edges",
+            values={
+                "edge_id": f"{deliver_id}:{failure_choice_id}",
+                "from_node_id": deliver_id,
+                "choice_id": failure_choice_id,
+                "to_node_name": BUILD_NODE_NAME,
             },
         ),
     ]
