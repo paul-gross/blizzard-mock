@@ -29,8 +29,8 @@ def test_compose_graph_mints_a_runner_node_and_a_hub_node() -> None:
     tables = [row.table for row in minted.rows]
     assert tables.count("graphs") == 1
     assert tables.count("graph_nodes") == 2
-    assert tables.count("graph_choices") == 2
-    assert tables.count("graph_edges") == 2
+    assert tables.count("graph_choices") == 3
+    assert tables.count("graph_edges") == 3
 
     assert minted.context.nodes[BUILD_NODE_NAME].executor == "runner"
     assert minted.context.nodes[DELIVER_NODE_NAME].executor == "hub"
