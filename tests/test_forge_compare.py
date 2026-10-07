@@ -103,6 +103,18 @@ def test_diverged_diffs_merge_base_against_head(backend: GitBackend, shas: dict[
     assert files["gone.txt"].previous_filename is None
 
 
+def test_files_count_the_patchs_added_and_removed_lines(backend: GitBackend) -> None:
+    result = backend.compare(REPO, "main", "feature/topic")
+    for f in result.files:
+        body = (f.patch or "").split("\n")
+        assert f.additions == sum(1 for line in body if line.startswith("+"))
+        assert f.deletions == sum(1 for line in body if line.startswith("-"))
+    files = {f.filename: f for f in result.files}
+    assert (files["new.txt"].additions, files["new.txt"].deletions) == (1, 0)
+    assert files["gone.txt"].additions == 0
+    assert files["gone.txt"].deletions >= 1
+
+
 def test_file_sha_is_the_blob_at_head(backend: GitBackend, shas: dict[str, str]) -> None:
     result = backend.compare(REPO, "main", "feature/topic")
     new = next(f for f in result.files if f.filename == "new.txt")

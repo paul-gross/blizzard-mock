@@ -40,6 +40,8 @@ class GitCompareFile:
     sha: str  # blob sha at head; at the merge base for a removed file
     patch: str | None  # None for a binary change
     previous_filename: str | None = None
+    additions: int = 0  # the patch's added lines; 0 for a binary change
+    deletions: int = 0  # the patch's removed lines; 0 for a binary change
 
 
 @dataclass(frozen=True)

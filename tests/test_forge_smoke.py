@@ -461,6 +461,8 @@ def test_compare_diverged_over_http(client: TestClient) -> None:
             "filename": "feature.txt",
             "status": "added",
             "sha": body["files"][0]["sha"],
+            "additions": 1,
+            "deletions": 0,
             "patch": "@@ -0,0 +1 @@\n+feature",
         }
     ]

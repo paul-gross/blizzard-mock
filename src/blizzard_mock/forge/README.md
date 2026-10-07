@@ -72,7 +72,7 @@ armed.
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
 | `POST /repos/{o}/{r}/check-runs/{id}/rerequest` | Acknowledge a check-run re-request with `201 {}` — runs are derived live, so nothing is reset |
 | `GET /repos/{o}/{r}/commits/{ref}/check-runs` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`, derived live from the lever set |
-| `GET /repos/{o}/{r}/compare/{base}...{head}` | Compare two refs (slashed branch names allowed) — `status` (`identical`/`ahead`/`behind`/`diverged`), `ahead_by`, `behind_by`, `merge_base_commit`, `commits` (`base..head`, oldest first, with `parents`), `files` (merge base → head diff: `filename`, `status`, `sha`, `patch`, `previous_filename` on rename); 404 if either side does not resolve |
+| `GET /repos/{o}/{r}/compare/{base}...{head}` | Compare two refs (slashed branch names allowed) — `status` (`identical`/`ahead`/`behind`/`diverged`), `ahead_by`, `behind_by`, `merge_base_commit`, `commits` (`base..head`, oldest first, with `parents`), `files` (merge base → head diff: `filename`, `status`, `sha`, `additions`, `deletions`, `patch`, `previous_filename` on rename); 404 if either side does not resolve |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `GET /healthz` | Liveness |
 

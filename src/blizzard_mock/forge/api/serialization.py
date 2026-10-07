@@ -134,7 +134,13 @@ def commit_json(repo_full: str, commit: GitCommit, base_url: str) -> dict[str, A
 def compare_json(repo_full: str, compare: GitCompare, base_url: str) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     for f in compare.files:
-        entry: dict[str, Any] = {"filename": f.filename, "status": f.status, "sha": f.sha}
+        entry: dict[str, Any] = {
+            "filename": f.filename,
+            "status": f.status,
+            "sha": f.sha,
+            "additions": f.additions,
+            "deletions": f.deletions,
+        }
         if f.patch is not None:
             entry["patch"] = f.patch
         if f.previous_filename is not None:
