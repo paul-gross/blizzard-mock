@@ -166,6 +166,7 @@ class GitBackend:
             raw = git.git.diff("-M", base_sha, head_sha, "--", *paths)
             hunk_start = raw.find("\n@@")
             patch = raw[hunk_start + 1 :] if hunk_start != -1 else None
+            body = patch.split("\n") if patch is not None else []
             blob_at = base_sha if letter == "D" else head_sha
             files.append(
                 GitCompareFile(
@@ -174,6 +175,8 @@ class GitBackend:
                     sha=git.git.rev_parse(f"{blob_at}:{filename}"),
                     patch=patch,
                     previous_filename=previous if letter == "R" else None,
+                    additions=sum(1 for line in body if line.startswith("+")),
+                    deletions=sum(1 for line in body if line.startswith("-")),
                 )
             )
         return files
