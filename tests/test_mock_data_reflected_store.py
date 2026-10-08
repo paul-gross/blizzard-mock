@@ -29,7 +29,12 @@ from sqlalchemy import (
 
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
-from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, TenantResolutionError
+from blizzard_mock.mock_data.domain.seeding import (
+    HUB_GLOBAL_TABLES,
+    SeedIntegrityError,
+    TenantResolutionError,
+    hub_reset_boundary,
+)
 from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore, create_seed_engine
 
 
@@ -417,3 +422,101 @@ def test_reset_leaves_the_migration_tracking_table_alone(tmp_path: Path) -> None
     with engine.begin() as conn:
         rows = conn.execute(text("SELECT version_num FROM alembic_version")).all()
     assert [row[0] for row in rows] == ["some_revision"]
+
+
+# --- reset keeps the tenant boundary ---------------------------------------------
+
+
+def _tenant_boundary_store(tmp_path: Path) -> tuple[str, MetaData]:
+    """``_tenanted_hub_store`` of two tenants, each holding the rows a tenant starts
+    with — a ``default`` project and a ``work_item_sequence`` row — plus a second
+    project, a registered runner, a signed-up user, and the migration stamp."""
+    url, meta = _tenanted_hub_store(tmp_path, _TENANT_A, _TENANT_B)
+    engine = create_engine(url)
+    extra = MetaData()
+    extra.reflect(bind=engine)
+    projects = Table(
+        "projects",
+        extra,
+        Column("project_id", String, primary_key=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("slug", String, nullable=False),
+    )
+    sequence = Table(
+        "work_item_sequence",
+        extra,
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+        Column("source", String, primary_key=True),
+        Column("next_ref", Integer, nullable=False),
+    )
+    alembic = Table("alembic_version", extra, Column("version_num", String, primary_key=True))
+    extra.create_all(engine)
+    with engine.begin() as conn:
+        for tenant_id in (_TENANT_A, _TENANT_B):
+            conn.execute(projects.insert().values(project_id=f"proj_{tenant_id}", tenant_id=tenant_id, slug="default"))
+            conn.execute(sequence.insert().values(tenant_id=tenant_id, source="hub", next_ref=7))
+        conn.execute(projects.insert().values(project_id="proj_other", tenant_id=_TENANT_A, slug="other"))
+        conn.execute(alembic.insert().values(version_num="some_revision"))
+        conn.execute(meta.tables["users"].insert().values(user_id="usr_1", email="a@example.com"))
+    _store(url, tenant=_TENANT_A).write([_registration("r1"), FactRow(table="scopes", values={"slug": "core"})])
+    return url, extra
+
+
+def _rows(url: str, table: str, *columns: str) -> list[tuple[object, ...]]:
+    with create_engine(url).begin() as conn:
+        return [tuple(row) for row in conn.execute(text(f"SELECT {', '.join(columns)} FROM {table} ORDER BY 1"))]
+
+
+def test_hub_reset_keeps_each_tenants_starting_rows_and_the_global_tables(tmp_path: Path) -> None:
+    url, _meta = _tenant_boundary_store(tmp_path)
+
+    summary = _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    assert _rows(url, "tenants", "tenant_id") == [(_TENANT_A,), (_TENANT_B,)]
+    assert _rows(url, "projects", "project_id") == [(f"proj_{_TENANT_A}",), (f"proj_{_TENANT_B}",)]
+    assert _rows(url, "work_item_sequence", "tenant_id", "next_ref") == [(_TENANT_A, 7), (_TENANT_B, 7)]
+    assert _rows(url, "users", "user_id") == [("usr_1",)]
+    assert _rows(url, "alembic_version", "version_num") == [("some_revision",)]
+    assert _rows(url, "runner_registrations", "runner_id") == []
+    assert _rows(url, "scopes", "scope_id") == []
+    # the registered runner, the scope, and the other project
+    assert summary.rows_deleted == 3
+    assert summary.table_count == 4  # projects is deleted from, though its default rows stay
+    assert summary.tables_kept == 3  # tenants, users, work_item_sequence
+
+
+def test_hub_reset_leaves_the_store_seedable_by_its_tenant(tmp_path: Path) -> None:
+    url, _meta = _tenant_boundary_store(tmp_path)
+    _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+    _store(url, tenant=_TENANT_B).write([_registration("r2")])
+    assert _rows(url, "runner_registrations", "runner_id", "tenant_id") == [("r2", _TENANT_B)]
+
+
+def test_hub_reset_of_a_store_from_before_tenancy_empties_every_table(tmp_path: Path) -> None:
+    """A hub without a ``tenants`` table has no tenant boundary — its global tables are
+    emptied with the rest, as every reset did before tenancy."""
+    url, registrations, _pause = _hub_store(tmp_path)
+    engine = create_engine(url)
+    meta = MetaData()
+    users = Table("users", meta, Column("user_id", String, primary_key=True))
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(users.insert().values(user_id="usr_1"))
+    _store(url).write([_registration("r1")])
+
+    summary = _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    assert summary.rows_deleted == 2
+    assert summary.tables_kept == 0
+    with engine.begin() as conn:
+        assert conn.execute(select(registrations)).all() == []
+        assert conn.execute(select(users)).all() == []
+
+
+def test_default_reset_still_empties_every_table(tmp_path: Path) -> None:
+    url, _meta = _tenant_boundary_store(tmp_path)
+    summary = _store(url).reset()
+    assert summary.tables_kept == 0
+    for table in ("tenants", "projects", "work_item_sequence", "users", "runner_registrations"):
+        assert _rows(url, table, "*") == []
+    assert _rows(url, "alembic_version", "version_num") == [("some_revision",)]

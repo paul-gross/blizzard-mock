@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -4405,3 +4407,84 @@ def test_create_chunk_reuses_only_the_named_tenants_graph(tmp_path: Path) -> Non
         assert sorted(conn.execute(select(graphs.c.tenant_id)).scalars().all()) == [_TENANT_A, _TENANT_B]
     stamped = _tenant_ids_by_table(url, meta)
     assert stamped["chunks"] == {_TENANT_A, _TENANT_B}
+
+
+# --- reset keeps the tenant boundary ----------------------------------------
+
+
+def test_reset_hub_keeps_the_tenants_and_leaves_the_store_seedable(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path, tenant_ids=(_TENANT_A,))
+    seeded = _runner().invoke(cli, ["scenario", "board", "--url", url, "--seed", "1"])
+    assert seeded.exit_code == 0, seeded.output
+
+    result = _runner().invoke(cli, ["reset", "--store", "hub", "--url", url])
+    assert result.exit_code == 0, result.output
+    assert "kept 1 table(s) whole" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(meta.tables["tenants"].c.tenant_id)).scalars().all() == [_TENANT_A]
+    assert _tenant_ids_by_table(url, meta) == {}
+
+    again = _runner().invoke(cli, ["scenario", "board", "--url", url, "--seed", "1"])
+    assert again.exit_code == 0, again.output
+
+
+def test_reset_hub_keeps_the_global_tables_the_hub_schema_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Installed alongside, the hub's own schema module names the global tables."""
+    schema = types.ModuleType("blizzard.hub.store.schema")
+    schema.GLOBAL_TABLES = frozenset({"runner_external_usage"})  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "blizzard.hub.store.schema", schema)
+    url, meta, registrations, _pause = _hub_store(tmp_path)
+    usage = meta.tables["runner_external_usage"]
+    Table("tenants", meta, Column("tenant_id", String, primary_key=True)).create(create_engine(url))
+    now = datetime.now(UTC)
+    with create_engine(url).begin() as conn:
+        conn.execute(insert(registrations).values(runner_id="r1", name="r1", added_at=now))
+        conn.execute(
+            insert(usage).values(runner_id="r1", slug="s", name="S", sampled_at=now, windows="[]", updated_at=now)
+        )
+
+    result = _runner().invoke(cli, ["reset", "--store", "hub", "--url", url])
+
+    assert result.exit_code == 0, result.output
+    assert "cleared 1 row(s)" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations)).all() == []
+        assert conn.execute(select(usage.c.slug)).scalars().all() == ["s"]
+
+
+def test_reset_hub_falls_back_to_its_own_global_list_without_the_hub_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "blizzard.hub.store.schema", None)  # import raises ImportError
+    url, meta, _registrations, _pause = _hub_store(tmp_path)
+    users = Table("users", meta, Column("user_id", String, primary_key=True))
+    Table("tenants", meta, Column("tenant_id", String, primary_key=True))
+    engine = create_engine(url)
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(users).values(user_id="usr_1"))
+
+    result = _runner().invoke(cli, ["reset", "--store", "hub", "--url", url])
+
+    assert result.exit_code == 0, result.output
+    with engine.begin() as conn:
+        assert conn.execute(select(users.c.user_id)).scalars().all() == ["usr_1"]
+
+
+def test_reset_runner_keeps_nothing(tmp_path: Path) -> None:
+    """The tenant boundary is the hub's: a runner store is emptied whole, whatever its tables are named."""
+    url, meta, _leases, _context = _runner_store(tmp_path)
+    users = Table("users", meta, Column("user_id", String, primary_key=True))
+    engine = create_engine(url)
+    users.create(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(users).values(user_id="usr_1"))
+
+    result = _runner().invoke(cli, ["reset", "--store", "runner", "--url", url])
+
+    assert result.exit_code == 0, result.output
+    assert "kept" not in result.output
+    with engine.begin() as conn:
+        assert conn.execute(select(users)).all() == []

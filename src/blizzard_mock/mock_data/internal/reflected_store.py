@@ -12,8 +12,22 @@ import random
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, event, insert, select
+from sqlalchemy import (
+    Column,
+    Engine,
+    Integer,
+    MetaData,
+    Table,
+    and_,
+    create_engine,
+    delete,
+    event,
+    insert,
+    not_,
+    select,
+)
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.dml import Delete
 
 from blizzard_mock.clock import SystemClock
 from blizzard_mock.mock_data.domain.facts import FactRow
@@ -26,9 +40,11 @@ from blizzard_mock.mock_data.domain.schema_contract import (
     check_drift,
 )
 from blizzard_mock.mock_data.domain.seeding import (
+    CLEAR_EVERYTHING,
     TENANT_COLUMN,
     TENANTS_TABLE,
     ISeedStore,
+    ResetBoundary,
     ResetSummary,
     SeedIntegrityError,
     TenantRecord,
@@ -96,6 +112,18 @@ def _snapshot(meta: MetaData) -> dict[str, ReflectedTable]:
         }
         snapshot[table.name] = ReflectedTable(name=table.name, columns=columns)
     return snapshot
+
+
+def _delete_outside(table: Table, keep: Mapping[str, object] | None) -> Delete:
+    """A delete of ``table``'s every row but those matching ``keep``'s equality filter."""
+    if not keep:
+        return delete(table)
+    absent = sorted(set(keep) - set(table.c.keys()))
+    if absent:
+        raise SchemaDriftError(
+            f"schema drift: table {table.name!r} has no column(s) {absent} to tell the rows a reset keeps — see {GUIDE}"
+        )
+    return delete(table).where(not_(and_(*(table.c[column] == value for column, value in keep.items()))))
 
 
 class ReflectedStore:
@@ -170,18 +198,21 @@ class ReflectedStore:
                 f"already carries this data (try `reset` first): {exc.orig}"
             ) from exc
 
-    def reset(self) -> ResetSummary:
+    def reset(self, boundary: ResetBoundary = CLEAR_EVERYTHING) -> ResetSummary:
         meta = self._reflect()
         if not meta.tables:
             raise SchemaDriftError(
                 f"the store has no tables — is it migrated? (run the daemon's `migrate`) — see {GUIDE}"
             )
-        reset_tables = [table for table in meta.sorted_tables if table.name != _MIGRATION_TRACKING_TABLE]
+        boundary = boundary.for_store(meta.tables.keys())
+        tables = [table for table in meta.sorted_tables if table.name != _MIGRATION_TRACKING_TABLE]
+        kept = [table for table in tables if table.name in boundary.kept_tables]
+        reset_tables = [table for table in tables if table.name not in boundary.kept_tables]
         deleted = 0
         with self._engine.begin() as conn:
             for table in reversed(reset_tables):  # children before parents (FK-safe)
-                deleted += conn.execute(delete(table)).rowcount or 0
-        return ResetSummary(rows_deleted=deleted, table_count=len(reset_tables))
+                deleted += conn.execute(_delete_outside(table, boundary.kept_rows.get(table.name))).rowcount or 0
+        return ResetSummary(rows_deleted=deleted, table_count=len(reset_tables), tables_kept=len(kept))
 
     def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
         meta = self._reflect()
