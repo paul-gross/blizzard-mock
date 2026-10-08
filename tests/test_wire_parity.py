@@ -355,9 +355,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
-    # `proposes_work_items` authorizes a completion's `proposals` hub-side; no runner path
-    # reads it, so a mirror serving a real runner carries nothing by carrying it.
-    "NodeConfig": ("NodeConfig", frozenset({"proposes_work_items"})),
+    "NodeConfig": ("NodeConfig", frozenset()),
     "NodeEnvelope": ("NodeEnvelope", frozenset()),
     "QuestionView": ("QuestionView", frozenset()),
     "QueuePeekEntry": ("QueuePeekEntry", frozenset()),
