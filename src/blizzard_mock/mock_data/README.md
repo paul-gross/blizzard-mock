@@ -64,9 +64,18 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   table — deleting its row would un-stamp the store's migration state without
   dropping a single table, so the *next* daemon boot would replay every
   migration from scratch and die on the first `CREATE TABLE` that already
-  exists. Store-agnostic: it never imports `blizzard`, so it works against
+  exists. Store-agnostic: it never depends on `blizzard`, so it works against
   whatever the daemon's Alembic tree migrated. The workhorse — every service
   scenario starts from a clean store.
+  `--store hub` against a store with a `tenants` table keeps the tenant boundary,
+  since nothing re-creates a tenant once its rows are gone: the global tables stay
+  whole, and so does each tenant's starting state — its `tenants` row, its
+  `work_item_sequence` row, and its `default`-slug project (`domain/seeding.py`'s
+  `hub_reset_boundary`). The global list is the hub schema module's own
+  `GLOBAL_TABLES` when `blizzard` is importable, else `HUB_GLOBAL_TABLES`, kept in
+  step with it by hand. A boundary table the store lacks is skipped. A hub from
+  before tenancy has no `tenants` table, so it is emptied whole, exactly as
+  `--store runner` empties every table.
 - `create runner --store hub [--runner-id R] [--name N] [--never-connected | --workspace-id W] [--paused] [--subscription SLUG NAME PROVIDER]... [--declare-empty-roster] [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
   **implemented**. Seeds one runner the hub added into its fleet registry
   (`runner_registrations`, `domain/hub/runner_registration_seed.py`) under `--runner-id` —
@@ -306,7 +315,10 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   (SQLAlchemy `MetaData.reflect`), so a hub/runner schema change never forces a
   mock-repo edit — exactly as the forge mirrors GitHub without importing octokit.
   Each `domain/<store>/*_seed.py` composer independently mirrors the id-prefix/status/kind
-  vocabulary it needs, the same precedent `domain/ids.py` set.
+  vocabulary it needs, the same precedent `domain/ids.py` set. The one reach into
+  `blizzard` is optional: `reset --store hub` reads the hub schema module's
+  `GLOBAL_TABLES` when that module happens to be importable, and otherwise uses its
+  own copy.
 - Store access uses the pre-declared `sqlalchemy` + `psycopg` deps against the
   portable-SQL store surface (`bzh:sql-portable`); resolve the target store from
   `--store` plus the per-verb target flags above. Which store each concept is *allowed* is one

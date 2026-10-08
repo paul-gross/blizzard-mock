@@ -13,8 +13,8 @@ so the same composition seeds a store from before tenancy and one after it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from blizzard_mock.mock_data.domain.facts import FactRow
@@ -31,12 +31,81 @@ SCOPES_TABLE = "scopes"
 SCOPE_ID_COLUMN = "scope_id"
 
 
+#: The hub's ``projects`` table, and the slug of the project every tenant starts with.
+PROJECTS_TABLE = "projects"
+DEFAULT_PROJECT_SLUG = "default"
+
+#: The hub's built-in work source's per-tenant counter, seeded when a tenant is created.
+WORK_ITEM_SEQUENCE_TABLE = "work_item_sequence"
+
+#: The hub tables that carry no tenant key, kept in step by hand with the ``GLOBAL_TABLES``
+#: the hub's schema module declares — the list a ``reset`` falls back to when that module
+#: can't be imported, which is the usual case: this tool never depends on ``blizzard``.
+HUB_GLOBAL_TABLES: frozenset[str] = frozenset(
+    {
+        TENANTS_TABLE,
+        "tenant_deletions",
+        "users",
+        "identities",
+        "sessions",
+        "auth_state",
+        "auth_facts",
+        "superuser_bootstrap",
+        "hub_admin_facts",
+        "config_import_facts",
+        "membership_facts",
+        "hub_event_log",
+        "trace_cursor",
+        "egress_cursor",
+    }
+)
+
+
 @dataclass(frozen=True)
 class ResetSummary:
-    """What a ``reset`` cleared — the ``reset`` verb's reported shape."""
+    """What a ``reset`` cleared — the ``reset`` verb's reported shape. ``table_count``
+    counts the tables it deleted from; ``tables_kept``, those it left whole."""
 
     rows_deleted: int
     table_count: int
+    tables_kept: int = 0
+
+
+@dataclass(frozen=True)
+class ResetBoundary:
+    """What a ``reset`` leaves standing. ``kept_tables`` are left whole; each table in
+    ``kept_rows`` keeps only the rows matching its equality filter and loses the rest.
+    Every other table is emptied. A name the store has no table for is ignored. When
+    ``requires_table`` is set, the boundary holds only in a store that has that table;
+    a store without it is emptied whole."""
+
+    kept_tables: frozenset[str] = frozenset()
+    kept_rows: Mapping[str, Mapping[str, object]] = field(default_factory=dict[str, Mapping[str, object]])
+    requires_table: str | None = None
+
+    def for_store(self, store_tables: Collection[str]) -> ResetBoundary:
+        """The boundary a store holding ``store_tables`` is reset to."""
+        if self.requires_table is not None and self.requires_table not in store_tables:
+            return CLEAR_EVERYTHING
+        return self
+
+
+#: A reset that empties every table — the runner store's, and a hub's from before tenancy.
+CLEAR_EVERYTHING = ResetBoundary()
+
+
+def hub_reset_boundary(global_tables: frozenset[str]) -> ResetBoundary:
+    """The hub store's reset boundary: ``global_tables`` stay whole, and so does each
+    tenant's starting state — its ``tenants`` row, its ``work_item_sequence`` row, and
+    its ``default`` project — so the hub is still a usable hub of the same tenants once
+    every other row is gone. Nothing re-creates a tenant after a reset (the hub's own
+    migration inserts the first one), so deleting these would strand the store. A hub
+    from before tenancy has no ``tenants`` table and no boundary: it is emptied whole."""
+    return ResetBoundary(
+        kept_tables=global_tables | {TENANTS_TABLE, WORK_ITEM_SEQUENCE_TABLE},
+        kept_rows={PROJECTS_TABLE: {"slug": DEFAULT_PROJECT_SLUG}},
+        requires_table=TENANTS_TABLE,
+    )
 
 
 class SeedIntegrityError(Exception):
@@ -130,8 +199,8 @@ class ISeedStore(Protocol):
         store's tenant can't be settled."""
         ...
 
-    def reset(self) -> ResetSummary:
-        """Delete every row from every table, FK-safe (children before parents)."""
+    def reset(self, boundary: ResetBoundary = CLEAR_EVERYTHING) -> ResetSummary:
+        """Delete every row ``boundary`` does not keep, FK-safe (children before parents)."""
         ...
 
     def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
@@ -153,9 +222,9 @@ class SeedService:
         """Hand a composed concept's rows to the store."""
         self._store.write(rows)
 
-    def reset(self) -> ResetSummary:
-        """Return the store to a known-clean state."""
-        return self._store.reset()
+    def reset(self, boundary: ResetBoundary = CLEAR_EVERYTHING) -> ResetSummary:
+        """Return the store to a known-clean state, keeping what ``boundary`` keeps."""
+        return self._store.reset(boundary)
 
     def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
         """Read a table's rows through the store, for a concept composer's

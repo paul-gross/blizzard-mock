@@ -7,9 +7,11 @@ the live store's schema at runtime rather than importing ``blizzard``.
 
 from __future__ import annotations
 
+import importlib
 import random
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import click
 from sqlalchemy import Engine
@@ -87,8 +89,15 @@ from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import compos
 from blizzard_mock.mock_data.domain.runner.usage_seed import UsageCompositionError as RunnerUsageCompositionError
 from blizzard_mock.mock_data.domain.runner.usage_seed import compose_usage as compose_runner_usage
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError, require_column
-from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, SeedService, TenantResolutionError
-from blizzard_mock.mock_data.domain.store_targets import STORE_TARGETS, store_mismatch_message
+from blizzard_mock.mock_data.domain.seeding import (
+    CLEAR_EVERYTHING,
+    HUB_GLOBAL_TABLES,
+    SeedIntegrityError,
+    SeedService,
+    TenantResolutionError,
+    hub_reset_boundary,
+)
+from blizzard_mock.mock_data.domain.store_targets import HUB, STORE_TARGETS, store_mismatch_message
 from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore, create_seed_engine
 from blizzard_mock.mock_data.internal.runtime_config import RuntimeConfigError, resolve_db_url, resolve_runner_id
 
@@ -213,6 +222,23 @@ def _named_tenant() -> str | None:
     ctx = click.get_current_context(silent=True)
     value = ctx.meta.get(_TENANT_META_KEY) if ctx is not None else None
     return str(value) if value is not None else None
+
+
+#: The hub's schema module, read for its declared ``GLOBAL_TABLES`` when installed alongside.
+_HUB_SCHEMA_MODULE = "blizzard.hub.store.schema"
+
+
+def _hub_global_tables() -> frozenset[str]:
+    """The hub's global tables: its schema module's ``GLOBAL_TABLES`` when that module is
+    importable and declares them, else the list this tool keeps in step by hand."""
+    try:
+        schema = importlib.import_module(_HUB_SCHEMA_MODULE)
+    except ImportError:
+        return HUB_GLOBAL_TABLES
+    declared = getattr(schema, "GLOBAL_TABLES", None)
+    if not isinstance(declared, (set, frozenset)):
+        return HUB_GLOBAL_TABLES
+    return frozenset(str(name) for name in cast("frozenset[object]", declared))
 
 
 def _seed_service(url: str) -> SeedService:
@@ -407,17 +433,24 @@ _DIR_HELP = "A hub/runner runtime dir — reads its blizzard-hub.toml/blizzard-r
 @click.option("--url", "url", envvar="DATABASE_URL", default=None, help=_URL_HELP)
 @click.option("--dir", "runtime_dir", default=None, help=_DIR_HELP)
 def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
-    """Return a store to a known-clean state — delete every row, FK-safe.
+    """Return a store to a known-clean state — delete its rows, FK-safe.
 
-    Reflects the live schema and deletes every table in reverse dependency
-    order; the tables (facts-only schema) survive, only the rows go.
+    Reflects the live schema and deletes in reverse dependency order; the
+    tables (facts-only schema) survive, only the rows go. A hub store with a
+    ``tenants`` table keeps its tenant boundary: the global tables whole, and
+    each tenant's own row, ``work_item_sequence`` row, and ``default``
+    project. Any other store is emptied whole.
     """
     service = _seed_service(_resolve_url(store, url, runtime_dir))
+    boundary = hub_reset_boundary(_hub_global_tables()) if store == HUB else CLEAR_EVERYTHING
     try:
-        summary = service.reset()
+        summary = service.reset(boundary)
     except SchemaDriftError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"reset {store} store: cleared {summary.rows_deleted} row(s) across {summary.table_count} table(s)")
+    kept = f"; kept {summary.tables_kept} table(s) whole" if summary.tables_kept else ""
+    click.echo(
+        f"reset {store} store: cleared {summary.rows_deleted} row(s) across {summary.table_count} table(s){kept}"
+    )
 
 
 @cli.group()
