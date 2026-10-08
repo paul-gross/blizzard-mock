@@ -17,6 +17,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Engine,
     Float,
     ForeignKey,
     Integer,
@@ -129,10 +130,13 @@ def _runner_store(tmp_path: Path) -> tuple[str, MetaData, Table, Table]:
     return url, meta, leases, lease_context
 
 
-def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
+def _full_hub_store(tmp_path: Path, *, tenant_ids: tuple[str, ...] | None = None) -> tuple[str, MetaData]:
     """A sqlite store mirroring the hub's chunk/graph/fact tables ``create graph``/
     ``create chunk`` write into — the subset ``blizzard/hub/store/schema.py`` declares
-    that this phase's composers touch."""
+    that this phase's composers touch.
+
+    With ``tenant_ids``, the store takes the tenanted shape: a ``tenants`` table holding
+    them, and ``tenant_id NOT NULL REFERENCES tenants`` on every other table."""
     url = f"sqlite:///{tmp_path / 'hub.db'}"
     engine = create_engine(url)
     meta = MetaData()
@@ -480,8 +484,39 @@ def _full_hub_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("source", String, nullable=True),
         Column("ref", String, nullable=True),
     )
+    if tenant_ids is not None:
+        _make_tenanted(meta)
     meta.create_all(engine)
+    if tenant_ids is not None:
+        _insert_tenants(engine, meta, tenant_ids)
     return url, meta
+
+
+def _make_tenanted(meta: MetaData) -> None:
+    """Give ``meta`` the tenanted hub's shape before it is created: a ``tenants`` table,
+    and ``tenant_id NOT NULL REFERENCES tenants`` on every table already declared."""
+    owned = list(meta.tables.values())
+    Table(
+        "tenants",
+        meta,
+        Column("tenant_id", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("created_at", DateTime, nullable=False),
+        Column("created_by", String, nullable=False),
+    )
+    for table in owned:
+        table.append_column(Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False))
+
+
+def _insert_tenants(engine: Engine, meta: MetaData, tenant_ids: tuple[str, ...]) -> None:
+    now = datetime.now(UTC)
+    with engine.begin() as conn:
+        for index, tenant_id in enumerate(tenant_ids):
+            conn.execute(
+                insert(meta.tables["tenants"]).values(
+                    tenant_id=tenant_id, name=f"tenant-{index}", created_at=now, created_by="t"
+                )
+            )
 
 
 def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
@@ -4246,3 +4281,127 @@ def test_reset_accepts_a_runtime_dir_in_place_of_url(tmp_path: Path) -> None:
     result = _runner().invoke(cli, ["reset", "--store", "hub", "--dir", str(runtime_dir)])
     assert result.exit_code == 0, result.output
     assert "cleared 0 row(s)" in result.output
+
+
+# --- tenant stamping --------------------------------------------------------
+
+_TENANT_A = "ten_01HK153X00AAAAAAAAAAAAAAAA"
+_TENANT_B = "ten_01HK153X00BBBBBBBBBBBBBBBB"
+
+
+def _tenanted_hub_store(tmp_path: Path, *tenant_ids: str) -> tuple[str, Table]:
+    """``_hub_store``'s registry once tenancy lands: a ``tenants`` table holding
+    ``tenant_ids``, and ``runner_registrations`` carrying ``tenant_id NOT NULL``."""
+    url = f"sqlite:///{tmp_path / 'tenanted-hub.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    tenants = Table(
+        "tenants",
+        meta,
+        Column("tenant_id", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("created_at", DateTime, nullable=False),
+        Column("created_by", String, nullable=False),
+    )
+    registrations = Table(
+        "runner_registrations",
+        meta,
+        Column("runner_id", String, primary_key=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("name", String, nullable=False),
+        Column("added_at", DateTime, nullable=False),
+        Column("added_by", String, nullable=True),
+        Column("workspace_id", String, nullable=True),
+        Column("registered_at", DateTime, nullable=True),
+        Column("last_seen_at", DateTime, nullable=True),
+        Column("subscriptions", Text, nullable=True),
+    )
+    meta.create_all(engine)
+    now = datetime.now(UTC)
+    with engine.begin() as conn:
+        for index, tenant_id in enumerate(tenant_ids):
+            conn.execute(
+                insert(tenants).values(tenant_id=tenant_id, name=f"tenant-{index}", created_at=now, created_by="t")
+            )
+    return url, registrations
+
+
+def test_create_runner_stamps_the_stores_only_tenant(tmp_path: Path) -> None:
+    url, registrations = _tenanted_hub_store(tmp_path, _TENANT_A)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-1"])
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(registrations.c.runner_id, registrations.c.tenant_id)).all()
+    assert [tuple(row) for row in rows] == [("seeded-1", _TENANT_A)]
+
+
+def test_create_runner_refuses_a_store_of_several_tenants_without_tenant(tmp_path: Path) -> None:
+    url, registrations = _tenanted_hub_store(tmp_path, _TENANT_A, _TENANT_B)
+    result = _runner().invoke(cli, ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-1"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "--tenant" in result.output
+    assert _TENANT_A in result.output and _TENANT_B in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations)).all() == []
+
+
+def test_create_runner_stamps_the_named_tenant(tmp_path: Path) -> None:
+    url, registrations = _tenanted_hub_store(tmp_path, _TENANT_A, _TENANT_B)
+    result = _runner().invoke(
+        cli,
+        ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-1", "--tenant", _TENANT_B],
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations.c.tenant_id)).scalars().all() == [_TENANT_B]
+
+
+def test_tenant_named_against_a_store_from_before_tenancy_is_refused(tmp_path: Path) -> None:
+    url, _meta, registrations, _pause = _hub_store(tmp_path)
+    result = _runner().invoke(
+        cli,
+        ["create", "runner", "--store", "hub", "--url", url, "--runner-id", "seeded-1", "--tenant", _TENANT_A],
+    )
+    assert result.exit_code != 0
+    assert "no 'tenants' table" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations)).all() == []
+
+
+def _tenant_ids_by_table(url: str, meta: MetaData) -> dict[str, set[str]]:
+    """Every tenant id each tenant-owned table's rows carry, for the tables holding rows."""
+    stamped: dict[str, set[str]] = {}
+    with create_engine(url).begin() as conn:
+        for table in meta.sorted_tables:
+            if table.name == "tenants":
+                continue
+            values = set(conn.execute(select(table.c.tenant_id)).scalars().all())
+            if values:
+                stamped[table.name] = values
+    return stamped
+
+
+def test_scenario_board_stamps_every_row_of_a_tenanted_store(tmp_path: Path) -> None:
+    url, meta = _full_hub_store(tmp_path, tenant_ids=(_TENANT_A,))
+    result = _runner().invoke(cli, ["scenario", "board", "--url", url, "--seed", "1"])
+    assert result.exit_code == 0, result.output
+    stamped = _tenant_ids_by_table(url, meta)
+    assert {"chunks", "graphs", "graph_nodes", "transitions"} <= set(stamped)
+    assert all(tenant_ids == {_TENANT_A} for tenant_ids in stamped.values())
+
+
+def test_create_chunk_reuses_only_the_named_tenants_graph(tmp_path: Path) -> None:
+    """A graph is minted into one tenant; a chunk created in another tenant mints that
+    tenant its own graph rather than pointing across the boundary."""
+    url, meta = _full_hub_store(tmp_path, tenant_ids=(_TENANT_A, _TENANT_B))
+    graphs = meta.tables["graphs"]
+    for tenant_id in (_TENANT_A, _TENANT_B):
+        result = _runner().invoke(
+            cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready", "--tenant", tenant_id]
+        )
+        assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        assert sorted(conn.execute(select(graphs.c.tenant_id)).scalars().all()) == [_TENANT_A, _TENANT_B]
+    stamped = _tenant_ids_by_table(url, meta)
+    assert stamped["chunks"] == {_TENANT_A, _TENANT_B}

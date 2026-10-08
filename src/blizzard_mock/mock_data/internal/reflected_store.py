@@ -2,18 +2,22 @@
 
 Reflects the target store's live schema once per invocation (never imports
 ``blizzard``), and writes every row in a single FK-safe transaction — parents
-before children. The drift guard runs first; its rules live in the domain.
+before children. Rows are stamped with the store's tenant first, then the drift
+guard runs; both rule sets live in the domain.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import random
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import Column, Engine, Integer, MetaData, Table, create_engine, delete, event, insert, select
 from sqlalchemy.exc import IntegrityError
 
+from blizzard_mock.clock import SystemClock
 from blizzard_mock.mock_data.domain.facts import FactRow
+from blizzard_mock.mock_data.domain.ids import SCOPE_PREFIX, mint
 from blizzard_mock.mock_data.domain.schema_contract import (
     GUIDE,
     ReflectedColumn,
@@ -21,7 +25,17 @@ from blizzard_mock.mock_data.domain.schema_contract import (
     SchemaDriftError,
     check_drift,
 )
-from blizzard_mock.mock_data.domain.seeding import ISeedStore, ResetSummary, SeedIntegrityError
+from blizzard_mock.mock_data.domain.seeding import (
+    TENANT_COLUMN,
+    TENANTS_TABLE,
+    ISeedStore,
+    ResetSummary,
+    SeedIntegrityError,
+    TenantRecord,
+    TenantResolutionError,
+    resolve_tenant,
+    stamp_rows,
+)
 
 # A live daemon may hold the same sqlite file open — set a busy timeout so a
 # lock waits rather than immediately raising (pinned by tests/test_pin_mock.py).
@@ -85,21 +99,62 @@ def _snapshot(meta: MetaData) -> dict[str, ReflectedTable]:
 
 
 class ReflectedStore:
-    """The SQLAlchemy reflection adapter implementing ``ISeedStore``."""
+    """The SQLAlchemy reflection adapter implementing ``ISeedStore``.
 
-    def __init__(self, engine: Engine) -> None:
+    ``tenant`` names the tenant (by id) a tenanted store's rows land in and its reads
+    are filtered to; unnamed, the store's only tenant. It is resolved once, on the first
+    write or read that touches a tenant-owned table, and only against a store that has
+    a ``tenants`` table — so a store from before tenancy writes exactly as it always has.
+    """
+
+    def __init__(self, engine: Engine, *, tenant: str | None = None) -> None:
         self._engine = engine
+        self._named_tenant = tenant
+        self._resolved_tenant: str | None = None
+        self._scope_rng = random.Random()
 
     def _reflect(self) -> MetaData:
         meta = MetaData()
         meta.reflect(bind=self._engine)
         return meta
 
+    def _tenant_for(self, meta: MetaData, tables: Iterable[str]) -> str | None:
+        """The tenant to stamp or filter by when touching ``tables``; ``None`` when none
+        of them is tenant-owned and no tenant was named."""
+        touches_tenant_owned = any(name in meta.tables and TENANT_COLUMN in meta.tables[name].c for name in tables)
+        if not touches_tenant_owned and self._named_tenant is None:
+            return None
+        if self._resolved_tenant is None:
+            self._resolved_tenant = self._resolve_tenant(meta)
+        return self._resolved_tenant
+
+    def _resolve_tenant(self, meta: MetaData) -> str | None:
+        tenants = meta.tables.get(TENANTS_TABLE)
+        if tenants is None:
+            if self._named_tenant is not None:
+                raise TenantResolutionError(
+                    f"--tenant {self._named_tenant!r} names a tenant, but this store has no "
+                    f"{TENANTS_TABLE!r} table — a runner store, or a hub store from before tenancy"
+                )
+            return None
+        with self._engine.connect() as conn:
+            records = [
+                TenantRecord(tenant_id=str(row.tenant_id), name=str(row.name))
+                for row in conn.execute(select(tenants.c.tenant_id, tenants.c.name).order_by(tenants.c.tenant_id)).all()
+            ]
+        return resolve_tenant(records, self._named_tenant)
+
+    def _mint_scope_id(self) -> str:
+        return mint(SCOPE_PREFIX, SystemClock(), self._scope_rng)
+
     def write(self, rows: Sequence[FactRow]) -> None:
         if not rows:
             return
         meta = self._reflect()
-        check_drift(_snapshot(meta), rows)
+        schema = _snapshot(meta)
+        tenant_id = self._tenant_for(meta, {row.table for row in rows})
+        rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id)
+        check_drift(schema, rows)
         by_table: dict[str, list[FactRow]] = {}
         for row in rows:
             by_table.setdefault(row.table, []).append(row)
@@ -134,6 +189,9 @@ class ReflectedStore:
         if reflected is None:
             raise SchemaDriftError(f"schema drift: table {table!r} does not exist in the live store — see {GUIDE}")
         stmt = select(reflected)
+        tenant_id = self._tenant_for(meta, [table])
+        if tenant_id is not None and TENANT_COLUMN in reflected.c:
+            stmt = stmt.where(reflected.c[TENANT_COLUMN] == tenant_id)
         for column, value in (where or {}).items():
             if column not in reflected.c:
                 raise SchemaDriftError(f"schema drift: table {table!r} has no column {column!r} — see {GUIDE}")
