@@ -3,15 +3,21 @@ round trip end to end via a genuine out-of-process ``blizzard-runner`` subproces
 the sibling worktree (rationale: ``tests/test_wire_parity.py``'s module docstring). The
 hub stays in-process (a bound ``uvicorn`` socket) so the assertion can read the stored
 registry row directly — the capability snapshot has no wire-exposed read surface, the
-same reason ``tests/test_runner_registration_federation.py`` reads its hub directly."""
+same reason ``tests/test_runner_registration_federation.py`` reads its hub directly. The
+same real runner's ``init`` and ``store reset`` verbs are driven over the mock hub's resets,
+the runner's store read back from its SQLite file."""
 
 from __future__ import annotations
 
 import os
+import re
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -211,3 +217,162 @@ def test_runner_init_reuses_its_token_and_re_adds_after_a_hub_reset_only_with_al
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+#: A runner store moved aside: ``runner.db`` under its UTC set-aside stamp.
+_ASIDE_DB = re.compile(r"^runner\.db\.\d{8}T\d{6}Z$")
+#: The files beside a SQLite database that hold part of it, moved aside under the database's new name.
+_SQLITE_SIBLINGS = ("-wal", "-shm", "-journal")
+
+
+@contextmanager
+def _serving_mock_hub() -> Iterator[tuple[str, MockHubService]]:
+    """A mock hub bound on a free local port for the block's duration: its URL and its service."""
+    hub_port = _free_port()
+    app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=hub_port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        _await_health(hub_port)
+        yield f"http://127.0.0.1:{hub_port}", app.state.service
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+class _RealRunner:
+    """The sibling checkout's runner binary, run as one-shot verbs over one runner directory."""
+
+    def __init__(self, runner_dir: Path, hub_url: str) -> None:
+        self.dir = runner_dir
+        self._bin = _require_runner_bin()
+        self._env = {**_scrubbed_env(), "BZ_HUB_URL": hub_url}
+
+    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([str(self._bin), *args], env=self._env, capture_output=True, text=True, timeout=30)
+
+    def init(self, *flags: str) -> subprocess.CompletedProcess[str]:
+        return self.run("init", str(self.dir), *flags)
+
+    def tick(self) -> None:
+        """One synchronous tick, whose registration records the runner the hub answers as in the store."""
+        tick = self.run("tick", "--dir", str(self.dir))
+        assert tick.returncode == 0, tick.stderr
+
+    @property
+    def data(self) -> Path:
+        return self.dir / "data"
+
+    @property
+    def store(self) -> Path:
+        return self.data / "runner.db"
+
+    def set_aside(self) -> list[Path]:
+        """The databases moved aside in the data directory, oldest stamp first."""
+        return sorted(p for p in self.data.iterdir() if _ASIDE_DB.match(p.name))
+
+    def siblings(self) -> list[str]:
+        """The suffixes of the SQLite files beside the live store right now."""
+        return [s for s in _SQLITE_SIBLINGS if self.store.with_name(self.store.name + s).exists()]
+
+
+def _stored_runner_id(database: Path) -> str | None:
+    """The runner the store's identity row names — the latest registration it recorded — or ``None``."""
+    with closing(sqlite3.connect(database)) as conn:
+        row = conn.execute("SELECT runner_id FROM runner_identity ORDER BY id DESC LIMIT 1").fetchone()
+    return row[0] if row is not None else None
+
+
+def _tables(database: Path) -> set[str]:
+    with closing(sqlite3.connect(database)) as conn:
+        return {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def _added_runner_id(service: MockHubService) -> str:
+    [added] = service._state.list_runners()
+    return added.runner_id
+
+
+def test_a_real_runner_re_added_after_a_hub_reset_sets_its_old_store_aside_before_adding(tmp_path: Path) -> None:
+    """``init --allow-readd`` over a store whose token the reset hub no longer knows moves that store aside
+    under a timestamped name — the database and every sibling it had, none deleted — and the fresh store in
+    its place comes to name the runner the re-add minted, never the old one."""
+    with _serving_mock_hub() as (hub_url, service):
+        runner = _RealRunner(tmp_path / "runner", hub_url)
+        first = runner.init()
+        assert first.returncode == 0, first.stderr
+        _disable_external_usage_network_call(runner.dir)
+        runner.tick()
+        old_runner_id = _added_runner_id(service)
+        assert _stored_runner_id(runner.store) == old_runner_id
+
+        service.reset()  # the hub's data is reset: the token in .env names no runner here now
+        siblings_before = runner.siblings()
+
+        readded = runner.init("--allow-readd")
+        assert readded.returncode == 0, readded.stderr
+        new_runner_id = _added_runner_id(service)
+        assert new_runner_id != old_runner_id
+
+        [aside] = runner.set_aside()
+        assert str(aside) in readded.stdout
+        for suffix in siblings_before:
+            assert aside.with_name(aside.name + suffix).exists(), f"the store's {suffix} sibling was not set aside"
+        assert _stored_runner_id(aside) == old_runner_id, "the set-aside store lost the old runner's identity"
+        # The store was set aside before the add, so the fresh one holds no identity until it registers.
+        assert runner.store.is_file()
+        assert _stored_runner_id(runner.store) is None
+
+        runner.tick()
+        assert _stored_runner_id(runner.store) == new_runner_id
+        assert runner.set_aside() == [aside]
+        assert _stored_runner_id(aside) == old_runner_id
+
+
+def test_a_real_runner_restarted_over_a_token_its_hub_knows_keeps_its_store(tmp_path: Path) -> None:
+    """A plain ``init`` over a token the hub still knows keeps the runner and its store as they are."""
+    with _serving_mock_hub() as (hub_url, service):
+        runner = _RealRunner(tmp_path / "runner", hub_url)
+        first = runner.init()
+        assert first.returncode == 0, first.stderr
+        _disable_external_usage_network_call(runner.dir)
+        runner.tick()
+        runner_id = _added_runner_id(service)
+        token = _env_token(runner.dir)
+
+        restarted = runner.init()
+        assert restarted.returncode == 0, restarted.stderr
+        assert _env_token(runner.dir) == token
+        assert _added_runner_id(service) == runner_id
+        assert runner.set_aside() == []
+        assert _stored_runner_id(runner.store) == runner_id
+
+
+def test_runner_store_reset_moves_a_real_runners_store_aside_and_leaves_a_fresh_one_at_head(tmp_path: Path) -> None:
+    """``blizzard runner store reset <dir>`` moves the store aside, deleting nothing, and migrates a fresh
+    store in its place: one the runner's next tick opens and registers into as the same runner."""
+    with _serving_mock_hub() as (hub_url, service):
+        runner = _RealRunner(tmp_path / "runner", hub_url)
+        first = runner.init()
+        assert first.returncode == 0, first.stderr
+        _disable_external_usage_network_call(runner.dir)
+        runner.tick()
+        runner_id = _added_runner_id(service)
+        siblings_before = runner.siblings()
+
+        reset = runner.run("store", "reset", str(runner.dir))
+        assert reset.returncode == 0, reset.stderr
+
+        [aside] = runner.set_aside()
+        assert str(aside) in reset.stdout
+        for suffix in siblings_before:
+            assert aside.with_name(aside.name + suffix).exists(), f"the store's {suffix} sibling was not set aside"
+        assert _stored_runner_id(aside) == runner_id
+        assert runner.store.is_file()
+        assert _stored_runner_id(runner.store) is None
+        assert _tables(runner.store) == _tables(aside), "the fresh store is not migrated to the set-aside one's head"
+
+        runner.tick()  # a store behind head is refused at startup, so this tick proves the fresh one current
+        assert _stored_runner_id(runner.store) == runner_id
+        assert _env_token(runner.dir) is not None
