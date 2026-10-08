@@ -49,6 +49,15 @@ same code path runs; only `--url` is spelled out per verb below.
 `scenario fleet` names two stores at once and so takes none of those three —
 its own entry below owns its flags.
 
+Every verb that can write the hub store (each `create` verb but
+`transcript-segment`, and both `scenario` verbs) also takes `--tenant <tenant_id>`,
+which no entry below repeats. It names, by id, the tenant a tenanted hub store's
+rows land in and its lookups read; omitted, the store's only tenant. A store that
+holds several tenants and is given none is refused with the list of its tenants,
+and so is a `--tenant` the store does not hold, or one named against a store with
+no `tenants` table (a runner store, or a hub from before tenancy). For
+`scenario fleet` it applies to the hub half only.
+
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
   live schema and deletes every row from every domain table in FK-safe order
   (children before parents), skipping Alembic's own `alembic_version` bookkeeping
@@ -311,6 +320,14 @@ its own entry below owns its flags.
   supplied. A miss is a schema drift — the live store moved out from under this
   tool — and raises `SchemaDriftError` naming the table and the offending
   column(s), never a silently-wrong row. Guide: `blizzard-context:/tooling/store-seeding.md`.
+- **The tenant is stamped by the store, never composed** (`domain/seeding.py`'s
+  `stamp_rows`, applied in `internal/reflected_store.py` ahead of the drift guard). A
+  table is tenant-owned exactly when its reflected schema has a `tenant_id` column; each
+  row written to one gets the resolved tenant, and each `ISeedStore.query` of one reads
+  only that tenant's rows — so a `--graph NAME` reuse never crosses into another tenant.
+  A `scopes` row likewise gets a minted `scp_<ulid>` `scope_id` once the table carries
+  that column. Because both are conditional on the column, the same composers seed a
+  store from before tenancy and one after it unchanged.
 - **Referential integrity is enforced, not just column shape**: the drift guard above
   validates a `FactRow`'s shape, not whether an id it names (a `--chunk`/`--runner-id`
   this store never seeded) actually exists. `internal/reflected_store.py` turns on

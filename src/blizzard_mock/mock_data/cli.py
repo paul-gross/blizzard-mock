@@ -87,7 +87,7 @@ from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import compos
 from blizzard_mock.mock_data.domain.runner.usage_seed import UsageCompositionError as RunnerUsageCompositionError
 from blizzard_mock.mock_data.domain.runner.usage_seed import compose_usage as compose_runner_usage
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError, require_column
-from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, SeedService
+from blizzard_mock.mock_data.domain.seeding import SeedIntegrityError, SeedService, TenantResolutionError
 from blizzard_mock.mock_data.domain.store_targets import STORE_TARGETS, store_mismatch_message
 from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore, create_seed_engine
 from blizzard_mock.mock_data.internal.runtime_config import RuntimeConfigError, resolve_db_url, resolve_runner_id
@@ -117,6 +117,7 @@ _COMPOSITION_ERRORS = (
     ScenarioCompositionError,
     RunnerFleetCompositionError,
     GardenProposalCompositionError,
+    TenantResolutionError,
 )
 
 #: Fallback ``event_log.runner_id`` when ``create event`` gets
@@ -185,8 +186,37 @@ def _resolve_fleet_runner_id(runner_id: str | None, runtime_dir: str | None) -> 
     return runner_id
 
 
+#: Where ``--tenant`` leaves its value for :func:`_seed_service` — on the click context,
+#: so the option rides every verb that writes a hub store without each one threading it.
+_TENANT_META_KEY = "blizzard_mock.mock_data.tenant"
+
+
+def _remember_tenant(ctx: click.Context, _param: click.Parameter, value: str | None) -> str | None:
+    if value is not None:
+        ctx.meta[_TENANT_META_KEY] = value
+    return value
+
+
+_tenant_option = click.option(
+    "--tenant",
+    "tenant",
+    default=None,
+    expose_value=False,
+    callback=_remember_tenant,
+    metavar="TENANT_ID",
+    help="The tenant (by id) a tenanted hub store's rows land in. Default: the store's only tenant.",
+)
+
+
+def _named_tenant() -> str | None:
+    """The ``--tenant`` the invoked verb was given, if any."""
+    ctx = click.get_current_context(silent=True)
+    value = ctx.meta.get(_TENANT_META_KEY) if ctx is not None else None
+    return str(value) if value is not None else None
+
+
 def _seed_service(url: str) -> SeedService:
-    return SeedService(ReflectedStore(create_seed_engine(url)))
+    return SeedService(ReflectedStore(create_seed_engine(url), tenant=_named_tenant()))
 
 
 def _create_fleet_engine(label: str, url: str) -> Engine:
@@ -199,7 +229,7 @@ def _create_fleet_engine(label: str, url: str) -> Engine:
         raise click.ClickException(f"cannot open the {label} store at {url!r}: {exc}") from exc
 
 
-def _connect_fleet_store(label: str, url: str, engine: Engine) -> SeedService:
+def _connect_fleet_store(label: str, url: str, engine: Engine, *, tenant: str | None = None) -> SeedService:
     """Open one real connection against ``label``'s already-constructed engine, before
     either store is written. An unreachable target (``sqlalchemy.exc.OperationalError``,
     raised on first connect — e.g. a sqlite path whose parent directory doesn't exist)
@@ -210,7 +240,7 @@ def _connect_fleet_store(label: str, url: str, engine: Engine) -> SeedService:
             pass
     except SQLAlchemyError as exc:
         raise click.ClickException(f"cannot open the {label} store at {url!r}: {exc}") from exc
-    return SeedService(ReflectedStore(engine))
+    return SeedService(ReflectedStore(engine, tenant=tenant))
 
 
 def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: random.Random) -> GraphContext:
@@ -443,6 +473,7 @@ def create() -> None:
     default=False,
     help="Declare a roster of zero subscriptions ('[]'), distinct from omitting --subscription entirely (NULL).",
 )
+@_tenant_option
 def create_runner(
     store: str,
     url: str | None,
@@ -525,6 +556,7 @@ def create_runner(
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str, seed: int | None) -> None:
     """Mint a synthetic workflow graph — a ``build`` node into a ``deliver`` node.
 
@@ -575,6 +607,7 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_chunk(
     store: str,
     url: str | None,
@@ -656,6 +689,7 @@ def create_chunk(
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_artifact(
     store: str,
     url: str | None,
@@ -760,6 +794,7 @@ def create_artifact(
     default=None,
     help="This lease's spawn ordinal (runner store only; default 1).",
 )
+@_tenant_option
 def create_usage(
     store: str,
     url: str | None,
@@ -900,6 +935,7 @@ def create_usage(
     help="Seed id-minting and pin the clock for byte-identical runs (runner store only — the "
     "hub's lease_facts mints no id of its own).",
 )
+@_tenant_option
 def create_lease(
     store: str,
     url: str | None,
@@ -1000,6 +1036,7 @@ def create_lease(
     default=CAUSE_RETRIES,
     help="What parked the chunk — selects the default takeover-command wording (domain/hub/escalation_seed.py).",
 )
+@_tenant_option
 def create_escalation(
     store: str,
     url: str | None,
@@ -1049,6 +1086,7 @@ def create_escalation(
     default=None,
     help="The raw JSON-object kick-back payload, landed verbatim. Left unset, a minimal one naming the cause.",
 )
+@_tenant_option
 def create_bounce(
     store: str,
     url: str | None,
@@ -1101,6 +1139,7 @@ def create_bounce(
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_question(
     store: str,
     url: str | None,
@@ -1184,6 +1223,7 @@ def create_question(
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_decision(
     store: str,
     url: str | None,
@@ -1265,6 +1305,7 @@ def create_decision(
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def create_garden_proposal(
     store: str,
     url: str | None,
@@ -1336,6 +1377,7 @@ def create_garden_proposal(
 )
 @click.option("--node", "node_name", default=None, help="The node name this event concerns, if any.")
 @click.option("--detail", "detail", default=None, help="Opaque JSON text, round-tripped only — must parse as JSON.")
+@_tenant_option
 def create_event(
     store: str,
     url: str | None,
@@ -1389,6 +1431,7 @@ def create_event(
 @click.option(
     "--reason", "reason", default=None, help="Only valid with --local — runner_pause_facts has no reason column."
 )
+@_tenant_option
 def create_runner_pause(
     store: str,
     url: str | None,
@@ -1536,6 +1579,7 @@ def scenario() -> None:
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress: bool, seed: int | None) -> None:
     """Seed one whole, ready-to-view board: a synthetic graph, ``--chunks``
     chunks spread across all nine derived statuses, a cost spread, an artifact
@@ -1600,6 +1644,7 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
 @click.option(
     "--seed", "seed", type=int, default=None, help="Seed id-minting and pin the clock for byte-identical runs."
 )
+@_tenant_option
 def scenario_fleet(
     hub_url: str | None,
     hub_dir: str | None,
@@ -1633,7 +1678,7 @@ def scenario_fleet(
     # DSN on either side refuses before the other side is attempted.
     hub_engine = _create_fleet_engine("hub", resolved_hub_url)
     runner_engine = _create_fleet_engine("runner", resolved_runner_url)
-    hub_service = _connect_fleet_store("hub", resolved_hub_url, hub_engine)
+    hub_service = _connect_fleet_store("hub", resolved_hub_url, hub_engine, tenant=_named_tenant())
     runner_service = _connect_fleet_store("runner", resolved_runner_url, runner_engine)
 
     # One Clock/Random pair across both halves, so --seed reproduces both.
