@@ -485,6 +485,48 @@ def test_hub_reset_keeps_each_tenants_starting_rows_and_the_global_tables(tmp_pa
     assert summary.tables_kept == 3  # tenants, users, work_item_sequence
 
 
+def test_hub_reset_keeps_memberships_hub_admins_and_the_hub_event_log(tmp_path: Path) -> None:
+    """Who belongs to which tenant, who holds the hub administrator role, and the hub's own
+    occurrences are global: a reset that emptied them would leave every tenant without its
+    members and the hub without its administrators."""
+    url, _meta = _tenant_boundary_store(tmp_path)
+    engine = create_engine(url)
+    global_meta = MetaData()
+    global_meta.reflect(bind=engine, only=["tenants"])
+    memberships = Table(
+        "membership_facts",
+        global_meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("user_id", String, nullable=False),
+        Column("role", String, nullable=False),
+    )
+    hub_admins = Table(
+        "hub_admin_facts",
+        global_meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("user_id", String, nullable=False),
+        Column("granted", Integer, nullable=False),
+    )
+    hub_events = Table(
+        "hub_event_log",
+        global_meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("kind", String, nullable=False),
+    )
+    global_meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(memberships.insert().values(tenant_id=_TENANT_B, user_id="usr_1", role="admin"))
+        conn.execute(hub_admins.insert().values(user_id="usr_1", granted=1))
+        conn.execute(hub_events.insert().values(kind="hub-started"))
+
+    _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    assert _rows(url, "membership_facts", "tenant_id", "user_id") == [(_TENANT_B, "usr_1")]
+    assert _rows(url, "hub_admin_facts", "user_id") == [("usr_1",)]
+    assert _rows(url, "hub_event_log", "kind") == [("hub-started",)]
+
+
 def test_hub_reset_leaves_the_store_seedable_by_its_tenant(tmp_path: Path) -> None:
     url, _meta = _tenant_boundary_store(tmp_path)
     _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))

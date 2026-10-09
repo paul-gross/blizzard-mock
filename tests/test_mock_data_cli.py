@@ -4488,3 +4488,96 @@ def test_reset_runner_keeps_nothing(tmp_path: Path) -> None:
     assert "kept" not in result.output
     with engine.begin() as conn:
         assert conn.execute(select(users)).all() == []
+
+
+# --- hub-level event kinds go to the hub event log ---------------------------
+
+
+def _hub_store_with_hub_event_log(tmp_path: Path) -> tuple[str, MetaData]:
+    """``_full_hub_store`` of two tenants, plus the global ``hub_event_log`` — no tenant key."""
+    url, meta = _full_hub_store(tmp_path, tenant_ids=(_TENANT_A, _TENANT_B))
+    Table(
+        "hub_event_log",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("recorded_at", DateTime, nullable=False),
+        Column("severity", String, nullable=False),
+        Column("kind", String, nullable=False),
+        Column("message", Text, nullable=False),
+        Column("detail", Text, nullable=True),
+    )
+    meta.create_all(create_engine(url))
+    return url, meta
+
+
+def _create_event(url: str, kind: str, *extra: str) -> Result:
+    return _runner().invoke(
+        cli,
+        [
+            "create",
+            "event",
+            "--store",
+            "hub",
+            "--url",
+            url,
+            "--kind",
+            kind,
+            "--severity",
+            "info",
+            "--message",
+            "m",
+            *extra,
+        ],
+    )
+
+
+@pytest.mark.parametrize("kind", ["hub-started", "hub-migrated", "trace-export-failed", "egress-cursor-reset"])
+def test_create_event_of_a_hub_level_kind_lands_in_the_hub_event_log_and_no_tenant(tmp_path: Path, kind: str) -> None:
+    """The hub's own occurrence names no tenant — no ``--tenant`` is needed though the store
+    holds two — and no tenant's ``event_log`` receives it."""
+    url, meta = _hub_store_with_hub_event_log(tmp_path)
+
+    result = _create_event(url, kind, "--detail", '{"from": "a"}')
+
+    assert result.exit_code == 0, result.output
+    assert "hub_event_log" in result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "hub_event_log"))).all()
+        assert conn.execute(select(_table(meta, "event_log"))).all() == []
+    assert [(row.kind, row.severity, row.message, row.detail) for row in rows] == [(kind, "info", "m", '{"from": "a"}')]
+
+
+def test_create_event_of_an_export_kind_naming_its_runner_stays_in_that_tenants_log(tmp_path: Path) -> None:
+    url, meta = _hub_store_with_hub_event_log(tmp_path)
+
+    result = _create_event(url, "trace-export-failed", "--runner-id", "r-1", "--tenant", _TENANT_B)
+
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "event_log"))).all()
+        assert conn.execute(select(_table(meta, "hub_event_log"))).all() == []
+    assert [(row.kind, row.runner_id, row.tenant_id) for row in rows] == [("trace-export-failed", "r-1", _TENANT_B)]
+
+
+def test_create_event_of_a_hub_only_kind_naming_a_runner_is_refused(tmp_path: Path) -> None:
+    url, meta = _hub_store_with_hub_event_log(tmp_path)
+
+    result = _create_event(url, "hub-started", "--runner-id", "r-1")
+
+    assert result.exit_code != 0
+    assert "hub_event_log alone" in result.output
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(_table(meta, "event_log"))).all() == []
+        assert conn.execute(select(_table(meta, "hub_event_log"))).all() == []
+
+
+def test_reset_hub_keeps_the_hub_event_log(tmp_path: Path) -> None:
+    url, meta = _hub_store_with_hub_event_log(tmp_path)
+    assert _create_event(url, "hub-started").exit_code == 0
+
+    result = _runner().invoke(cli, ["reset", "--store", "hub", "--url", url])
+
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        kinds = conn.execute(select(_table(meta, "hub_event_log").c.kind)).scalars().all()
+    assert kinds == ["hub-started"]

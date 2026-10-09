@@ -41,7 +41,12 @@ from blizzard_mock.mock_data.domain.hub.escalation_seed import (
     EscalationCompositionError,
     compose_escalation,
 )
-from blizzard_mock.mock_data.domain.hub.event_seed import SEVERITIES, EventCompositionError, compose_event
+from blizzard_mock.mock_data.domain.hub.event_seed import (
+    SEVERITIES,
+    EventCompositionError,
+    compose_event,
+    is_hub_event_kind,
+)
 from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
     CLOSURE_ACCEPTED_MINTED,
     GardenProposalCompositionError,
@@ -129,8 +134,8 @@ _COMPOSITION_ERRORS = (
     TenantResolutionError,
 )
 
-#: Fallback ``event_log.runner_id`` when ``create event`` gets
-#: neither ``--runner-id`` nor a ``--chunk`` whose lease history names one.
+#: Fallback ``event_log.runner_id`` when ``create event`` gets neither ``--runner-id``
+#: nor a ``--chunk`` whose lease history names one, for a kind that is not hub-level.
 _DEFAULT_EVENT_RUNNER_ID = SEED_RUNNER_ID
 
 #: Fixed clock instant any ``--seed``\ ed verb pins to, so two invocations at
@@ -391,8 +396,11 @@ def _resolve_artifact_defaults(
     return resolved_node_id, resolved_node_name, resolved_epoch
 
 
-def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_id: str | None) -> str | None:
-    """Default to the chunk's newest lease, else the seed runner.
+def _resolve_event_runner_id(
+    service: SeedService, *, kind: str, chunk_id: str | None, runner_id: str | None
+) -> str | None:
+    """Default to the chunk's newest lease, else the seed runner — or, for a hub-level
+    ``kind`` naming no chunk, no runner at all: the hub's own occurrence.
 
     An explicit empty string selects a hub-authored row (null runner_id)."""
     if runner_id == "":
@@ -404,6 +412,8 @@ def _resolve_event_runner_id(service: SeedService, chunk_id: str | None, runner_
         if leases:
             newest = max(leases, key=lambda row: str(require_column(row, "minted_at", table="lease_facts")))
             return str(require_column(newest, "runner_id", table="lease_facts"))
+    if is_hub_event_kind(kind) and chunk_id is None:
+        return None
     return _DEFAULT_EVENT_RUNNER_ID
 
 
@@ -1405,8 +1415,8 @@ def create_garden_proposal(
     "--runner-id",
     "runner_id",
     default=None,
-    help="The reporting runner (default: --chunk's newest lease, else the fixed seed runner's id; '' for a "
-    "hub-authored row).",
+    help="The reporting runner (default: --chunk's newest lease, else the fixed seed runner's id, else none for a "
+    "hub-level kind; '' for a hub-authored row).",
 )
 @click.option("--node", "node_name", default=None, help="The node name this event concerns, if any.")
 @click.option("--detail", "detail", default=None, help="Opaque JSON text, round-tripped only — must parse as JSON.")
@@ -1423,12 +1433,13 @@ def create_event(
     node_name: str | None,
     detail: str | None,
 ) -> None:
-    """Land one ``event_log`` row — the operational event feed. Independent of ``create
-    escalation`` (``domain/hub/event_seed.py``)."""
+    """Land one ``event_log`` row — the operational event feed — or, for a hub-level kind
+    naming no runner, chunk or node, one ``hub_event_log`` row, the hub's own occurrence.
+    Independent of ``create escalation`` (``domain/hub/event_seed.py``)."""
     _require_store("event", store)
     service = _seed_service(_resolve_url(store, url, runtime_dir))
     try:
-        resolved_runner_id = _resolve_event_runner_id(service, chunk_id, runner_id)
+        resolved_runner_id = _resolve_event_runner_id(service, kind=kind, chunk_id=chunk_id, runner_id=runner_id)
         row = compose_event(
             kind=kind,
             severity=severity,
@@ -1442,7 +1453,7 @@ def create_event(
         service.seed([row])
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"created event {kind!r} (severity={severity})")
+    click.echo(f"created event {kind!r} (severity={severity}) in {row.table}")
 
 
 @create.command("runner-pause")
