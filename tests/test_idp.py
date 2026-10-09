@@ -213,6 +213,101 @@ def test_github_user_emails_is_empty_with_no_email(client: TestClient) -> None:
     assert client.get("/user/emails", headers={"Authorization": f"token {token}"}).json() == []
 
 
+def _github_access_token(client: TestClient) -> str:
+    resp = client.get(
+        "/login/oauth/authorize",
+        params={"redirect_uri": "http://cb.test/callback", "state": "s1", "client_id": "cid"},
+        follow_redirects=False,
+    )
+    code = _redirect_query(resp)["code"]
+    return client.post(
+        "/login/oauth/access_token",
+        data={"code": code, "redirect_uri": "http://cb.test/callback", "client_id": "cid", "client_secret": "s"},
+    ).json()["access_token"]
+
+
+def test_github_user_emails_lists_every_address_with_its_own_verified_flag(client: TestClient) -> None:
+    client.put(
+        "/_levers/profile",
+        json={
+            "subject": "42",
+            "handle": "ada",
+            "email": "ada@example.com",
+            "email_verified": True,
+            "secondary_emails": [
+                {"email": "ada@work.example", "verified": True},
+                {"email": "ada@old.example", "verified": False},
+            ],
+        },
+    )
+    token = _github_access_token(client)
+    assert client.get("/user/emails", headers={"Authorization": f"token {token}"}).json() == [
+        {"email": "ada@example.com", "primary": True, "verified": True},
+        {"email": "ada@work.example", "primary": False, "verified": True},
+        {"email": "ada@old.example", "primary": False, "verified": False},
+    ]
+
+
+def test_github_user_emails_lists_secondaries_with_no_primary(client: TestClient) -> None:
+    client.put(
+        "/_levers/profile",
+        json={"subject": "42", "handle": "ada", "email": None, "secondary_emails": [{"email": "ada@work.example"}]},
+    )
+    token = _github_access_token(client)
+    assert client.get("/user/emails", headers={"Authorization": f"token {token}"}).json() == [
+        {"email": "ada@work.example", "primary": False, "verified": True}
+    ]
+
+
+def test_github_user_emails_answers_the_profile_bound_at_authorize(client: TestClient) -> None:
+    client.put(
+        "/_levers/profile", json={"subject": "42", "handle": "ada", "secondary_emails": [{"email": "a@x.example"}]}
+    )
+    token = _github_access_token(client)
+    client.put("/_levers/profile", json={"subject": "7", "handle": "bob", "email": "bob@example.com"})
+    emails = client.get("/user/emails", headers={"Authorization": f"token {token}"}).json()
+    assert [entry["email"] for entry in emails] == ["octocat@example.com", "a@x.example"]
+
+
+def test_oidc_id_token_carries_the_primary_address_alone(client: TestClient) -> None:
+    client.put(
+        "/_levers/profile",
+        json={
+            "subject": "42",
+            "handle": "ada",
+            "email": "ada@example.com",
+            "secondary_emails": [{"email": "a@x.example"}],
+        },
+    )
+    resp = client.get(
+        "/oidc/authorize",
+        params={"redirect_uri": "http://cb.test/callback", "state": "s1", "client_id": "cid"},
+        follow_redirects=False,
+    )
+    token_resp = client.post(
+        "/oidc/token",
+        data={"code": _redirect_query(resp)["code"], "client_id": "cid", "client_secret": "secret"},
+    )
+    jwks = client.get("/oidc/jwks").json()
+    key = RSAAlgorithm.from_jwk(jwks["keys"][0])
+    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert claims["email"] == "ada@example.com"
+    assert "a@x.example" not in str(claims)
+
+
+@pytest.mark.parametrize(
+    "emails",
+    [
+        {"email": "ada@example.com", "secondary_emails": [{"email": "ADA@example.com"}]},
+        {"email": None, "secondary_emails": [{"email": "a@x.example"}, {"email": "a@x.example", "verified": False}]},
+    ],
+)
+def test_levers_profile_refuses_an_address_listed_twice(client: TestClient, emails: dict[str, object]) -> None:
+    resp = client.put("/_levers/profile", json={"subject": "42", "handle": "ada", **emails})
+    assert resp.status_code == 422
+    assert client.get("/_levers/profile").json()["profile"]["handle"] == "octocat"
+
+
 # --- levers ---------------------------------------------------------------------
 
 
@@ -226,6 +321,7 @@ def test_levers_reset_restores_the_default_profile(client: TestClient) -> None:
         "handle": "octocat",
         "email": "octocat@example.com",
         "email_verified": True,
+        "secondary_emails": [],
         "role": None,
     }
 

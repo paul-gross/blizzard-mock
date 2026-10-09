@@ -79,6 +79,14 @@ def user_emails(
     profile = _profile_for_bearer(state_repo, authorization)
     if profile is None:
         return _UNAUTHORIZED
-    if profile.email is None:
-        return JSONResponse(content=[])
-    return JSONResponse(content=[{"email": profile.email, "primary": True, "verified": profile.email_verified}])
+    return JSONResponse(content=_emails(profile))
+
+
+def _emails(profile: Profile) -> list[dict[str, object]]:
+    """Every address on the account, primary first, each with its own verified flag."""
+    primary = (
+        [] if profile.email is None else [{"email": profile.email, "primary": True, "verified": profile.email_verified}]
+    )
+    return primary + [
+        {"email": entry.email, "primary": False, "verified": entry.verified} for entry in profile.secondary_emails
+    ]
