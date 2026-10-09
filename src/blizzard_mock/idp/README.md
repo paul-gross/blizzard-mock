@@ -22,7 +22,7 @@ involved.
 
 | Lever | Effect |
 |-------|--------|
-| `PUT /_levers/profile` | The identity (`subject`, `handle`, `email`, `email_verified`) the *next* completed dance resolves to — also how a test drives an unverified email or a handle rename. The optional `role` field rides along for a consuming hub to read and apply at first-login time; it is additive only — it never surfaces in the signed `id_token` or the GitHub-shaped `/user` response, which stay provider-shaped |
+| `PUT /_levers/profile` | The identity (`subject`, `handle`, `email`, `email_verified`, `secondary_emails`) the *next* completed dance resolves to — also how a test drives an unverified email or a handle rename. `secondary_emails` lists the account's other addresses, each `{"email", "verified"}`; `GET /user/emails` answers the primary first and then each of them with its own `verified` flag, while the OIDC `id_token` carries the primary alone, as a real one carries one address. An address listed twice (case-insensitively, the primary included) is refused with 422. The optional `role` field rides along for a consuming hub to read and apply at first-login time; it is additive only — it never surfaces in the signed `id_token` or the GitHub-shaped `/user` response, which stay provider-shaped |
 | `PUT /_levers/refuse_callback` | Armed, `authorize` redirects back with `error=access_denied` instead of a code |
 | `POST /_levers/reset` | Back to the default profile, lever cleared, codes/tokens forgotten |
 
