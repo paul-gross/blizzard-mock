@@ -47,6 +47,19 @@ an unregistered runner's. Registration only updates a runner already added; the 
 from the body, and a blank one keeps the held name. Every received header is still
 recorded (`GET /_captured`).
 
+The hub holds a tenant registry. It starts with one tenant, `default`, under the pinned id
+`ten_00000000000000000000000000`, and a scenario seeds more (`POST /_seed/tenants`). A runner
+is added in exactly one tenant and serves it for life; registration and the identity read
+both answer that tenant's `tenant_id` and its current `tenant_name`. `X-Blizzard-Tenant`
+carries a tenant id, never a name, and is resolved as the real hub resolves it. On a fleet
+call the runner token decides the tenant: a header naming any other tenant is refused **400**,
+and a header naming the token's own tenant is accepted. The identity read resolves no tenant
+and ignores the header. The operator routes act in the tenant the header names, answering
+**404** `no such tenant` for an id no tenant holds. With no header they act in the hub's only
+tenant, or answer **409** `{"code": "tenant_required"}` once it holds several. Chunks,
+questions, scopes and system artifacts stay one shared set, so a scenario runs one tenant's
+work at a time.
+
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
@@ -66,10 +79,10 @@ recorded (`GET /_captured`).
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`) → `{runner_id, runner_name, first_registration}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
-| `GET /api/fleet/identity` | The caller's `{runner_id, runner_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
-| `POST /api/runners` | Add a runner under a non-blank `name` → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name |
-| `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added, **409** for a retired runner |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
+| `GET /api/fleet/identity` | The caller's `{runner_id, runner_name, tenant_id, tenant_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
+| `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name, plus the tenant refusals above |
+| `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added in the request's tenant, **409** for a retired runner |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 | `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first |
 
@@ -134,10 +147,16 @@ to either a sample or a miss.
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
   chunk answers no such proposal. `POST /_seed/reset` clears all state, runners and their
   tokens included — as after a reset of a real hub's data, every token a runner holds then
-  answers `unknown`, and `blizzard runner init` re-adds only with `--allow-readd`.
-- `POST /_seed/runners {name, runner_id?, token?}` — add a runner never connected, as
-  `POST /api/runners` does, optionally under a pinned id and token (**409** for a pinned id
-  already added). `POST /_seed/runners/{id}/retire {by}` retires it and revokes its token,
+  answers `unknown`, and `blizzard runner init` re-adds only with `--allow-readd`. The tenant
+  registry returns to the first tenant alone, under its first name.
+- `POST /_seed/tenants {name, tenant_id?}` — create a tenant under a minted `ten_` id, or a
+  pinned one (**409** for a pinned id already held) → **201** `{tenant_id, name}`. `PATCH
+  /_seed/tenants/{id} {name}` renames it, as a hub administrator does, and its runners read
+  the new name on their next registration (**404** for an id no tenant holds).
+- `POST /_seed/runners {name, runner_id?, token?, tenant_id?}` — add a runner never
+  connected, as `POST /api/runners` does, optionally under a pinned id, token, and tenant (the
+  first tenant when omitted; **409** for a pinned id already added, **404** for an unknown
+  tenant). `POST /_seed/runners/{id}/retire {by}` retires it and revokes its token,
   so the identity read answers `retired`; `POST /_seed/runners/{id}/token-revocations`
   revokes the token alone (`revoked` until a rotation); `POST
   /_seed/runners/{id}/pause?paused=` sets or releases the fleet's brake on it. All three answer

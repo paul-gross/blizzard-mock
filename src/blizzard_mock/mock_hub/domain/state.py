@@ -87,14 +87,32 @@ class ScopeRow:
     retired: bool = False
 
 
+#: The tenant every mock hub starts with — the one a freshly migrated real hub holds. Its id is
+#: pinned so a scenario can name it without first reading it back.
+FIRST_TENANT_ID = "ten_00000000000000000000000000"
+FIRST_TENANT_NAME = "default"
+
+
+@dataclass(kw_only=True)
+class TenantRow:
+    """One tenant in the mock hub's registry — mirrors the real hub's ``tenants`` row. The id is
+    the tenant's only name a request may use; ``name`` is a label, and a rename replaces it.
+    Keyword-only: the two adjacent ``str`` fields would swap silently at a positional call."""
+
+    tenant_id: str
+    name: str
+
+
 class RunnerRow:
     """An added runner's mutable registry row. Mirrors the real hub's ``runner_registrations`` row.
 
     ``add`` writes the row never connected; a registration fills the rest. What the runner reports about
     itself lives in :class:`ReportedRunnerFacts`, which outlives and predates this row."""
 
-    def __init__(self, runner_id: str, *, name: str, added_at: datetime) -> None:
+    def __init__(self, runner_id: str, *, tenant_id: str, name: str, added_at: datetime) -> None:
         self.runner_id = runner_id
+        # The tenant the runner was added in, for life — its bearer token resolves to it.
+        self.tenant_id = tenant_id
         # Display only and not unique — the runner owns it, and every registration may replace it.
         self.name = name
         self.added_at = added_at
@@ -151,8 +169,15 @@ def refuse_braked_runner(row: RunnerRow | None, *, runner_id: str) -> RunnerRow:
 
 
 class IHubState(Protocol):
-    """The mock hub's write-through state: chunks, questions, the runner registry, and the
-    global (not per-chunk) published system-artifact set."""
+    """The mock hub's write-through state: chunks, questions, the tenant and runner registries,
+    and the global (not per-chunk) published system-artifact set."""
+
+    def put_tenant(self, row: TenantRow) -> None:
+        """Insert or replace one tenant, keyed by its id."""
+        ...
+
+    def get_tenant(self, tenant_id: str) -> TenantRow | None: ...
+    def list_tenants(self) -> list[TenantRow]: ...
 
     def put_chunk(self, chunk: ChunkState) -> None: ...
     def get_chunk(self, chunk_id: str) -> ChunkState | None: ...
@@ -223,6 +248,6 @@ class IHubState(Protocol):
         ...
 
     def clear(self) -> None:
-        """Drop every row, the runner registry and its tokens included — a hub data reset, after
-        which every token a runner holds is unknown here."""
+        """Drop every row, the tenant and runner registries and the runners' tokens included — a hub
+        data reset, after which every token a runner holds is unknown here."""
         ...

@@ -13,7 +13,14 @@ from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints
 
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
-from blizzard_mock.mock_hub.domain.service import MockHubService, UnresolvableRunner
+from blizzard_mock.mock_hub.domain.service import (
+    TENANT_HEADER,
+    ForeignTenantNamed,
+    MockHubService,
+    NoSuchTenant,
+    TenantRequired,
+    UnresolvableRunner,
+)
 
 
 def get_service(request: Request) -> MockHubService:
@@ -37,6 +44,38 @@ def get_principal(request: Request, service: Annotated[MockHubService, Depends(g
         return service.principal(presented_bearer(request))
     except UnresolvableRunner as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def named_tenant(request: Request) -> str | None:
+    """The tenant id an ``X-Blizzard-Tenant`` header names, else ``None``."""
+    return request.headers.get(TENANT_HEADER) or None
+
+
+def fleet_tenant_bound(
+    request: Request,
+    runner_id: Annotated[str, Depends(get_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> None:
+    """A fleet router dependency after :func:`get_principal`: the runner token decides the call's
+    tenant, so an ``X-Blizzard-Tenant`` naming another one is refused ``400``, as the real hub's
+    resolution does; one naming the token's own tenant is accepted."""
+    try:
+        service.refuse_foreign_tenant(runner_id, named_tenant(request))
+    except ForeignTenantNamed as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def get_tenant(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
+    """The tenant an operator call acts in — the one ``X-Blizzard-Tenant`` names (``404`` for an id
+    no tenant holds, the real hub's one body for unknown and unenterable), else the hub's only
+    tenant (``409 tenant_required`` when it holds several). The mock's operator is a member of
+    every tenant, as the real hub's implicit operator is."""
+    try:
+        return service.tenant_named(named_tenant(request))
+    except NoSuchTenant as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TenantRequired as exc:
+        raise HTTPException(status_code=409, detail={"code": "tenant_required", "message": str(exc)}) from exc
 
 
 def get_captured(request: Request) -> ICaptureStore:
@@ -223,6 +262,23 @@ class RunnerSeedControlBody(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = "runner-mock"
     runner_id: str | None = None
     token: str | None = None
+    # The tenant the runner is added in — the hub's first tenant when omitted.
+    tenant_id: str | None = None
+
+
+class TenantSeedControlBody(BaseModel):
+    """``POST /_seed/tenants`` — test-control only; creates a tenant, minting its ``ten_`` id
+    unless a scenario pins one."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    tenant_id: str | None = None
+
+
+class TenantRenameControlBody(BaseModel):
+    """``PATCH /_seed/tenants/{tenant_id}`` — test-control only; renames a tenant, as the hub
+    administrator's rename does."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class RunnerRetireControlBody(BaseModel):

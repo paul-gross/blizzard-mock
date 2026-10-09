@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from blizzard_mock.clock import Clock
-from blizzard_mock.ids import RUNNER_PREFIX, mint
+from blizzard_mock.ids import RUNNER_PREFIX, TENANT_PREFIX, mint
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
@@ -49,6 +49,8 @@ from blizzard_mock.mock_hub.domain.models import (
     status_if_paused,
 )
 from blizzard_mock.mock_hub.domain.state import (
+    FIRST_TENANT_ID,
+    FIRST_TENANT_NAME,
     DeclaredSubscription,
     IHubState,
     ReportedRunnerFacts,
@@ -56,6 +58,7 @@ from blizzard_mock.mock_hub.domain.state import (
     RunnerRow,
     ScopeRow,
     SubscriptionUsageMiss,
+    TenantRow,
     refuse_braked_runner,
 )
 from blizzard_mock.mock_hub.domain.wire import (
@@ -123,6 +126,9 @@ TOKEN_RETIRED = "retired"
 
 #: The one miss reason surfaced as a per-slug `condition` — restated from the real hub, not imported.
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
+
+#: The header a request names its tenant with — the tenant's id, never its name.
+TENANT_HEADER = "X-Blizzard-Tenant"
 
 
 def _optional_text(value: object) -> str | None:
@@ -282,6 +288,30 @@ class RunnerTokenRefused(Exception):
         self.runner_id = runner_id
 
 
+class NoSuchTenant(Exception):
+    """The tenant a request names is no tenant here — the real hub's ``404``, one body whether the
+    id was never minted or names a tenant the caller cannot enter."""
+
+    def __init__(self) -> None:
+        super().__init__("no such tenant")
+
+
+class TenantRequired(Exception):
+    """A request naming no tenant reached a hub holding several — the real hub's
+    ``409 tenant_required``."""
+
+    def __init__(self) -> None:
+        super().__init__(f"name the tenant to act in with {TENANT_HEADER}")
+
+
+class ForeignTenantNamed(Exception):
+    """A fleet call's ``X-Blizzard-Tenant`` names a tenant other than the one its runner token
+    resolves to — the real hub's ``400``; a header naming the token's own tenant is accepted."""
+
+    def __init__(self) -> None:
+        super().__init__(f"{TENANT_HEADER} names a tenant other than the presented credential's")
+
+
 class UnknownRunner(Exception):
     """No runner with that id was ever added here."""
 
@@ -353,6 +383,7 @@ class MockHubService:
         #: Retained transcript records, keyed by lease, then by each record's own
         #: natural key — only accepted records land here, so a capped one never reads back.
         self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
+        self._found_first_tenant()
 
     @property
     def levers(self) -> ILeverStore:
@@ -388,7 +419,10 @@ class MockHubService:
         return chunk
 
     def reset(self) -> None:
+        """Return the hub to its first boot: every row gone, the tenant registry back to the one
+        first tenant under its original name."""
         self._state.clear()
+        self._found_first_tenant()
         self._levers.clear_all()
         self._fact_high_water.clear()
         self._transcript_high_water.clear()
@@ -1054,20 +1088,85 @@ class MockHubService:
         chunk.claimed = False
         self._state.put_chunk(chunk)
 
+    # -- tenants -----------------------------------------------------------
+
+    def _found_first_tenant(self) -> None:
+        self._state.put_tenant(TenantRow(tenant_id=FIRST_TENANT_ID, name=FIRST_TENANT_NAME))
+
+    def seed_tenant(self, *, name: str, tenant_id: str | None = None) -> TenantRow:
+        """Create a tenant under ``name`` — the hub mints its ``ten_`` id unless a scenario pins
+        one. A pinned id already held raises ``ValueError``."""
+        minted = tenant_id or mint(TENANT_PREFIX, self._clock, self._rng)
+        if self._state.get_tenant(minted) is not None:
+            raise ValueError(f"tenant {minted} already exists")
+        row = TenantRow(tenant_id=minted, name=name)
+        self._state.put_tenant(row)
+        return row
+
+    def rename_tenant(self, tenant_id: str, *, name: str) -> TenantRow:
+        """Replace the tenant's name; its runners read the new one on their next registration."""
+        row = self._tenant(tenant_id)
+        row.name = name
+        return row
+
+    def tenant_named(self, named: str | None) -> str:
+        """The tenant an operator request acts in — the one ``X-Blizzard-Tenant`` names, else the
+        hub's only tenant. Mirrors the real hub's resolution for a caller who is a member of every
+        tenant: :class:`NoSuchTenant` for an id no tenant holds, :class:`TenantRequired` when no
+        header is sent and several tenants exist."""
+        if named:
+            return self._tenant(named).tenant_id
+        tenants = self._state.list_tenants()
+        if len(tenants) != 1:
+            raise TenantRequired()
+        return tenants[0].tenant_id
+
+    def refuse_foreign_tenant(self, runner_id: str, named: str | None) -> None:
+        """Refuse a fleet call whose ``X-Blizzard-Tenant`` names a tenant other than its runner's
+        (:class:`ForeignTenantNamed`) — the runner token decides the tenant, and a header can only
+        agree with it."""
+        if named and named != self._added(runner_id).tenant_id:
+            raise ForeignTenantNamed()
+
+    def _tenant(self, tenant_id: str) -> TenantRow:
+        row = self._state.get_tenant(tenant_id)
+        if row is None:
+            raise NoSuchTenant()
+        return row
+
+    def _tenant_name(self, tenant_id: str) -> str | None:
+        row = self._state.get_tenant(tenant_id)
+        return row.name if row is not None else None
+
     # -- registry ----------------------------------------------------------
 
-    def add_runner(self, *, name: str, runner_id: str | None = None, token: str | None = None) -> RunnerAddResponse:
-        """Add a runner under the initial ``name``, never connected — the hub mints its id and
-        bearer token together (``POST /api/runners``). ``runner_id``/``token`` let a scenario
-        pin either instead; ids are opaque, so a literal one is as good as a minted one."""
+    def add_runner(
+        self,
+        *,
+        name: str,
+        tenant_id: str = FIRST_TENANT_ID,
+        runner_id: str | None = None,
+        token: str | None = None,
+    ) -> RunnerAddResponse:
+        """Add a runner under the initial ``name`` in ``tenant_id``, never connected — the hub mints
+        its id and bearer token together (``POST /api/runners``), and the runner serves that tenant
+        for life. ``runner_id``/``token`` let a scenario pin either instead; ids are opaque, so a
+        literal one is as good as a minted one. An unknown tenant raises :class:`NoSuchTenant`."""
+        tenant = self._tenant(tenant_id)
         added_id = runner_id or mint(RUNNER_PREFIX, self._clock, self._rng)
         issued = token or f"mock-runner-token-{secrets.token_urlsafe(18)}"
-        self._state.add_runner(RunnerRow(added_id, name=name, added_at=self._clock.now()), token=issued)
+        self._state.add_runner(
+            RunnerRow(added_id, tenant_id=tenant.tenant_id, name=name, added_at=self._clock.now()), token=issued
+        )
         return RunnerAddResponse(runner_id=added_id, runner_name=name, token=issued)
 
-    def enroll(self, runner_id: str) -> RunnerEnrollmentResponse:
-        """Rotate the runner's bearer token — the one it held until now is revoked."""
+    def enroll(self, runner_id: str, *, tenant_id: str = FIRST_TENANT_ID) -> RunnerEnrollmentResponse:
+        """Rotate the runner's bearer token — the one it held until now is revoked. A runner added
+        in another tenant is :class:`UnknownRunner`, as a tenant's own read of the registry finds
+        no such runner."""
         row = self._added(runner_id)
+        if row.tenant_id != tenant_id:
+            raise UnknownRunner(runner_id)
         if row.retired_at is not None:
             raise RunnerRetired(runner_id)
         token = f"mock-runner-token-{secrets.token_urlsafe(18)}"
@@ -1096,7 +1195,12 @@ class MockHubService:
         if current is not None:
             if current.retired_at is not None:
                 raise RunnerTokenRefused(TOKEN_RETIRED, runner_id=current.runner_id)
-            return RunnerIdentityView(runner_id=current.runner_id, runner_name=current.name)
+            return RunnerIdentityView(
+                runner_id=current.runner_id,
+                runner_name=current.name,
+                tenant_id=current.tenant_id,
+                tenant_name=self._tenant_name(current.tenant_id),
+            )
         revoked_id = self._state.revoked_token_runner_id(token)
         revoked_for = self._state.get_runner(revoked_id) if revoked_id is not None else None
         if revoked_for is None:
@@ -1143,8 +1247,13 @@ class MockHubService:
             declared_subscriptions=subscriptions,
             gates=gates,
         )
+        row = self._added(runner_id)
         return RunnerRegistrationResponse(
-            runner_id=runner_id, runner_name=self._added(runner_id).name, first_registration=first
+            runner_id=runner_id,
+            runner_name=row.name,
+            first_registration=first,
+            tenant_id=row.tenant_id,
+            tenant_name=self._tenant_name(row.tenant_id),
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:

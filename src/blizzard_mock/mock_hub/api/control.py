@@ -18,13 +18,22 @@ from blizzard_mock.mock_hub.api.deps import (
     RunnerRetireControlBody,
     RunnerSeedControlBody,
     StopControlBody,
+    TenantRenameControlBody,
+    TenantSeedControlBody,
     get_captured,
     get_service,
 )
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import CATALOG, HubLever
 from blizzard_mock.mock_hub.domain.models import ChunkSpec, ScopeSpec, SystemArtifactSpec
-from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService, QuestionNotFound, UnknownRunner
+from blizzard_mock.mock_hub.domain.service import (
+    ChunkNotFound,
+    MockHubService,
+    NoSuchTenant,
+    QuestionNotFound,
+    UnknownRunner,
+)
+from blizzard_mock.mock_hub.domain.state import FIRST_TENANT_ID
 
 seed_router = APIRouter(prefix="/_seed", tags=["control"])
 levers_router = APIRouter(prefix="/_levers", tags=["control"])
@@ -84,13 +93,41 @@ def seed_stop(body: StopControlBody, service: Annotated[MockHubService, Depends(
     return {"stopped": True, "chunk_id": body.chunk_id}
 
 
+@seed_router.post("/tenants", status_code=201)
+def seed_tenant(body: TenantSeedControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — creates a tenant beside the first one, under a minted or pinned id. A
+    pinned id already held is refused ``409``."""
+    try:
+        row = service.seed_tenant(name=body.name, tenant_id=body.tenant_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    return {"tenant_id": row.tenant_id, "name": row.name}
+
+
+@seed_router.patch("/tenants/{tenant_id}")
+def seed_rename_tenant(
+    tenant_id: str, body: TenantRenameControlBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Test-control only — renames a tenant; its runners read the new name on their next
+    registration or identity read. ``404`` for an id no tenant holds."""
+    try:
+        row = service.rename_tenant(tenant_id, name=body.name)
+    except NoSuchTenant as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"tenant_id": row.tenant_id, "name": row.name}
+
+
 @seed_router.post("/runners", status_code=201)
 def seed_runner(body: RunnerSeedControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     """Test-control only — adds a runner never connected, exactly as ``POST /api/runners``
-    does, except that a scenario may pin its id and bearer token. A pinned id already added
-    is refused ``409``."""
+    does, except that a scenario may pin its id, bearer token and tenant (the first tenant when
+    none is named). A pinned id already added is refused ``409``; an unknown tenant ``404``."""
     try:
-        return service.add_runner(name=body.name, runner_id=body.runner_id, token=body.token)
+        return service.add_runner(
+            name=body.name, tenant_id=body.tenant_id or FIRST_TENANT_ID, runner_id=body.runner_id, token=body.token
+        )
+    except NoSuchTenant as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
     except ValueError as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
