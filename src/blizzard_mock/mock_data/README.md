@@ -73,7 +73,7 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   `work_item_sequence` row, and its `default`-slug project (`domain/seeding.py`'s
   `hub_reset_boundary`). The global list is the hub schema module's own
   `GLOBAL_TABLES` when `blizzard` is importable, else `HUB_GLOBAL_TABLES`, kept in
-  step with it by hand. A boundary table the store lacks is skipped. A hub from
+  step with it by hand and compared against it by `tests/test_wire_parity.py`. A boundary table the store lacks is skipped. A hub from
   before tenancy has no `tenants` table, so it is emptied whole, exactly as
   `--store runner` empties every table.
 - `create runner --store hub [--runner-id R] [--name N] [--never-connected | --workspace-id W] [--paused] [--subscription SLUG NAME PROVIDER]... [--declare-empty-roster] [--sample SLUG AGE_SECONDS]... [--miss SLUG AGE_SECONDS REASON]...` —
@@ -216,7 +216,11 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   operational event feed. `--runner-id` defaults to `--chunk`'s newest lease's runner,
   or the fixed `rn_` seed runner absent either; an empty `--runner-id ""` lands a
   hub-authored row (`NULL`). `--detail` is opaque JSON, round-tripped only — validated to parse, never
-  interpreted.
+  interpreted. A hub-level kind — an export's (`trace-*`, `egress-*`), `hub-started`,
+  `hub-migrated`, `tenant-closed`, `tenant-deleted` — naming no runner, chunk or node lands
+  in the global `hub_event_log` instead, never in a tenant's `event_log`, and takes no
+  default runner. An export kind that names one is a runner's report of its own export and
+  stays in `event_log`; any other hub-level kind naming one is refused.
 - `create runner-pause --store {hub,runner} [--runner-id R] (--local | --fleet) [--reason TEXT]` —
   **implemented**. Lands one pause fact, engaged (`domain/hub/runner_pause_seed.py`):
   `--local` on the runner's own brake (`runner_local_pause_facts`, `--reason`

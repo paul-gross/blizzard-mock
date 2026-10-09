@@ -26,12 +26,14 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from pydantic import BaseModel
 
 import blizzard_mock.mock_hub.domain.wire as mirror
+from blizzard_mock.mock_data.domain.hub.event_seed import EXPORT_EVENT_KINDS, HUB_EVENT_KINDS
+from blizzard_mock.mock_data.domain.seeding import HUB_GLOBAL_TABLES
 from blizzard_mock.mock_hub.api import deps
 from blizzard_mock.mock_hub.domain import service as hub_service
 from blizzard_mock.mock_hub.domain import state as hub_state
@@ -47,6 +49,8 @@ _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
 _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "fact_kinds.py"
 _OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode" / "shapes.py"
 _ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
+_EVENT_LOG_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "event_log.py"
+_HUB_SCHEMA_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "store" / "schema.py"
 
 
 def _sibling(path: Path) -> str:
@@ -476,6 +480,27 @@ def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
         value for name, value in vars(hub_service).items() if name.isupper() and isinstance(value, str) and "." in value
     }
     assert mirrored == real
+
+
+def test_hub_event_kinds_match_the_real_vocabulary() -> None:
+    """``create event`` routes the hub's own kinds to ``hub_event_log`` by the real
+    ``HubEventKind``, and lets a runner report only the kinds both logs carry — a hub kind
+    the mock never learned would land in a tenant's log."""
+    real = _exec_source("_event_log_wire_parity", _EVENT_LOG_SOURCE)
+    hub_kinds = set(get_args(real.HubEventKind))
+    assert set(HUB_EVENT_KINDS) == hub_kinds
+    assert set(EXPORT_EVENT_KINDS) == hub_kinds & set(get_args(real.EventLogKind))
+
+
+def test_hub_global_tables_match_the_real_schema() -> None:
+    """``reset --store hub`` keeps the hub's global tables by this hand-kept list when
+    ``blizzard`` is not importable — a global table it missed would be emptied."""
+    block = re.search(
+        r"^GLOBAL_TABLES: frozenset\[str\] = frozenset\(\n(.*?)^\)$", _sibling(_HUB_SCHEMA_SOURCE), re.M | re.S
+    )
+    assert block is not None, f"no GLOBAL_TABLES declaration in {_HUB_SCHEMA_SOURCE}"
+    real = set(re.findall(r'^\s*"([a-z_]+)",', block.group(1), re.MULTILINE))
+    assert real == HUB_GLOBAL_TABLES
 
 
 def _transposable(entry_point: Callable[..., Any]) -> list[str]:
