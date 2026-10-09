@@ -281,11 +281,17 @@ class RunnerView(BaseModel):
 
 class RunnerRegistrationResponse(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerRegistrationResponse`` — the id the caller's token
-    names, the name the registration recorded, and whether it was the first since the add."""
+    names, the name the registration recorded, whether it was the first since the add, and the
+    tenant the runner serves. Registration doubles as the heartbeat, so a renamed tenant reaches
+    the runner on its next tick."""
 
     runner_id: str
     runner_name: str | None = None
     first_registration: bool
+    # The tenant the runner was added in, and that tenant's current name. The mock always fills
+    # both; the real model leaves them optional for a hub that predates tenants.
+    tenant_id: str | None = None
+    tenant_name: str | None = None
 
 
 class RunnerAddResponse(BaseModel):
@@ -305,10 +311,13 @@ class RunnerEnrollmentResponse(BaseModel):
 
 
 class RunnerIdentityView(BaseModel):
-    """Mirrors ``blizzard.wire.runner.RunnerIdentityView`` — whom a bearer token names."""
+    """Mirrors ``blizzard.wire.runner.RunnerIdentityView`` — whom a bearer token names, and the
+    tenant it was added in, read as registration reads it."""
 
     runner_id: str
     runner_name: str
+    tenant_id: str | None = None
+    tenant_name: str | None = None
 
 
 class RunnerIdentityRefusal(BaseModel):

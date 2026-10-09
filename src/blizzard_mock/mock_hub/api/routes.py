@@ -20,8 +20,10 @@ from blizzard_mock.mock_hub.api.deps import (
     RunnerFactBatchBody,
     RunnerRegistrationBody,
     TranscriptSegmentBatchBody,
+    fleet_tenant_bound,
     get_principal,
     get_service,
+    get_tenant,
     presented_bearer,
 )
 from blizzard_mock.mock_hub.domain.models import (
@@ -58,14 +60,21 @@ from blizzard_mock.mock_hub.domain.state import (
 #: hub.
 router = APIRouter(prefix="/api", tags=["hub"])
 
-#: The runner-facing hub mirror — every route answers only a caller whose bearer token names a runner.
-fleet_router = APIRouter(prefix="/api/fleet", tags=["hub"], dependencies=[Depends(get_principal)])
+#: The runner-facing hub mirror — every route answers only a caller whose bearer token names a runner,
+#: and acts in that runner's tenant.
+fleet_router = APIRouter(
+    prefix="/api/fleet", tags=["hub"], dependencies=[Depends(get_principal), Depends(fleet_tenant_bound)]
+)
 
 #: ``GET /api/fleet/identity`` alone — outside the gate, since it is how a runner learns why its token is refused.
+#: It resolves no tenant, so it reads no ``X-Blizzard-Tenant``.
 identity_router = APIRouter(prefix="/api/fleet", tags=["hub"])
 
-#: The operator verbs a runner's bootstrap calls, unauthenticated.
+#: The operator verbs a runner's bootstrap calls, unauthenticated — each acts in the tenant
+#: ``X-Blizzard-Tenant`` names, else the hub's only one.
 operator_router = APIRouter(prefix="/api", tags=["hub"])
+
+Tenant = Annotated[str, Depends(get_tenant)]
 
 Principal = Annotated[str, Depends(get_principal)]
 
@@ -501,17 +510,19 @@ def get_runner_identity(request: Request, service: Annotated[MockHubService, Dep
 
 
 @operator_router.post("/runners", status_code=201)
-def add_runner(body: RunnerAddBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """Add a runner under the initial ``name`` — its id and bearer token are minted together and
-    the token returned once; it stays never connected until it registers with that token."""
-    return service.add_runner(name=body.name)
+def add_runner(body: RunnerAddBody, tenant: Tenant, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Add a runner under the initial ``name`` in the request's tenant — its id and bearer token are
+    minted together and the token returned once; it stays never connected until it registers with
+    that token."""
+    return service.add_runner(name=body.name, tenant_id=tenant)
 
 
 @operator_router.post("/runners/{runner_id}/enrollments", status_code=201)
-def enroll_runner(runner_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """Rotate the runner's bearer token — 404 for a runner never added, 409 for a retired one."""
+def enroll_runner(runner_id: str, tenant: Tenant, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Rotate the runner's bearer token — 404 for a runner never added in the request's tenant, 409
+    for a retired one."""
     try:
-        return service.enroll(runner_id)
+        return service.enroll(runner_id, tenant_id=tenant)
     except UnknownRunner as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except RunnerRetired as exc:

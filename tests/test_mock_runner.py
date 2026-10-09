@@ -23,6 +23,7 @@ from blizzard_mock.clock import FixedClock
 from blizzard_mock.harness_identity import OPENCODE_HARNESS_ID
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
 from blizzard_mock.mock_hub.domain.service import MockHubService
+from blizzard_mock.mock_hub.domain.state import FIRST_TENANT_ID, FIRST_TENANT_NAME
 from blizzard_mock.mock_runner.app import bootstrap_token
 from blizzard_mock.mock_runner.app import create_app as create_runner_app
 from blizzard_mock.mock_runner.domain.models import Held
@@ -215,7 +216,13 @@ def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[Te
 
     reply = runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()
 
-    assert reply["response"] == {"runner_id": "runner-mock", "runner_name": "runner-mock", "first_registration": True}
+    assert reply["response"] == {
+        "runner_id": "runner-mock",
+        "runner_name": "runner-mock",
+        "first_registration": True,
+        "tenant_id": FIRST_TENANT_ID,
+        "tenant_name": FIRST_TENANT_NAME,
+    }
     assert service.runner_id == "runner-mock"
 
 

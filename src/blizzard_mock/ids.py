@@ -17,6 +17,8 @@ _RAND_CHARS = 16  # 80 bits of randomness
 
 #: A runner's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.RUNNER``.
 RUNNER_PREFIX = "rn"
+#: A tenant's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.TENANT``.
+TENANT_PREFIX = "ten"
 
 
 def seeded_rng(seed: int | None) -> random.Random:

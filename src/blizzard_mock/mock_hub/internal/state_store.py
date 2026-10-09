@@ -16,13 +16,15 @@ from blizzard_mock.mock_hub.domain.state import (
     RunnerCapability,
     RunnerRow,
     ScopeRow,
+    TenantRow,
 )
 
 
 class InMemoryHubState:
-    """Process-local chunk map + question map + runner registry. Implements ``IHubState``."""
+    """Process-local chunk map + question map + tenant and runner registries. Implements ``IHubState``."""
 
     def __init__(self) -> None:
+        self._tenants: dict[str, TenantRow] = {}
         self._chunks: dict[str, ChunkState] = {}
         self._runners: dict[str, RunnerRow] = {}
         #: Plaintext bearer token -> the runner it is the current token of. The real hub keeps a
@@ -34,6 +36,15 @@ class InMemoryHubState:
         self._questions: dict[str, QuestionState] = {}
         self._system_artifacts: dict[str, str] = {}
         self._scopes: dict[str, ScopeRow] = {}
+
+    def put_tenant(self, row: TenantRow) -> None:
+        self._tenants[row.tenant_id] = row
+
+    def get_tenant(self, tenant_id: str) -> TenantRow | None:
+        return self._tenants.get(tenant_id)
+
+    def list_tenants(self) -> list[TenantRow]:
+        return list(self._tenants.values())
 
     def put_chunk(self, chunk: ChunkState) -> None:
         self._chunks[chunk.chunk_id] = chunk
@@ -130,6 +141,7 @@ class InMemoryHubState:
         return sorted(self._scopes.values(), key=lambda row: row.created_at, reverse=True)
 
     def clear(self) -> None:
+        self._tenants.clear()
         self._chunks.clear()
         self._runners.clear()
         self._tokens.clear()

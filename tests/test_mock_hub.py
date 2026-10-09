@@ -34,6 +34,8 @@ from blizzard_mock.mock_hub.domain.models import (
 )
 from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES, MockHubService
 from blizzard_mock.mock_hub.domain.state import (
+    FIRST_TENANT_ID,
+    FIRST_TENANT_NAME,
     ClaimDeniedPaused,
     ClaimDeniedUnregistered,
     DeclaredSubscription,
@@ -3502,7 +3504,7 @@ def test_an_unregistered_runner_is_braked() -> None:
 
 
 def test_an_added_runner_that_never_registered_is_braked_as_unregistered() -> None:
-    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+    row = RunnerRow("r1", tenant_id=FIRST_TENANT_ID, name="r1", added_at=_HUB_INSTANT)
 
     with pytest.raises(ClaimDeniedUnregistered) as refused:
         refuse_braked_runner(row, runner_id="r1")
@@ -3511,7 +3513,7 @@ def test_an_added_runner_that_never_registered_is_braked_as_unregistered() -> No
 
 
 def test_a_runner_paused_at_the_hub_is_braked() -> None:
-    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+    row = RunnerRow("r1", tenant_id=FIRST_TENANT_ID, name="r1", added_at=_HUB_INSTANT)
     row.registered_at = _HUB_INSTANT
     row.paused = True
 
@@ -3522,7 +3524,7 @@ def test_a_runner_paused_at_the_hub_is_braked() -> None:
 
 
 def test_a_registered_runner_is_not_braked() -> None:
-    row = RunnerRow("r1", name="r1", added_at=_HUB_INSTANT)
+    row = RunnerRow("r1", tenant_id=FIRST_TENANT_ID, name="r1", added_at=_HUB_INSTANT)
     row.registered_at = _HUB_INSTANT
 
     assert refuse_braked_runner(row, runner_id="r1") is row
@@ -4013,8 +4015,19 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
     kept = client.post("/api/fleet/runners", json={"name": "  ", "workspace_id": "ws"}, headers=_bearer(added["token"]))
 
     assert first.status_code == 201
-    assert first.json() == {"runner_id": added["runner_id"], "runner_name": "r-claude", "first_registration": True}
-    assert renamed.json() == {"runner_id": added["runner_id"], "runner_name": "r-renamed", "first_registration": False}
+    tenant = {"tenant_id": FIRST_TENANT_ID, "tenant_name": FIRST_TENANT_NAME}
+    assert first.json() == {
+        "runner_id": added["runner_id"],
+        "runner_name": "r-claude",
+        "first_registration": True,
+        **tenant,
+    }
+    assert renamed.json() == {
+        "runner_id": added["runner_id"],
+        "runner_name": "r-renamed",
+        "first_registration": False,
+        **tenant,
+    }
     assert kept.json()["runner_name"] == "r-renamed"
     view = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"])).json()
     assert (view["runner_id"], view["runner_name"]) == (added["runner_id"], "r-renamed")
@@ -4049,7 +4062,12 @@ def test_identity_answers_a_current_token_with_its_runner_and_no_side_effects(cl
     answer = TestClient(client.app).get("/api/fleet/identity", headers=_bearer(added["token"]))
 
     assert answer.status_code == 200
-    assert answer.json() == {"runner_id": added["runner_id"], "runner_name": "r-claude"}
+    assert answer.json() == {
+        "runner_id": added["runner_id"],
+        "runner_name": "r-claude",
+        "tenant_id": FIRST_TENANT_ID,
+        "tenant_name": FIRST_TENANT_NAME,
+    }
     still = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"]))
     assert still.status_code == 409  # the identity read registered nothing
 
@@ -4115,3 +4133,161 @@ def test_a_hub_reset_leaves_every_token_a_runner_holds_unknown(client: TestClien
         "reason": "unknown",
         "runner_id": None,
     }
+
+
+# --- tenants: the registry, the runner's tenant, X-Blizzard-Tenant ----------------
+
+
+def _tenant_header(tenant_id: str) -> dict[str, str]:
+    return {"X-Blizzard-Tenant": tenant_id}
+
+
+def _seed_tenant(client: TestClient, name: str, **pinned: str) -> str:
+    created = TestClient(client.app).post("/_seed/tenants", json={"name": name, **pinned})
+    assert created.status_code == 201, created.text
+    return created.json()["tenant_id"]
+
+
+def test_a_seeded_tenant_gets_a_minted_tenant_id_and_a_pinned_one_is_taken_once(client: TestClient) -> None:
+    plain = TestClient(client.app)
+
+    minted = _seed_tenant(client, "acme")
+    pinned = plain.post("/_seed/tenants", json={"name": "globex", "tenant_id": "ten_pinned"})
+    taken = plain.post("/_seed/tenants", json={"name": "again", "tenant_id": "ten_pinned"})
+
+    assert minted.startswith("ten_") and len(minted) == len("ten_") + 26
+    assert pinned.json() == {"tenant_id": "ten_pinned", "name": "globex"}
+    assert taken.status_code == 409
+    assert plain.post("/_seed/tenants", json={"name": "  "}).status_code == 422
+
+
+def test_add_acts_in_the_tenant_the_header_names_and_registration_and_identity_answer_it(
+    client: TestClient,
+) -> None:
+    acme = _seed_tenant(client, "acme")
+    plain = TestClient(client.app)
+    added = plain.post("/api/runners", json={"name": "r-acme"}, headers=_tenant_header(acme)).json()
+
+    registered = plain.post(
+        "/api/fleet/runners", json={"name": "r-acme", "workspace_id": "ws"}, headers=_bearer(added["token"])
+    )
+    identity = plain.get("/api/fleet/identity", headers=_bearer(added["token"]))
+
+    assert (registered.json()["tenant_id"], registered.json()["tenant_name"]) == (acme, "acme")
+    assert (identity.json()["tenant_id"], identity.json()["tenant_name"]) == (acme, "acme")
+
+
+def test_add_with_no_header_acts_in_the_only_tenant_and_with_several_answers_409(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    only = _add(client)
+    assert plain.get("/api/fleet/identity", headers=_bearer(only["token"])).json()["tenant_id"] == FIRST_TENANT_ID
+
+    _seed_tenant(client, "acme")
+    ambiguous = plain.post("/api/runners", json={"name": "r"})
+
+    assert ambiguous.status_code == 409
+    assert ambiguous.json()["detail"]["code"] == "tenant_required"
+
+
+def test_add_naming_a_tenant_no_tenant_holds_answers_404_and_adds_nothing(client: TestClient) -> None:
+    plain = TestClient(client.app)
+
+    unknown = plain.post("/api/runners", json={"name": "r"}, headers=_tenant_header("ten_never_minted"))
+    by_name = plain.post("/api/runners", json={"name": "r"}, headers=_tenant_header(FIRST_TENANT_NAME))
+
+    assert (unknown.status_code, unknown.json()) == (404, {"detail": "no such tenant"})
+    assert (by_name.status_code, by_name.json()) == (404, {"detail": "no such tenant"})
+    assert client.app.state.service._state.list_runners() == []  # type: ignore[attr-defined]
+
+
+def test_a_fleet_call_naming_another_tenant_is_refused_400_and_its_own_is_accepted(client: TestClient) -> None:
+    added = _add(client)
+    acme = _seed_tenant(client, "acme")
+    plain = TestClient(client.app)
+
+    foreign = plain.post(
+        "/api/fleet/runners", json={"workspace_id": "ws"}, headers={**_bearer(added["token"]), **_tenant_header(acme)}
+    )
+    unknown = plain.get(
+        "/api/fleet/queue/peek", headers={**_bearer(added["token"]), **_tenant_header("ten_never_minted")}
+    )
+    own = plain.post(
+        "/api/fleet/runners",
+        json={"workspace_id": "ws"},
+        headers={**_bearer(added["token"]), **_tenant_header(FIRST_TENANT_ID)},
+    )
+
+    detail = "X-Blizzard-Tenant names a tenant other than the presented credential's"
+    assert (foreign.status_code, foreign.json()) == (400, {"detail": detail})
+    assert (unknown.status_code, unknown.json()) == (400, {"detail": detail})
+    assert own.status_code == 201 and own.json()["first_registration"] is True
+
+
+def test_an_unresolved_token_is_refused_401_before_the_header_is_read(client: TestClient) -> None:
+    refused = TestClient(client.app).get(
+        "/api/fleet/queue/peek", headers={**_bearer("never-issued"), **_tenant_header("ten_other")}
+    )
+
+    assert refused.status_code == 401
+
+
+def test_the_identity_route_reads_no_tenant_header(client: TestClient) -> None:
+    added = _add(client)
+    acme = _seed_tenant(client, "acme")
+
+    answer = TestClient(client.app).get(
+        "/api/fleet/identity", headers={**_bearer(added["token"]), **_tenant_header(acme)}
+    )
+
+    assert answer.status_code == 200 and answer.json()["tenant_id"] == FIRST_TENANT_ID
+
+
+def test_a_renamed_tenant_reaches_its_runner_on_the_next_registration(client: TestClient) -> None:
+    added = _add(client)
+    plain = TestClient(client.app)
+
+    renamed = plain.patch(f"/_seed/tenants/{FIRST_TENANT_ID}", json={"name": "acme"})
+    tick = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(added["token"]))
+
+    assert renamed.json() == {"tenant_id": FIRST_TENANT_ID, "name": "acme"}
+    assert (tick.json()["tenant_id"], tick.json()["tenant_name"]) == (FIRST_TENANT_ID, "acme")
+    assert plain.patch("/_seed/tenants/ten_never_minted", json={"name": "x"}).status_code == 404
+
+
+def test_enrolling_a_runner_of_another_tenant_answers_404_like_an_unknown_one(client: TestClient) -> None:
+    added = _add(client)
+    acme = _seed_tenant(client, "acme")
+    plain = TestClient(client.app)
+
+    across = plain.post(f"/api/runners/{added['runner_id']}/enrollments", headers=_tenant_header(acme))
+    own = plain.post(f"/api/runners/{added['runner_id']}/enrollments", headers=_tenant_header(FIRST_TENANT_ID))
+
+    assert (across.status_code, across.json()) == (404, {"detail": f"unknown runner {added['runner_id']}"})
+    assert own.status_code == 201
+
+
+def test_a_seeded_runner_lands_in_the_tenant_it_names_and_an_unknown_one_is_refused_404(client: TestClient) -> None:
+    acme = _seed_tenant(client, "acme")
+    plain = TestClient(client.app)
+
+    seeded = plain.post("/_seed/runners", json={"name": "r", "runner_id": "r-acme", "token": "t", "tenant_id": acme})
+    unknown = plain.post("/_seed/runners", json={"name": "r", "tenant_id": "ten_never_minted"})
+
+    assert seeded.status_code == 201
+    assert plain.get("/api/fleet/identity", headers=_bearer("t")).json()["tenant_id"] == acme
+    assert (unknown.status_code, unknown.json()) == (404, {"detail": "no such tenant"})
+
+
+def test_a_hub_reset_returns_the_registry_to_the_first_tenant_under_its_first_name(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    acme = _seed_tenant(client, "acme")
+    plain.patch(f"/_seed/tenants/{FIRST_TENANT_ID}", json={"name": "renamed"})
+
+    plain.post("/_seed/reset")
+
+    gone = plain.post("/api/runners", json={"name": "r"}, headers=_tenant_header(acme))
+    added = plain.post("/api/runners", json={"name": "r"})
+    assert gone.status_code == 404
+    assert added.status_code == 201
+    identity = plain.get("/api/fleet/identity", headers=_bearer(added.json()["token"])).json()
+    assert (identity["tenant_id"], identity["tenant_name"]) == (FIRST_TENANT_ID, FIRST_TENANT_NAME)
