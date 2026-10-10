@@ -161,6 +161,8 @@ class RunnerRegistrationBody(MirroredWireBody):
     subscriptions: list[RunnerSubscriptionDeclarationBody] | None = None
     # The node names the runner holds for a human decision — reported, never enforced.
     gates: list[str] = Field(default_factory=list)
+    # The projects the runner serves, by id or slug — ``None`` keeps the declaration the hub holds.
+    projects: list[str] | None = None
 
 
 class RunnerFactBody(BaseModel):
@@ -253,6 +255,8 @@ class RunnerAddBody(MirroredWireBody):
     name refused ``422``."""
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    # The projects the runner is added serving, by id or slug — ``None`` serves the tenant's only project.
+    projects: list[str] | None = None
 
 
 class RunnerSeedControlBody(BaseModel):
@@ -264,6 +268,25 @@ class RunnerSeedControlBody(BaseModel):
     token: str | None = None
     # The tenant the runner is added in — the hub's first tenant when omitted.
     tenant_id: str | None = None
+    # The projects it is added serving, resolved as ``POST /api/runners`` resolves them.
+    projects: list[str] | None = None
+
+
+class ProjectSeedControlBody(BaseModel):
+    """``POST /_seed/projects`` — test-control only; creates a project in a tenant (the hub's first tenant when
+    none is named), minting its ``proj_`` id unless a scenario pins one."""
+
+    slug: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    tenant_id: str | None = None
+    project_id: str | None = None
+
+
+class RunnerProjectsControlBody(BaseModel):
+    """``PUT /_seed/runners/{runner_id}/projects`` — test-control only; replaces the runner's served
+    declaration as a registration declaring ``projects`` does, without the registration."""
+
+    projects: list[str]
 
 
 class TenantSeedControlBody(BaseModel):

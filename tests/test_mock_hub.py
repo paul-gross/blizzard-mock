@@ -19,6 +19,9 @@ from fastapi.testclient import TestClient
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.domain.models import (
+    DEFAULT_PROJECT_NAME,
+    DEFAULT_PROJECT_SLUG,
+    FIRST_PROJECT_ID,
     ChunkState,
     ChunkStatus,
     ClaimConflict,
@@ -62,6 +65,14 @@ _SPEC = {
         "deliver": {"executor": "hub"},
     },
     "work_refs": [{"source": "o-r", "ref": "1"}],
+}
+
+
+#: The project fields a chunk-owned view carries for a chunk seeded naming no project.
+_DEFAULT_PROJECT_FIELDS = {
+    "project_id": FIRST_PROJECT_ID,
+    "project_slug": DEFAULT_PROJECT_SLUG,
+    "project_name": DEFAULT_PROJECT_NAME,
 }
 
 
@@ -2953,6 +2964,7 @@ def test_garden_findings_reads_the_seeded_live_bucket(client: TestClient) -> Non
             "severity": None,
             "raised_by_chunk_id": None,
             "exit": None,
+            **_DEFAULT_PROJECT_FIELDS,
         }
     ]
 
@@ -3029,6 +3041,7 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
             "findings": ["fin_1"],
             "created_at": "2026-07-13T00:00:00+00:00",
             "closure": None,
+            **_DEFAULT_PROJECT_FIELDS,
         }
     ]
 
@@ -3253,6 +3266,7 @@ def test_chunk_findings_reads_the_seeded_answered_set(client: TestClient) -> Non
             "severity": None,
             "raised_by_chunk_id": None,
             "exit": None,
+            **_DEFAULT_PROJECT_FIELDS,
         }
     ]
 
@@ -4016,17 +4030,27 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
 
     assert first.status_code == 201
     tenant = {"tenant_id": FIRST_TENANT_ID, "tenant_name": FIRST_TENANT_NAME}
+    served = [
+        {
+            "entry": FIRST_PROJECT_ID,
+            "project_id": FIRST_PROJECT_ID,
+            "slug": DEFAULT_PROJECT_SLUG,
+            "name": DEFAULT_PROJECT_NAME,
+        }
+    ]
     assert first.json() == {
         "runner_id": added["runner_id"],
         "runner_name": "r-claude",
         "first_registration": True,
         **tenant,
+        "projects": served,
     }
     assert renamed.json() == {
         "runner_id": added["runner_id"],
         "runner_name": "r-renamed",
         "first_registration": False,
         **tenant,
+        "projects": served,
     }
     assert kept.json()["runner_name"] == "r-renamed"
     view = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"])).json()

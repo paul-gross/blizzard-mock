@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse
 from blizzard_mock.levers import Lever, LeverParams
 from blizzard_mock.mock_hub.api.deps import (
     AnswerControlBody,
+    ProjectSeedControlBody,
+    RunnerProjectsControlBody,
     RunnerRetireControlBody,
     RunnerSeedControlBody,
     StopControlBody,
@@ -31,6 +33,7 @@ from blizzard_mock.mock_hub.domain.service import (
     MockHubService,
     NoSuchTenant,
     QuestionNotFound,
+    UnknownProjects,
     UnknownRunner,
 )
 from blizzard_mock.mock_hub.domain.state import FIRST_TENANT_ID
@@ -41,9 +44,14 @@ captured_router = APIRouter(prefix="/_captured", tags=["control"])
 
 
 @seed_router.post("/chunk", status_code=201)
-def seed_chunk(spec: ChunkSpec, service: Annotated[MockHubService, Depends(get_service)]) -> dict[str, str]:
-    chunk = service.seed_chunk(spec)
-    return {"chunk_id": chunk.chunk_id, "graph_id": chunk.graph_id}
+def seed_chunk(spec: ChunkSpec, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Seed one chunk in ``spec.project_id`` — the first tenant's ``default`` project when omitted; a project
+    the hub does not hold is refused ``404``."""
+    try:
+        chunk = service.seed_chunk(spec)
+    except UnknownProjects as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {"chunk_id": chunk.chunk_id, "graph_id": chunk.graph_id, "project_id": chunk.project_id}
 
 
 @seed_router.post("/system-artifacts", status_code=201)
@@ -121,15 +129,50 @@ def seed_rename_tenant(
 def seed_runner(body: RunnerSeedControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     """Test-control only — adds a runner never connected, exactly as ``POST /api/runners``
     does, except that a scenario may pin its id, bearer token and tenant (the first tenant when
-    none is named). A pinned id already added is refused ``409``; an unknown tenant ``404``."""
+    none is named). A pinned id already added is refused ``409``; an unknown tenant ``404``; a
+    project entry naming no project of the tenant ``422``."""
     try:
         return service.add_runner(
-            name=body.name, tenant_id=body.tenant_id or FIRST_TENANT_ID, runner_id=body.runner_id, token=body.token
+            name=body.name,
+            tenant_id=body.tenant_id or FIRST_TENANT_ID,
+            runner_id=body.runner_id,
+            token=body.token,
+            projects=body.projects,
+        )
+    except NoSuchTenant as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except UnknownProjects as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@seed_router.put("/runners/{runner_id}/projects")
+def seed_runner_projects(
+    runner_id: str, body: RunnerProjectsControlBody, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """Test-control only — replaces the runner's served declaration as a registration declaring
+    ``projects`` does, and answers the declaration as stored. ``404`` for a runner never added."""
+    try:
+        return service.set_runner_projects(runner_id, body.projects)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@seed_router.post("/projects", status_code=201)
+def seed_project(body: ProjectSeedControlBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Test-control only — creates a project in a tenant (the first tenant when none is named),
+    under a minted or pinned id. An unknown tenant is refused ``404``; a pinned id already held,
+    or a slug the tenant already holds, ``409``."""
+    try:
+        row = service.seed_project(
+            slug=body.slug, name=body.name, tenant_id=body.tenant_id or FIRST_TENANT_ID, project_id=body.project_id
         )
     except NoSuchTenant as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except ValueError as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+    return {"project_id": row.project_id, "tenant_id": row.tenant_id, "slug": row.slug, "name": row.name}
 
 
 @seed_router.post("/runners/{runner_id}/retire")

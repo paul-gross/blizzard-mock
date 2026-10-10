@@ -391,10 +391,19 @@ class AnalyticsSpec(BaseModel):
     spend_graphs: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
 
 
+#: The project every tenant starts with — the one the real hub creates beside a new tenant, and the one a
+#: migrated hub's existing work lands in. The first tenant's is pinned so a scenario can name it unread.
+FIRST_PROJECT_ID = "proj_00000000000000000000000000"
+DEFAULT_PROJECT_SLUG = "default"
+DEFAULT_PROJECT_NAME = "Default"
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
     chunk_id: str | None = None
+    #: The id of the project the chunk belongs to — the first tenant's ``default`` project when omitted.
+    project_id: str | None = None
     graph_id: str = "gr_mock"
     #: The pinned graph's name the envelope reports; ``None`` models a hub that omits it.
     graph_name: str | None = None
@@ -438,6 +447,8 @@ class ChunkState(BaseModel):
     """The mock hub's mutable per-chunk state (facts collapsed to a small machine)."""
 
     chunk_id: str
+    #: The project the chunk belongs to, by id — a runner is offered and may claim it only while serving it.
+    project_id: str = FIRST_PROJECT_ID
     graph_id: str
     graph_name: str | None = None
     default_model: list[str] = Field(default_factory=list)

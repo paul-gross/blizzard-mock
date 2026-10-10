@@ -18,11 +18,14 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from blizzard_mock.clock import Clock
-from blizzard_mock.ids import RUNNER_PREFIX, TENANT_PREFIX, mint
+from blizzard_mock.ids import PROJECT_PREFIX, RUNNER_PREFIX, TENANT_PREFIX, mint
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.models import (
+    DEFAULT_PROJECT_NAME,
+    DEFAULT_PROJECT_SLUG,
+    FIRST_PROJECT_ID,
     PAUSABLE_STATUSES,
     PRE_CLAIM_STATUSES,
     RESERVED_HUB_SOURCE_NAME,
@@ -53,10 +56,12 @@ from blizzard_mock.mock_hub.domain.state import (
     FIRST_TENANT_NAME,
     DeclaredSubscription,
     IHubState,
+    ProjectRow,
     ReportedRunnerFacts,
     RunnerCapability,
     RunnerRow,
     ScopeRow,
+    ServedEntry,
     SubscriptionUsageMiss,
     TenantRow,
     refuse_braked_runner,
@@ -97,6 +102,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RunnerRegistrationResponse,
     RunnerView,
     ScopeView,
+    ServedProjectView,
     SubscriptionUsageView,
     SystemArtifactView,
     TranscriptSegmentAck,
@@ -125,6 +131,12 @@ TOKEN_MISSING = "missing"
 TOKEN_UNKNOWN = "unknown"
 TOKEN_REVOKED = "revoked"
 TOKEN_RETIRED = "retired"
+
+#: The reasons an incompatible claim ``409`` names — restated from the real ``ClaimDenialReason``.
+CLAIM_DENIED_CAPABILITY = "capability"
+CLAIM_DENIED_PROJECT = "project"
+#: The incompatible ``409``'s ``detail`` when the runner's capabilities are what it lacks — the real body's default.
+CAPABILITY_DENIAL_DETAIL = "runner capabilities no longer satisfy the chunk's reachable lineage"
 
 #: The one miss reason surfaced as a per-slug `condition` — restated from the real hub, not imported.
 _CREDENTIAL_LAPSED_CONDITION = "credential_lapsed"
@@ -162,11 +174,13 @@ _TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
 
-def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -> FindingView:
+def _finding_view(
+    f: GardenFindingSpec, *, routine_name: str, scope_slug: str, project: dict[str, str | None]
+) -> FindingView:
     """`f` projected to the real hub's own `FindingView` shape, `routine_name`/
     `scope_slug` supplied by the caller since a `GardenFindingSpec` carries neither
-    itself. The one place `test_wire_parity.py` can't scan — keep it the
-    only place either read builds this dict."""
+    itself, and `project` — the three project fields — the same way. The one place
+    `test_wire_parity.py` can't scan — keep it the only place either read builds this dict."""
     # `class_`'s alias is the Python keyword `class` — constructed by alias via
     # `model_validate`, the real hub's own `finding_view` shape.
     return FindingView.model_validate(
@@ -186,15 +200,19 @@ def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str) -
             "last_seen_at": f.last_seen_at,
             "observed_count": f.observed_count,
             "exit": finding_exit(f.state),
+            **project,
         }
     )
 
 
-def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> GardenProposalView:
+def _proposal_view(
+    p: GardenProposalSpec, *, routine_name: str, now: str, project: dict[str, str | None]
+) -> GardenProposalView:
     """`p` projected to the real hub's own `GardenProposalView` shape, `routine_name`
     supplied by the caller since a `GardenProposalSpec` carries none itself. `now` backs
     `created_at` when the spec left it unseeded (mint-time default), and likewise backs
-    a seeded closure's own `closed_at` when that is left unseeded."""
+    a seeded closure's own `closed_at` when that is left unseeded. `project` is the run
+    chunk's own project, as `_finding_view` takes it."""
     closure = None
     if p.closure is not None:
         closure = {
@@ -218,6 +236,7 @@ def _proposal_view(p: GardenProposalSpec, *, routine_name: str, now: str) -> Gar
             "findings": list(p.findings),
             "created_at": p.created_at or now,
             "closure": closure,
+            **project,
         }
     )
 
@@ -355,14 +374,28 @@ class DependencyUnmet(Exception):
 
 
 class ClaimIncompatible(Exception):
-    """The claiming runner's *currently stored* capabilities can no longer run every
-    statically reachable runner-owned lineage from the chunk's current node — refused
-    outright, mirroring :class:`DependencyUnmet`'s shape. A registration
-    reporting no capabilities is refused here too."""
+    """The claiming runner may not take the chunk — refused outright, mirroring
+    :class:`DependencyUnmet`'s shape. ``reason`` says what it lacks: ``capability``, its
+    *currently stored* capabilities no longer run every statically reachable runner-owned
+    lineage from the chunk's current node (a registration reporting none is refused here
+    too); or ``project``, it does not serve the chunk's project, which ``detail`` names."""
 
-    def __init__(self, runner_id: str) -> None:
-        super().__init__(f"runner {runner_id}'s capabilities no longer satisfy the chunk")
+    def __init__(
+        self, runner_id: str, *, reason: str = CLAIM_DENIED_CAPABILITY, detail: str = CAPABILITY_DENIAL_DETAIL
+    ) -> None:
+        super().__init__(f"runner {runner_id} may not claim the chunk: {detail}")
         self.runner_id = runner_id
+        self.reason = reason
+        self.detail = detail
+
+
+class UnknownProjects(Exception):
+    """Entries naming no project of the tenant, where a project must resolve — adding a runner, unlike
+    registering one, can afford to refuse; the real hub's ``422``."""
+
+    def __init__(self, entries: Sequence[str]) -> None:
+        super().__init__("no project of the tenant answers to " + ", ".join(repr(e) for e in entries))
+        self.entries = tuple(entries)
 
 
 class MockHubService:
@@ -406,8 +439,12 @@ class MockHubService:
         if spec.entry not in spec.nodes:
             raise ValueError(f"entry node {spec.entry!r} is not in the node set")
         chunk_id = spec.chunk_id or f"ch_{uuid.uuid4().hex[:24]}"
+        project_id = spec.project_id or FIRST_PROJECT_ID
+        if self._state.get_project(project_id) is None:
+            raise UnknownProjects([project_id])
         chunk = ChunkState(
             chunk_id=chunk_id,
+            project_id=project_id,
             graph_id=spec.graph_id,
             graph_name=spec.graph_name,
             default_model=list(spec.default_model),
@@ -429,7 +466,7 @@ class MockHubService:
 
     def reset(self) -> None:
         """Return the hub to its first boot: every row gone, the tenant registry back to the one
-        first tenant under its original name."""
+        first tenant under its original name, holding its one ``default`` project."""
         self._state.clear()
         self._found_first_tenant()
         self._levers.clear_all()
@@ -494,6 +531,7 @@ class MockHubService:
                 position=i,
                 work_refs=[p.model_dump() for p in c.work_refs],
                 blocked=self._blocked_marking(c.chunk_id),
+                **self._project_fields(c.project_id),
             )
             for i, c in enumerate(ready)
         ]
@@ -505,14 +543,24 @@ class MockHubService:
             return None
         return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
-    def peek_matched(self, *, capabilities: Sequence[RunnerCapability], policy: str) -> QueuePeekResponse:
+    def peek_matched(
+        self, runner_id: str, *, capabilities: Sequence[RunnerCapability], policy: str
+    ) -> QueuePeekResponse:
         """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
         flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
         blocked, policy applied to both the capability and blocked-dependency dimensions before
-        selection. Like the real verb it answers any resolved principal, registered or not — the
-        fleet router has already refused a call whose token names no runner."""
+        selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
+        from its stored declaration, so another project's chunk is never its head and ``hold``
+        cannot stall it on one; a position is the chunk's place in the narrowed order. Like the
+        real verb it answers any resolved principal, registered or not — the fleet router has
+        already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
-        ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
+        served = self._served_project_ids(self._added(runner_id))
+        ready = [
+            c
+            for c in self._state.list_chunks()
+            if not c.claimed and c.status is ChunkStatus.READY and c.project_id in served
+        ]
         for position, chunk in enumerate(ready):
             unusable = self._blocked_marking(chunk.chunk_id) is not None or matching.capability_ineligible(
                 chunk, chunk.current_node_id or chunk.entry, capabilities
@@ -526,6 +574,7 @@ class MockHubService:
                             position=position,
                             work_refs=[p.model_dump() for p in chunk.work_refs],
                             blocked=None,
+                            **self._project_fields(chunk.project_id),
                         )
                     ]
                 )
@@ -547,6 +596,10 @@ class MockHubService:
         if blocked is not None:
             self._levers.consume(blocked)
             raise DependencyUnmet(str(blocked.payload.get("prerequisite_chunk_id", "unknown")))
+        if chunk.project_id not in self._served_project_ids(registration):
+            raise ClaimIncompatible(
+                runner_id, reason=CLAIM_DENIED_PROJECT, detail=self._unserved_detail(chunk.project_id)
+            )
         node_id = chunk.current_node_id or chunk.entry
         if matching.capability_ineligible(chunk, node_id, registration.capabilities):
             raise ClaimIncompatible(runner_id)
@@ -633,6 +686,7 @@ class MockHubService:
             route=route,
             escalation=escalation,
             questions=questions,
+            **self._project_fields(chunk.project_id),
         )
 
     def chunk_statuses(self, chunk_ids: list[str]) -> list[ChunkStatusView]:
@@ -667,6 +721,7 @@ class MockHubService:
                     status=chunk.status.value,
                     route_runner_id=route_runner_id,
                     latest_epoch=chunk.latest_epoch or None,
+                    **self._project_fields(chunk.project_id),
                 )
             )
         return views
@@ -701,7 +756,12 @@ class MockHubService:
         assert chunk.garden_run is not None  # narrowed by `_garden_run_or_404`
         run = chunk.garden_run
         return [
-            _finding_view(f, routine_name=run.routine_name, scope_slug=run.scope_slug)
+            _finding_view(
+                f,
+                routine_name=run.routine_name,
+                scope_slug=run.scope_slug,
+                project=self._project_fields(chunk.project_id),
+            )
             for f in chunk.garden_findings
             if f.live
         ]
@@ -722,7 +782,10 @@ class MockHubService:
             proposals = [p for p in proposals if p.closure is None]
         elif state is RoutineProposalState.CLOSED:
             proposals = [p for p in proposals if p.closure is not None]
-        return [_proposal_view(p, routine_name=chunk.garden_run.routine_name, now=now) for p in proposals]
+        project = self._project_fields(chunk.project_id)
+        return [
+            _proposal_view(p, routine_name=chunk.garden_run.routine_name, now=now, project=project) for p in proposals
+        ]
 
     def _garden_run_or_404(self, chunk_id: str) -> ChunkState:
         """The chunk a worker's own routine-run-scoped read is confined to — shared by
@@ -769,7 +832,12 @@ class MockHubService:
         if chunk.garden_answered_findings is None:
             raise NoAnsweredProposal(f"chunk {chunk_id} answers no accepted, minted garden proposal")
         return [
-            _finding_view(f, routine_name=f.routine_name, scope_slug=f.scope_slug)
+            _finding_view(
+                f,
+                routine_name=f.routine_name,
+                scope_slug=f.scope_slug,
+                project=self._project_fields(chunk.project_id),
+            )
             for f in chunk.garden_answered_findings
         ]
 
@@ -1101,15 +1169,25 @@ class MockHubService:
 
     def _found_first_tenant(self) -> None:
         self._state.put_tenant(TenantRow(tenant_id=FIRST_TENANT_ID, name=FIRST_TENANT_NAME))
+        self._state.put_project(
+            ProjectRow(
+                project_id=FIRST_PROJECT_ID,
+                tenant_id=FIRST_TENANT_ID,
+                slug=DEFAULT_PROJECT_SLUG,
+                name=DEFAULT_PROJECT_NAME,
+            )
+        )
 
     def seed_tenant(self, *, name: str, tenant_id: str | None = None) -> TenantRow:
         """Create a tenant under ``name`` — the hub mints its ``ten_`` id unless a scenario pins
-        one. A pinned id already held raises ``ValueError``."""
+        one — holding a ``default`` project, as the real hub creates one beside every tenant. A
+        pinned id already held raises ``ValueError``."""
         minted = tenant_id or mint(TENANT_PREFIX, self._clock, self._rng)
         if self._state.get_tenant(minted) is not None:
             raise ValueError(f"tenant {minted} already exists")
         row = TenantRow(tenant_id=minted, name=name)
         self._state.put_tenant(row)
+        self.seed_project(tenant_id=minted, slug=DEFAULT_PROJECT_SLUG, name=DEFAULT_PROJECT_NAME)
         return row
 
     def rename_tenant(self, tenant_id: str, *, name: str) -> TenantRow:
@@ -1170,6 +1248,100 @@ class MockHubService:
         row = self._state.get_tenant(tenant_id)
         return row.name if row is not None else None
 
+    # -- projects ----------------------------------------------------------
+
+    def seed_project(
+        self, *, slug: str, name: str, tenant_id: str = FIRST_TENANT_ID, project_id: str | None = None
+    ) -> ProjectRow:
+        """Create a project in ``tenant_id`` — the hub mints its ``proj_`` id unless a scenario pins one. An
+        unknown tenant raises :class:`NoSuchTenant`; a pinned id already held, or a slug the tenant already
+        holds, ``ValueError``."""
+        tenant = self._tenant(tenant_id)
+        minted = project_id or mint(PROJECT_PREFIX, self._clock, self._rng)
+        if self._state.get_project(minted) is not None:
+            raise ValueError(f"project {minted} already exists")
+        if any(p.slug == slug for p in self._tenant_projects(tenant.tenant_id)):
+            raise ValueError(f"tenant {tenant.tenant_id} already holds a project with slug {slug!r}")
+        row = ProjectRow(project_id=minted, tenant_id=tenant.tenant_id, slug=slug, name=name)
+        self._state.put_project(row)
+        return row
+
+    def _tenant_projects(self, tenant_id: str) -> list[ProjectRow]:
+        return [p for p in self._state.list_projects() if p.tenant_id == tenant_id]
+
+    def _resolve_project(self, tenant_id: str, value: str) -> ProjectRow | None:
+        """The project of ``tenant_id`` that ``value`` names: a ``proj_`` value by id, whatever its slug; any
+        other value by its current slug. The mock keeps no former slugs, so a slug no project holds now names
+        nothing."""
+        if value.startswith(f"{PROJECT_PREFIX}_"):
+            found = self._state.get_project(value)
+            return found if found is not None and found.tenant_id == tenant_id else None
+        return next((p for p in self._tenant_projects(tenant_id) if p.slug == value), None)
+
+    def _declared(self, tenant_id: str, entries: Sequence[str]) -> tuple[ServedEntry, ...]:
+        """``entries`` resolved in ``tenant_id``, each kept beside what it resolved to — ``None`` for one no
+        project answers to, which serves nothing until one does."""
+        resolved = []
+        for entry in entries:
+            project = self._resolve_project(tenant_id, entry)
+            resolved.append(ServedEntry(entry=entry, project_id=project.project_id if project else None))
+        return tuple(resolved)
+
+    def _added_declaration(self, tenant_id: str, entries: Sequence[str] | None) -> tuple[ServedEntry, ...]:
+        """The declaration a runner is added with. Naming none, it serves the tenant's only project, stored
+        by id so no slug change touches it, or nothing when the tenant holds several; naming some, each
+        must resolve, else :class:`UnknownProjects`."""
+        if entries is None:
+            projects = self._tenant_projects(tenant_id)
+            if len(projects) != 1:
+                return ()
+            return (ServedEntry(entry=projects[0].project_id, project_id=projects[0].project_id),)
+        declared = self._declared(tenant_id, entries)
+        unresolved = [e.entry for e in declared if e.project_id is None]
+        if unresolved:
+            raise UnknownProjects(unresolved)
+        return declared
+
+    def set_runner_projects(self, runner_id: str, entries: Sequence[str]) -> list[ServedProjectView]:
+        """Replace the runner's served declaration as a registration declaring ``entries`` would, without
+        registering it; an entry no project answers to is kept, serving nothing."""
+        row = self._added(runner_id)
+        row.projects = self._declared(row.tenant_id, entries)
+        return self._served_views(row)
+
+    @staticmethod
+    def _served_project_ids(row: RunnerRow) -> set[str]:
+        return {e.project_id for e in row.projects if e.project_id is not None}
+
+    def _served_views(self, row: RunnerRow) -> list[ServedProjectView]:
+        """The runner's stored declaration with each entry's project read now, so a renamed project shows its
+        current slug and name."""
+        views = []
+        for e in row.projects:
+            project = self._state.get_project(e.project_id) if e.project_id is not None else None
+            views.append(
+                ServedProjectView(entry=e.entry, project_id=e.project_id)
+                if project is None
+                else ServedProjectView(
+                    entry=e.entry, project_id=project.project_id, slug=project.slug, name=project.name
+                )
+            )
+        return views
+
+    def _project_fields(self, project_id: str) -> dict[str, str | None]:
+        """The three project fields a chunk-owned view carries — the project's id, current slug and name."""
+        project = self._state.get_project(project_id)
+        return {
+            "project_id": project_id,
+            "project_slug": project.slug if project is not None else None,
+            "project_name": project.name if project is not None else None,
+        }
+
+    def _unserved_detail(self, project_id: str) -> str:
+        """A project claim denial's ``detail``: the project the runner does not serve, by its current slug."""
+        project = self._state.get_project(project_id)
+        return f"runner does not serve project {project.slug if project is not None else project_id!r}"
+
     # -- registry ----------------------------------------------------------
 
     def add_runner(
@@ -1179,17 +1351,23 @@ class MockHubService:
         tenant_id: str = FIRST_TENANT_ID,
         runner_id: str | None = None,
         token: str | None = None,
+        projects: Sequence[str] | None = None,
     ) -> RunnerAddResponse:
         """Add a runner under the initial ``name`` in ``tenant_id``, never connected — the hub mints
         its id and bearer token together (``POST /api/runners``), and the runner serves that tenant
         for life. ``runner_id``/``token`` let a scenario pin either instead; ids are opaque, so a
-        literal one is as good as a minted one. An unknown tenant raises :class:`NoSuchTenant`."""
+        literal one is as good as a minted one. An unknown tenant raises :class:`NoSuchTenant`.
+
+        The runner is added serving ``projects`` (ids or slugs), every one of which must resolve, else
+        :class:`UnknownProjects` and nothing is added; naming none, the tenant's only project, or nothing
+        when it holds several."""
         tenant = self._tenant(tenant_id)
+        declaration = self._added_declaration(tenant.tenant_id, projects)
         added_id = runner_id or mint(RUNNER_PREFIX, self._clock, self._rng)
         issued = token or f"mock-runner-token-{secrets.token_urlsafe(18)}"
-        self._state.add_runner(
-            RunnerRow(added_id, tenant_id=tenant.tenant_id, name=name, added_at=self._clock.now()), token=issued
-        )
+        row = RunnerRow(added_id, tenant_id=tenant.tenant_id, name=name, added_at=self._clock.now())
+        row.projects = declaration
+        self._state.add_runner(row, token=issued)
         return RunnerAddResponse(runner_id=added_id, runner_name=name, token=issued)
 
     def enroll(self, runner_id: str, *, tenant_id: str = FIRST_TENANT_ID) -> RunnerEnrollmentResponse:
@@ -1264,9 +1442,15 @@ class MockHubService:
         capabilities: tuple[RunnerCapability, ...] = (),
         subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
+        projects: Sequence[str] | None = None,
     ) -> RunnerRegistrationResponse:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its
-        token. A blank or absent ``name`` keeps the held one."""
+        token. A blank or absent ``name`` keeps the held one. ``projects`` replaces the served
+        declaration — ``[]`` with none — and ``None`` keeps it. Registration doubles as the
+        heartbeat, so it never refuses over the declaration: an entry no project answers to is
+        stored unresolved, and resolved afresh at the next registration that declares it."""
+        tenant_id = self._added(runner_id).tenant_id
+        declaration = self._declared(tenant_id, projects) if projects is not None else None
         first = self._state.record_registration(
             runner_id,
             name=(name or "").strip() or None,
@@ -1278,6 +1462,7 @@ class MockHubService:
             capabilities=capabilities,
             declared_subscriptions=subscriptions,
             gates=gates,
+            projects=declaration,
         )
         row = self._added(runner_id)
         return RunnerRegistrationResponse(
@@ -1286,6 +1471,7 @@ class MockHubService:
             first_registration=first,
             tenant_id=row.tenant_id,
             tenant_name=self._tenant_name(row.tenant_id),
+            projects=self._served_views(row),
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
@@ -1324,6 +1510,7 @@ class MockHubService:
                 for c in row.capabilities
             ],
             gates=list(row.gates),
+            projects=self._served_views(row),
         )
 
     def _parse_instant(self, value: Any) -> datetime:
