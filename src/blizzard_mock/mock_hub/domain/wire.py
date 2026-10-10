@@ -329,6 +329,31 @@ class RunnerIdentityRefusal(BaseModel):
     runner_id: str | None = None
 
 
+class MeTenantView(BaseModel):
+    """Mirrors ``blizzard.hub.api.me.MeTenant`` — one tenant the caller is a member of, its role there,
+    and the permissions that role grants. The mock models no permission vocabulary, so the list is
+    empty."""
+
+    tenant_id: str
+    name: str
+    role: str
+    permissions: list[str] = []
+
+
+class MeView(BaseModel):
+    """Mirrors ``blizzard.hub.api.me.MeResponse`` — the caller, every tenant it may enter ordered by
+    id, and the role of the tenant the request resolves (``None`` when it resolves none)."""
+
+    user_id: str
+    username: str
+    display_name: str
+    role: str | None
+    permissions: list[str] = []
+    assignable_roles: list[str] = []
+    tenants: list[MeTenantView] = []
+    hub_admin: bool = False
+
+
 class RunnerFactAck(BaseModel):
     runner_id: str
     high_water: int

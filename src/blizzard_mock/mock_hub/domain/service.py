@@ -78,6 +78,8 @@ from blizzard_mock.mock_hub.domain.wire import (
     GraphArtifact,
     HubAdvanceResponse,
     LeaseTranscriptView,
+    MeTenantView,
+    MeView,
     NodeConfig,
     NodeEnvelope,
     QuestionView,
@@ -286,6 +288,13 @@ class RunnerTokenRefused(Exception):
         super().__init__(f"runner token refused: {reason}")
         self.reason = reason
         self.runner_id = runner_id
+
+
+#: The identity every request resolves to on a hub without sign-in, and its role in each tenant.
+_OPERATOR = "operator"
+_OPERATOR_ROLE = "admin"
+#: Every role the real hub's role-assignment API may grant — each but ``superuser``.
+_ASSIGNABLE_ROLES = ("pending", "guest", "contributor", "admin")
 
 
 class NoSuchTenant(Exception):
@@ -1120,6 +1129,29 @@ class MockHubService:
         if len(tenants) != 1:
             raise TenantRequired()
         return tenants[0].tenant_id
+
+    def me(self, named: str | None) -> MeView:
+        """``GET /api/me`` as a hub without sign-in answers it: the implicit ``operator``, a hub
+        administrator and an ``admin`` member of every tenant, ordered by id. ``role`` is that of
+        the tenant ``named`` picks among them, else of the only tenant; a name no tenant holds
+        resolves none, never a refusal."""
+        tenants = [
+            MeTenantView(tenant_id=row.tenant_id, name=row.name, role=_OPERATOR_ROLE)
+            for row in sorted(self._state.list_tenants(), key=lambda row: row.tenant_id)
+        ]
+        if named:
+            resolved = next((t for t in tenants if t.tenant_id == named), None)
+        else:
+            resolved = tenants[0] if len(tenants) == 1 else None
+        return MeView(
+            user_id=_OPERATOR,
+            username=_OPERATOR,
+            display_name=_OPERATOR,
+            role=resolved.role if resolved is not None else None,
+            assignable_roles=list(_ASSIGNABLE_ROLES),
+            tenants=tenants,
+            hub_admin=True,
+        )
 
     def refuse_foreign_tenant(self, runner_id: str, named: str | None) -> None:
         """Refuse a fleet call whose ``X-Blizzard-Tenant`` names a tenant other than its runner's

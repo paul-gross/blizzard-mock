@@ -4072,6 +4072,32 @@ def test_identity_answers_a_current_token_with_its_runner_and_no_side_effects(cl
     assert still.status_code == 409  # the identity read registered nothing
 
 
+def test_me_lists_every_tenant_the_implicit_operator_may_enter_ordered_by_id(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    only = plain.get("/api/me")
+    assert only.status_code == 200
+    assert only.json() == {
+        "user_id": "operator",
+        "username": "operator",
+        "display_name": "operator",
+        "role": "admin",
+        "permissions": [],
+        "assignable_roles": ["pending", "guest", "contributor", "admin"],
+        "tenants": [{"tenant_id": FIRST_TENANT_ID, "name": FIRST_TENANT_NAME, "role": "admin", "permissions": []}],
+        "hub_admin": True,
+    }
+
+    assert plain.post("/_seed/tenants", json={"name": "globex", "tenant_id": "ten_zzz"}).status_code == 201
+    several = plain.get("/api/me").json()
+    assert [(t["tenant_id"], t["name"]) for t in several["tenants"]] == [
+        (FIRST_TENANT_ID, FIRST_TENANT_NAME),
+        ("ten_zzz", "globex"),
+    ]
+    assert several["role"] is None  # several tenants and no header: none resolves
+    assert plain.get("/api/me", headers={"X-Blizzard-Tenant": "ten_zzz"}).json()["role"] == "admin"
+    assert plain.get("/api/me", headers={"X-Blizzard-Tenant": "ten_nope"}).json()["role"] is None
+
+
 def test_identity_tells_a_missing_an_unknown_a_revoked_and_a_retired_token_apart(client: TestClient) -> None:
     plain = TestClient(client.app)
     rotated, retired = _add(client, "rotated"), _add(client, "retired")
