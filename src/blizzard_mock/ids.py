@@ -19,6 +19,8 @@ _RAND_CHARS = 16  # 80 bits of randomness
 RUNNER_PREFIX = "rn"
 #: A tenant's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.TENANT``.
 TENANT_PREFIX = "ten"
+#: A project's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.PROJECT``.
+PROJECT_PREFIX = "proj"
 
 
 def seeded_rng(seed: int | None) -> random.Random:

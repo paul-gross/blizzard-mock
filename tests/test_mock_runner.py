@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.harness_identity import OPENCODE_HARNESS_ID
 from blizzard_mock.mock_hub.app import create_app as create_hub_app
+from blizzard_mock.mock_hub.domain.models import DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_SLUG, FIRST_PROJECT_ID
 from blizzard_mock.mock_hub.domain.service import MockHubService
 from blizzard_mock.mock_hub.domain.state import FIRST_TENANT_ID, FIRST_TENANT_NAME
 from blizzard_mock.mock_runner.app import bootstrap_token
@@ -222,6 +223,14 @@ def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[Te
         "first_registration": True,
         "tenant_id": FIRST_TENANT_ID,
         "tenant_name": FIRST_TENANT_NAME,
+        "projects": [
+            {
+                "entry": FIRST_PROJECT_ID,
+                "project_id": FIRST_PROJECT_ID,
+                "slug": DEFAULT_PROJECT_SLUG,
+                "name": DEFAULT_PROJECT_NAME,
+            }
+        ],
     }
     assert service.runner_id == "runner-mock"
 

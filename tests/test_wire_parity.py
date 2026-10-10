@@ -51,6 +51,7 @@ _OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" 
 _ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
 _EVENT_LOG_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "event_log.py"
 _HUB_SCHEMA_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "store" / "schema.py"
+_CLAIM_DENIALS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "claim_denials.py"
 
 
 def _sibling(path: Path) -> str:
@@ -378,7 +379,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
     "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
-    "ScopeView": ("ScopeView", frozenset()),
+    # Scopes are the deployment's global vocabulary in the mock, held in no project.
+    "ScopeView": ("ScopeView", frozenset({"project_id", "project_slug", "project_name"})),
+    "ServedProjectView": ("ServedProjectView", frozenset()),
     "SubscriptionUsageView": ("SubscriptionUsageView", frozenset()),
     "SystemArtifactView": ("SystemArtifactView", frozenset()),
     "TranscriptSegmentAck": ("TranscriptSegmentAck", frozenset()),
@@ -482,6 +485,18 @@ def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
         value for name, value in vars(hub_service).items() if name.isupper() and isinstance(value, str) and "." in value
     }
     assert mirrored == real
+
+
+def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
+    """The incompatible claim ``409`` body appears in no OpenAPI schema, so the mock's ``reason``
+    values are pinned to the real ``ClaimDenialReason`` here: a runner reads the value to tell a
+    project denial from a capability one."""
+    real = _exec_source("_claim_denials_wire_parity", _CLAIM_DENIALS_SOURCE)
+    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} == {
+        r.value for r in real.ClaimDenialReason
+    }
+    assert real.ClaimDenialReason.CAPABILITY.value == hub_service.CLAIM_DENIED_CAPABILITY
+    assert real.ClaimDenialReason.PROJECT.value == hub_service.CLAIM_DENIED_PROJECT
 
 
 def test_hub_event_kinds_match_the_real_vocabulary() -> None:

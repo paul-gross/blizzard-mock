@@ -103,6 +103,28 @@ class TenantRow:
     name: str
 
 
+@dataclass(kw_only=True)
+class ProjectRow:
+    """One project in the mock hub's registry — mirrors the real hub's ``projects`` row, held in exactly one
+    tenant. Its id is durable; ``slug`` is the name a runner's configuration may use instead, and ``name`` a label.
+    Keyword-only: four adjacent ``str`` fields would swap silently at a positional call."""
+
+    project_id: str
+    tenant_id: str
+    slug: str
+    name: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class ServedEntry:
+    """One entry of a runner's served declaration — mirrors one ``{entry, project_id}`` pair of the real hub's
+    ``runner_registrations.projects``: what was declared, a project id or slug, and the project it resolved to
+    in the runner's tenant, ``None`` for an entry no project answered to."""
+
+    entry: str
+    project_id: str | None
+
+
 class RunnerRow:
     """An added runner's mutable registry row. Mirrors the real hub's ``runner_registrations`` row.
 
@@ -131,6 +153,9 @@ class RunnerRow:
         self.declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None
         # The node names the runner holds for a human decision, replaced whole on every registration.
         self.gates: tuple[str, ...] = ()
+        # The projects the runner serves — set when it is added, replaced by a registration that declares some,
+        # kept by one that declares none.
+        self.projects: tuple[ServedEntry, ...] = ()
         self.paused = False
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
@@ -169,7 +194,7 @@ def refuse_braked_runner(row: RunnerRow | None, *, runner_id: str) -> RunnerRow:
 
 
 class IHubState(Protocol):
-    """The mock hub's write-through state: chunks, questions, the tenant and runner registries,
+    """The mock hub's write-through state: chunks, questions, the tenant, project and runner registries,
     and the global (not per-chunk) published system-artifact set."""
 
     def put_tenant(self, row: TenantRow) -> None:
@@ -178,6 +203,15 @@ class IHubState(Protocol):
 
     def get_tenant(self, tenant_id: str) -> TenantRow | None: ...
     def list_tenants(self) -> list[TenantRow]: ...
+
+    def put_project(self, row: ProjectRow) -> None:
+        """Insert or replace one project, keyed by its id."""
+        ...
+
+    def get_project(self, project_id: str) -> ProjectRow | None: ...
+    def list_projects(self) -> list[ProjectRow]:
+        """Every project of every tenant, in the order they were created."""
+        ...
 
     def put_chunk(self, chunk: ChunkState) -> None: ...
     def get_chunk(self, chunk_id: str) -> ChunkState | None: ...
@@ -199,11 +233,13 @@ class IHubState(Protocol):
         capabilities: tuple[RunnerCapability, ...] = (),
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
+        projects: tuple[ServedEntry, ...] | None = None,
     ) -> bool:
         """Register/heartbeat an added runner; return ``True`` on its first registration.
 
         Never inserts — an id no ``add`` wrote raises ``LookupError``. ``name`` replaces the held
-        name unless ``None``; everything else is overwritten on every call."""
+        name and ``projects`` the held declaration unless ``None``; everything else is overwritten
+        on every call."""
         ...
 
     def runner_for_token(self, token: str) -> RunnerRow | None:
@@ -248,6 +284,6 @@ class IHubState(Protocol):
         ...
 
     def clear(self) -> None:
-        """Drop every row, the tenant and runner registries and the runners' tokens included — a hub
+        """Drop every row, the tenant, project and runner registries and the runners' tokens included — a hub
         data reset, after which every token a runner holds is unknown here."""
         ...

@@ -189,6 +189,10 @@ class ChunkDetail(BaseModel):
     current_node_terminal: bool = False
     escalation: ChunkEscalationView | None = None
     questions: list[QuestionView] = Field(default_factory=list)
+    # The project the chunk belongs to — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
 
 
 class ChunkStatusView(BaseModel):
@@ -201,6 +205,10 @@ class ChunkStatusView(BaseModel):
     status: str
     route_runner_id: str | None = None
     latest_epoch: int | None = None
+    # The project the chunk belongs to — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
 
 
 class BlockedView(BaseModel):
@@ -213,6 +221,10 @@ class QueuePeekEntry(BaseModel):
     position: int
     work_refs: list[dict[str, str]] = Field(default_factory=list)
     blocked: BlockedView | None = None
+    # The project the chunk belongs to — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
 
 
 class QueuePeekResponse(BaseModel):
@@ -253,6 +265,17 @@ class RunnerCapabilityView(BaseModel):
     available: bool = True
 
 
+class ServedProjectView(BaseModel):
+    """One entry of the projects a runner serves — mirrors ``blizzard.wire.runner.ServedProjectView``: the
+    ``entry`` as declared, a project id or slug, and the project it resolves to in the runner's tenant;
+    ``project_id``, ``slug`` and ``name`` are ``None`` for an entry no project answers to."""
+
+    entry: str
+    project_id: str | None = None
+    slug: str | None = None
+    name: str | None = None
+
+
 class RunnerView(BaseModel):
     runner_id: str
     runner_name: str | None = None
@@ -277,13 +300,15 @@ class RunnerView(BaseModel):
     retired_by: str | None = None
     # The node names the runner declared it holds for a human decision.
     gates: list[str] = Field(default_factory=list)
+    # The projects the runner serves, one entry per declared entry.
+    projects: list[ServedProjectView] = Field(default_factory=list)
 
 
 class RunnerRegistrationResponse(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerRegistrationResponse`` — the id the caller's token
     names, the name the registration recorded, whether it was the first since the add, and the
-    tenant the runner serves. Registration doubles as the heartbeat, so a renamed tenant reaches
-    the runner on its next tick."""
+    tenant the runner serves, with the projects it serves there. Registration doubles as the
+    heartbeat, so a renamed tenant or project reaches the runner on its next tick."""
 
     runner_id: str
     runner_name: str | None = None
@@ -292,6 +317,9 @@ class RunnerRegistrationResponse(BaseModel):
     # both; the real model leaves them optional for a hub that predates tenants.
     tenant_id: str | None = None
     tenant_name: str | None = None
+    # The declaration the registration left stored, as the hub resolved it. The mock always fills it; the
+    # real model leaves it optional for a hub that predates projects.
+    projects: list[ServedProjectView] | None = None
 
 
 class RunnerAddResponse(BaseModel):
@@ -448,6 +476,10 @@ class FindingView(BaseModel):
     raised_by_chunk_id: str | None = None
     # How an exited finding left — ``outflow`` or ``withdrawn``; ``None`` while unexited.
     exit: str | None = None
+    # The project the finding belongs to — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
 
 
 class AnalyticsCountView(BaseModel):
@@ -527,3 +559,7 @@ class GardenProposalView(BaseModel):
     findings: list[str]
     created_at: str
     closure: GardenProposalClosureView | None = None
+    # The project the proposal belongs to — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None

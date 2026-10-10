@@ -12,19 +12,23 @@ from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
     IHubState,
+    ProjectRow,
     ReportedRunnerFacts,
     RunnerCapability,
     RunnerRow,
     ScopeRow,
+    ServedEntry,
     TenantRow,
 )
 
 
 class InMemoryHubState:
-    """Process-local chunk map + question map + tenant and runner registries. Implements ``IHubState``."""
+    """Process-local chunk map + question map + tenant, project and runner registries. Implements ``IHubState``."""
 
     def __init__(self) -> None:
         self._tenants: dict[str, TenantRow] = {}
+        #: Insertion-ordered, so a tenant's projects list in the order they were created.
+        self._projects: dict[str, ProjectRow] = {}
         self._chunks: dict[str, ChunkState] = {}
         self._runners: dict[str, RunnerRow] = {}
         #: Plaintext bearer token -> the runner it is the current token of. The real hub keeps a
@@ -45,6 +49,15 @@ class InMemoryHubState:
 
     def list_tenants(self) -> list[TenantRow]:
         return list(self._tenants.values())
+
+    def put_project(self, row: ProjectRow) -> None:
+        self._projects[row.project_id] = row
+
+    def get_project(self, project_id: str) -> ProjectRow | None:
+        return self._projects.get(project_id)
+
+    def list_projects(self) -> list[ProjectRow]:
+        return list(self._projects.values())
 
     def put_chunk(self, chunk: ChunkState) -> None:
         self._chunks[chunk.chunk_id] = chunk
@@ -74,6 +87,7 @@ class InMemoryHubState:
         capabilities: tuple[RunnerCapability, ...] = (),
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
+        projects: tuple[ServedEntry, ...] | None = None,
     ) -> bool:
         row = self._runners.get(runner_id)
         if row is None:
@@ -91,6 +105,8 @@ class InMemoryHubState:
         row.capabilities = capabilities
         row.declared_subscriptions = declared_subscriptions
         row.gates = gates
+        if projects is not None:
+            row.projects = projects
         return first
 
     def runner_for_token(self, token: str) -> RunnerRow | None:
@@ -142,6 +158,7 @@ class InMemoryHubState:
 
     def clear(self) -> None:
         self._tenants.clear()
+        self._projects.clear()
         self._chunks.clear()
         self._runners.clear()
         self._tokens.clear()

@@ -48,6 +48,7 @@ from blizzard_mock.mock_hub.domain.service import (
     RunnerRetired,
     RunnerTokenRefused,
     SystemArtifactNotFound,
+    UnknownProjects,
     UnknownRunner,
 )
 from blizzard_mock.mock_hub.domain.state import (
@@ -96,11 +97,14 @@ def peek_queue(service: Annotated[MockHubService, Depends(get_service)]) -> obje
 
 
 @fleet_router.post("/queue/peek")
-def peek_matched_queue(body: QueuePeekBody, service: Annotated[MockHubService, Depends(get_service)]) -> object:
-    """The matched fleet peek — at most one ready entry the caller's reported capabilities can
-    both work and claim, ``body.policy`` applied to both. See
+def peek_matched_queue(
+    body: QueuePeekBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """The matched fleet peek — at most one ready entry of a project the caller serves that its
+    reported capabilities can both work and claim, ``body.policy`` applied to both. See
     :meth:`MockHubService.peek_matched` for the matching."""
     return service.peek_matched(
+        runner_id,
         capabilities=tuple(
             RunnerCapability(
                 harness_id=c.harness_id,
@@ -189,7 +193,8 @@ def claim_route(
             content={
                 "chunk_id": body.chunk_id,
                 "incompatible_runner_id": exc.runner_id,
-                "detail": "runner capabilities no longer satisfy the chunk's reachable lineage",
+                "detail": exc.detail,
+                "reason": exc.reason,
             },
         )
     except ChunkNotFound as exc:
@@ -480,6 +485,7 @@ def register_runner(
         ),
         subscriptions=subscriptions,
         gates=tuple(body.gates),
+        projects=body.projects,
     )
 
 
@@ -514,8 +520,12 @@ def get_runner_identity(request: Request, service: Annotated[MockHubService, Dep
 def add_runner(body: RunnerAddBody, tenant: Tenant, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     """Add a runner under the initial ``name`` in the request's tenant — its id and bearer token are
     minted together and the token returned once; it stays never connected until it registers with
-    that token."""
-    return service.add_runner(name=body.name, tenant_id=tenant)
+    that token. It serves the ``projects`` named, each by id or slug — one naming no project of the
+    tenant refuses the add ``422`` — or, naming none, the tenant's only project."""
+    try:
+        return service.add_runner(name=body.name, tenant_id=tenant, projects=body.projects)
+    except UnknownProjects as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @operator_router.get("/me")
