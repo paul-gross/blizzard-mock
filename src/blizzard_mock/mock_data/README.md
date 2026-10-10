@@ -58,6 +58,12 @@ and so is a `--tenant` the store does not hold, or one named against a store wit
 no `tenants` table (a runner store, or a hub from before tenancy). For
 `scenario fleet` it applies to the hub half only.
 
+There is no `--project` option. A row whose table requires a `project_id` lands in the
+resolved tenant's only project, read from the store's `projects` table; a tenant that holds
+several projects, or none, is refused with the list of its projects (`id (slug: name)` each),
+since a row is never placed by guessing among them. A hub from before projects is seeded as
+before.
+
 - `reset --store hub|runner --url <sqlite|dsn>` — **implemented**. Reflects the
   live schema and deletes every row from every domain table in FK-safe order
   (children before parents), skipping Alembic's own `alembic_version` bookkeeping
@@ -101,6 +107,10 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   independently of the roster — a sample or miss for a slug outside
   `--subscription` is accepted, seeding the "reported but not declared" shape a
   declared roster reads as absent.
+  The runner's served-projects declaration is not a flag: on a store whose
+  `runner_registrations` carries `projects`, the row declares the tenant's only project by
+  id, `[{"entry": <project_id>, "project_id": <project_id>}]` — the shape the hub's own
+  migration gives every runner that declared nothing.
 - `create graph --store hub [--name NAME] [--seed N]` — **implemented**. Mints a
   synthetic workflow graph (`domain/hub/graph_seed.py`): a `build` (`executor: runner`)
   node into a `deliver` (`executor: hub`) node into the reserved terminal. A
@@ -341,9 +351,14 @@ no `tenants` table (a runner store, or a hub from before tenancy). For
   table is tenant-owned exactly when its reflected schema has a `tenant_id` column; each
   row written to one gets the resolved tenant, and each `ISeedStore.query` of one reads
   only that tenant's rows — so a `--graph NAME` reuse never crosses into another tenant.
-  A `scopes` row likewise gets a minted `scp_<ulid>` `scope_id` once the table carries
-  that column. Because both are conditional on the column, the same composers seed a
-  store from before tenancy and one after it unchanged.
+  The project is stamped the same way: a row of a table whose `project_id` is required
+  (not null, no default) gets the tenant's only project, and a `runner_registrations` row
+  gets the declaration serving it once that table carries `projects`. A nullable
+  `project_id` left out stays `NULL`, the tenant-level row it means, and a value the
+  composer supplies always wins. The project is read per write, and only when some row
+  needs it. A `scopes` row likewise gets a minted `scp_<ulid>` `scope_id` once the table
+  carries that column. Because all of these are conditional on the column, the same
+  composers seed a store from before tenancy or projects and one after them unchanged.
 - **Referential integrity is enforced, not just column shape**: the drift guard above
   validates a `FactRow`'s shape, not whether an id it names (a `--chunk`/`--runner-id`
   this store never seeded) actually exists. `internal/reflected_store.py` turns on

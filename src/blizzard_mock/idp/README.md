@@ -26,6 +26,15 @@ involved.
 | `PUT /_levers/refuse_callback` | Armed, `authorize` redirects back with `error=access_denied` instead of a code |
 | `POST /_levers/reset` | Back to the default profile, lever cleared, codes/tokens forgotten |
 
+## Tenants and projects
+
+The IdP holds no tenant or project: it reports who signed in, and the hub decides what that
+person may reach. A tenant invitation is accepted only by a sign-in reporting a verified
+address equal to the invited one, and the GitHub shape reports every address
+`GET /user/emails` lists. A test proves a secondary-address acceptance by listing the invited
+address in `secondary_emails` with `verified: true`, and a refusal by listing it unverified.
+An OIDC sign-in carries the primary alone, so only the primary can match there.
+
 ## Binary & configuration
 
 `blizzard-mock-idp` → `blizzard_mock.idp.cli:main` (a click command). Serves the

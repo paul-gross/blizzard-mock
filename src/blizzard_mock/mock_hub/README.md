@@ -56,16 +56,45 @@ call the runner token decides the tenant: a header naming any other tenant is re
 and a header naming the token's own tenant is accepted. The identity read resolves no tenant
 and ignores the header. The operator routes act in the tenant the header names, answering
 **404** `no such tenant` for an id no tenant holds. With no header they act in the hub's only
-tenant, or answer **409** `{"code": "tenant_required"}` once it holds several. Chunks,
-questions, scopes and system artifacts stay one shared set, so a scenario runs one tenant's
-work at a time.
+tenant, or answer **409** `{"code": "tenant_required"}` once it holds several. Questions, scopes and system
+artifacts stay one shared set, and chunks reach a tenant only through their project, so a
+scenario runs one tenant's work at a time.
+
+Each tenant holds projects. The first tenant starts with one, `default` (named `Default`),
+under the pinned id `proj_00000000000000000000000000`; a seeded tenant gets its own `default`
+under a minted `proj_` id, and a scenario adds more (`POST /_seed/projects`). Every chunk
+belongs to one project, the first tenant's `default` unless seeded otherwise. Every
+chunk-owned view (`ChunkDetail`, `ChunkStatusView`, `QueuePeekEntry`, `FindingView`,
+`GardenProposalView`) carries the chunk's `project_id` and the project's current
+`project_slug` and `project_name`.
+
+A runner serves the projects its declaration names. An entry names a project by id (a `proj_`
+value) or by its current slug, and resolves only within the runner's own tenant; the mock keeps
+no former slugs. Adding a runner with `projects` stores each entry beside the project it
+resolved to, and refuses the add **422**, naming each entry no project answers to. Added with
+no `projects`, the runner serves the tenant's only project, stored by id so a slug change never
+touches it, or nothing once the tenant holds several. A registration's `projects` replaces the
+declaration: `[]` serves nothing, and an omitted or `null` one keeps what the hub holds.
+Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no
+project answers to is stored unresolved, serving nothing, and resolved afresh at the next
+registration that declares it. Registration and the own-runner read answer the declaration as
+`projects: [{entry, project_id, slug, name}]`, each project read at answer time so a rename
+shows at once; an unresolved entry carries `project_id`, `slug` and `name` as `null`.
+
+The matched peek narrows the ready order to the projects the caller serves before it scans
+it, so another project's chunk is never its head and `hold` never stalls on one; an entry's
+`position` is its place in that narrowed order. The unmatched `GET` peek is not narrowed. A
+claim rechecks the declaration after the dependency check and before the capability check: a
+chunk of a project the runner does not serve is refused with the incompatible **409**,
+`reason: "project"` and `detail` `runner does not serve project '<slug>'`. A capability
+refusal carries `reason: "capability"`.
 
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
 | `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
-| `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry, capability- and policy-filtered for the caller |
-| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or incompatible capabilities |
+| `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry of a project the caller serves, capability- and policy-filtered for the caller |
+| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or an incompatible runner (`{chunk_id, incompatible_runner_id, detail, reason}`, `reason` `project` or `capability`) |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **404** with no live route, **409** when the route sits on an ended chunk |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090); **409** once the chunk has ended (`done` or `stopped`) |
@@ -79,9 +108,9 @@ work at a time.
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`, `projects`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name, projects}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
 | `GET /api/fleet/identity` | The caller's `{runner_id, runner_name, tenant_id, tenant_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
-| `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name, plus the tenant refusals above |
+| `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant, serving the `projects` named → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name or a `projects` entry no project of the tenant answers to, plus the tenant refusals above |
 | `GET /api/me` | The implicit operator of a hub without sign-in → `{user_id, username, display_name, role, permissions, assignable_roles, tenants, hub_admin}`, `tenants` holding every tenant ordered by id as `{tenant_id, name, role: "admin", permissions}`; `role` is the tenant `X-Blizzard-Tenant` names, else the only one's, else `null`; `permissions` lists are empty |
 | `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added in the request's tenant, **409** for a retired runner |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
@@ -146,22 +175,34 @@ to either a sample or a miss.
   full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
   accepted, minted garden proposal answers — an independent lever from `garden_run`/
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
-  chunk answers no such proposal. `POST /_seed/reset` clears all state, runners and their
+  chunk answers no such proposal. `project_id` names the chunk's project by id — the
+  first tenant's `default` when omitted, **404** for a project the hub does not hold — and
+  the seed answers `{chunk_id, graph_id, project_id}`. `POST /_seed/reset` clears all state, runners and their
   tokens included — as after a reset of a real hub's data, every token a runner holds then
   answers `unknown`, and `blizzard runner init` re-adds only with `--allow-readd`. The tenant
-  registry returns to the first tenant alone, under its first name.
+  registry returns to the first tenant alone, under its first name, holding its pinned
+  `default` project alone.
 - `POST /_seed/tenants {name, tenant_id?}` — create a tenant under a minted `ten_` id, or a
-  pinned one (**409** for a pinned id already held) → **201** `{tenant_id, name}`. `PATCH
+  pinned one (**409** for a pinned id already held), holding its own `default` project →
+  **201** `{tenant_id, name}`. `PATCH
   /_seed/tenants/{id} {name}` renames it, as a hub administrator does, and its runners read
   the new name on their next registration (**404** for an id no tenant holds).
-- `POST /_seed/runners {name, runner_id?, token?, tenant_id?}` — add a runner never
+- `POST /_seed/runners {name, runner_id?, token?, tenant_id?, projects?}` — add a runner never
   connected, as `POST /api/runners` does, optionally under a pinned id, token, and tenant (the
   first tenant when omitted; **409** for a pinned id already added, **404** for an unknown
-  tenant). `POST /_seed/runners/{id}/retire {by}` retires it and revokes its token,
+  tenant), serving `projects` resolved as that route resolves them (**422** for an entry no
+  project of the tenant answers to). `POST /_seed/runners/{id}/retire {by}` retires it and revokes its token,
   so the identity read answers `retired`; `POST /_seed/runners/{id}/token-revocations`
   revokes the token alone (`revoked` until a rotation); `POST
   /_seed/runners/{id}/pause?paused=` sets or releases the fleet's brake on it. All three answer
   **404** for an id never added.
+- `PUT /_seed/runners/{id}/projects {projects}` — replace the runner's served declaration as
+  a registration declaring `projects` does, without registering it: an unresolved entry is
+  kept, serving nothing. Answers the declaration as stored; **404** for an id never added.
+- `POST /_seed/projects {slug, name, tenant_id?, project_id?}` — create a project in a tenant
+  (the first tenant when omitted) under a minted `proj_` id, or a pinned one → **201**
+  `{project_id, tenant_id, slug, name}`; **404** for an unknown tenant, **409** for a pinned
+  id already held or a slug the tenant already holds.
 - `POST /_seed/scopes {slug, description?, retired?, created_at?}` — upsert one scope
   in the global vocabulary; a scenario seeds the end state it wants
   directly rather than replaying create/retire. Seeding the same `slug` twice replaces
@@ -218,4 +259,6 @@ transport-edge levers so a test can always steer and gate on startup.
 
 The lever store and clock are the package-shared `blizzard_mock.levers` /
 `blizzard_mock.clock`. Owns `tests/test_mock_hub.py` — unit + component coverage of
-the happy path and every lever (`blizzard-mock:unit-test`).
+the happy path and every lever (`blizzard-mock:unit-test`) — and
+`tests/test_mock_hub_projects.py`, the projects a runner serves: the declaration, the
+narrowed peek and the project claim refusal.
