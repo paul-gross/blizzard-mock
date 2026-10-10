@@ -551,17 +551,16 @@ class MockHubService:
         blocked, policy applied to both the capability and blocked-dependency dimensions before
         selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
         from its stored declaration, so another project's chunk is never its head and ``hold``
-        cannot stall it on one; a position is the chunk's place in the narrowed order. Like the
-        real verb it answers any resolved principal, registered or not — the fleet router has
+        cannot stall it on one. Narrowing selects from the ready order without renumbering it: a
+        position is the chunk's index in the whole ready order, as :meth:`peek` reports it. Like
+        the real verb it answers any resolved principal, registered or not — the fleet router has
         already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
         served = self._served_project_ids(self._added(runner_id))
-        ready = [
-            c
-            for c in self._state.list_chunks()
-            if not c.claimed and c.status is ChunkStatus.READY and c.project_id in served
-        ]
+        ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         for position, chunk in enumerate(ready):
+            if chunk.project_id not in served:
+                continue
             unusable = self._blocked_marking(chunk.chunk_id) is not None or matching.capability_ineligible(
                 chunk, chunk.current_node_id or chunk.entry, capabilities
             )
