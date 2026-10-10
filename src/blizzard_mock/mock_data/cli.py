@@ -97,6 +97,7 @@ from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError, req
 from blizzard_mock.mock_data.domain.seeding import (
     CLEAR_EVERYTHING,
     HUB_GLOBAL_TABLES,
+    ProjectResolutionError,
     SeedIntegrityError,
     SeedService,
     TenantResolutionError,
@@ -132,6 +133,7 @@ _COMPOSITION_ERRORS = (
     RunnerFleetCompositionError,
     GardenProposalCompositionError,
     TenantResolutionError,
+    ProjectResolutionError,
 )
 
 #: Fallback ``event_log.runner_id`` when ``create event`` gets neither ``--runner-id``

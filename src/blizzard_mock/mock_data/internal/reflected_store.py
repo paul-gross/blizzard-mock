@@ -2,8 +2,8 @@
 
 Reflects the target store's live schema once per invocation (never imports
 ``blizzard``), and writes every row in a single FK-safe transaction — parents
-before children. Rows are stamped with the store's tenant first, then the drift
-guard runs; both rule sets live in the domain.
+before children. Rows are stamped with the store's tenant and its project first,
+then the drift guard runs; both rule sets live in the domain.
 """
 
 from __future__ import annotations
@@ -41,14 +41,19 @@ from blizzard_mock.mock_data.domain.schema_contract import (
 )
 from blizzard_mock.mock_data.domain.seeding import (
     CLEAR_EVERYTHING,
+    PROJECTS_TABLE,
     TENANT_COLUMN,
     TENANTS_TABLE,
     ISeedStore,
+    ProjectRecord,
+    ProjectResolutionError,
     ResetBoundary,
     ResetSummary,
     SeedIntegrityError,
     TenantRecord,
     TenantResolutionError,
+    needs_project,
+    resolve_project,
     resolve_tenant,
     stamp_rows,
 )
@@ -172,6 +177,26 @@ class ReflectedStore:
             ]
         return resolve_tenant(records, self._named_tenant)
 
+    def _resolve_project(self, meta: MetaData) -> str:
+        """The project a row that names none lands in: the store tenant's only project.
+        Read on every write that needs it, so a project seeded earlier counts."""
+        projects = meta.tables.get(PROJECTS_TABLE)
+        if projects is None:
+            raise ProjectResolutionError(
+                f"the store has project-owned tables but no {PROJECTS_TABLE!r} table — re-migrate the store"
+            )
+        tenant_id = self._tenant_for(meta, [PROJECTS_TABLE])
+        name = projects.c.get("name", projects.c.slug)
+        stmt = select(projects.c.project_id, projects.c.slug, name.label("name")).order_by(projects.c.project_id)
+        if tenant_id is not None and TENANT_COLUMN in projects.c:
+            stmt = stmt.where(projects.c[TENANT_COLUMN] == tenant_id)
+        with self._engine.connect() as conn:
+            records = [
+                ProjectRecord(project_id=str(row.project_id), slug=str(row.slug), name=str(row.name))
+                for row in conn.execute(stmt).all()
+            ]
+        return resolve_project(records)
+
     def _mint_scope_id(self) -> str:
         return mint(SCOPE_PREFIX, SystemClock(), self._scope_rng)
 
@@ -181,7 +206,8 @@ class ReflectedStore:
         meta = self._reflect()
         schema = _snapshot(meta)
         tenant_id = self._tenant_for(meta, {row.table for row in rows})
-        rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id)
+        project_id = self._resolve_project(meta) if needs_project(rows, schema) else None
+        rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id, project_id)
         check_drift(schema, rows)
         by_table: dict[str, list[FactRow]] = {}
         for row in rows:

@@ -4,15 +4,17 @@ Declares ``ISeedStore`` (``bzh:dependency-inversion``): the store operations
 a concept composition needs, owned inward. ``SeedService`` is the ``concept
 -> list[FactRow]`` orchestrator concept composers hand their rows to.
 
-Also owns the tenant rules every write and read applies: which tenant a
-tenanted store resolves to (:func:`resolve_tenant`), and the column-conditional
-stamping that carries it onto a composed row (:func:`stamp_rows`). Composers
-never name a tenant; the store stamps one wherever its schema has the column,
-so the same composition seeds a store from before tenancy and one after it.
+Also owns the tenant and project rules every write and read applies: which tenant
+a tenanted store resolves to (:func:`resolve_tenant`), which project its rows land
+in (:func:`resolve_project`), and the column-conditional stamping that carries both
+onto a composed row (:func:`stamp_rows`). Composers name neither; the store stamps
+them wherever its schema has the column, so the same composition seeds a store from
+before tenancy or projects and one after them.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -34,6 +36,14 @@ SCOPE_ID_COLUMN = "scope_id"
 #: The hub's ``projects`` table, and the slug of the project every tenant starts with.
 PROJECTS_TABLE = "projects"
 DEFAULT_PROJECT_SLUG = "default"
+
+#: The column every project-owned table carries; a required one is stamped with the tenant's project.
+PROJECT_COLUMN = "project_id"
+
+#: A runner's served-projects declaration: a JSON list of ``{entry, project_id}`` pairs on its
+#: registration row, what the runner declared and the project each entry resolved to.
+RUNNER_REGISTRATIONS_TABLE = "runner_registrations"
+SERVED_PROJECTS_COLUMN = "projects"
 
 #: The hub's built-in work source's per-tenant counter, seeded when a tenant is created.
 WORK_ITEM_SEQUENCE_TABLE = "work_item_sequence"
@@ -155,6 +165,71 @@ def resolve_tenant(tenants: Sequence[TenantRecord], named: str | None) -> str:
     )
 
 
+class ProjectResolutionError(Exception):
+    """The project a seeded row lands in can't be settled: the tenant holds several
+    projects and the composer named none, or it holds none at all. The message lists
+    the projects to choose from."""
+
+
+@dataclass(frozen=True)
+class ProjectRecord:
+    """One project a tenant holds — its id, slug, and the name a person reads beside it."""
+
+    project_id: str
+    slug: str
+    name: str
+
+
+def resolve_project(projects: Sequence[ProjectRecord]) -> str:
+    """The project a seeded row that names none lands in: the tenant's only project.
+    Refuses, listing the tenant's projects, when it holds several — a row is never
+    placed by guessing among them — or none."""
+    if len(projects) == 1:
+        return projects[0].project_id
+    if not projects:
+        raise ProjectResolutionError(
+            f"the tenant holds no project in the store's {PROJECTS_TABLE!r} table — a migrated hub gives every "
+            "tenant one; re-migrate the store"
+        )
+    listing = ", ".join(f"{project.project_id} ({project.slug}: {project.name})" for project in projects)
+    raise ProjectResolutionError(
+        f"the tenant holds {len(projects)} projects, so a seeded row must name its {PROJECT_COLUMN!r} — "
+        f"this tool seeds only a tenant holding one project; it holds: {listing}"
+    )
+
+
+def served_declaration(project_id: str) -> str:
+    """A runner registration's served-projects JSON declaring ``project_id`` by its id —
+    the shape the hub's own migration gives every runner that declared nothing."""
+    return json.dumps([{"entry": project_id, "project_id": project_id}])
+
+
+def _needs_project_id(row: FactRow, table: ReflectedTable) -> bool:
+    column = table.columns.get(PROJECT_COLUMN)
+    return (
+        row.table != PROJECTS_TABLE and column is not None and column.is_required and PROJECT_COLUMN not in row.values
+    )
+
+
+def _needs_declaration(row: FactRow, table: ReflectedTable) -> bool:
+    return (
+        row.table == RUNNER_REGISTRATIONS_TABLE
+        and SERVED_PROJECTS_COLUMN in table.columns
+        and SERVED_PROJECTS_COLUMN not in row.values
+    )
+
+
+def needs_project(rows: Sequence[FactRow], schema: Mapping[str, ReflectedTable]) -> bool:
+    """Whether stamping ``rows`` needs the tenant's project: some row belongs to a table
+    whose ``project_id`` is required and composes none, or is a runner registration whose
+    table carries a served-projects declaration and composes none."""
+    for row in rows:
+        table = schema.get(row.table)
+        if table is not None and (_needs_project_id(row, table) or _needs_declaration(row, table)):
+            return True
+    return False
+
+
 def is_tenant_owned(table: ReflectedTable) -> bool:
     """Whether ``table`` holds one tenant's rows — it carries :data:`TENANT_COLUMN`."""
     return TENANT_COLUMN in table.columns
@@ -165,12 +240,16 @@ def stamp_rows(
     schema: Mapping[str, ReflectedTable],
     tenant_id: str | None,
     mint_scope_id: Callable[[], str],
+    project_id: str | None = None,
 ) -> list[FactRow]:
     """``rows`` with what the live schema asks of every writer and no composer supplies:
-    ``tenant_id`` on each row of a tenant-owned table (when a tenant was resolved), and a
-    minted ``scope_id`` on each ``scopes`` row once that table carries the column. A value
-    the composer already supplied wins; a table the schema lacks is passed through for the
-    drift guard to name."""
+    ``tenant_id`` on each row of a tenant-owned table (when a tenant was resolved); when a
+    project was resolved, ``project_id`` on each row of a table that requires it and a
+    declaration serving that project on each runner registration whose table carries
+    one; and a minted ``scope_id`` on each ``scopes`` row once that table carries the
+    column. A value the composer already supplied wins — a nullable ``project_id`` left
+    out stays NULL, the tenant-level row it means; a table the schema lacks is passed
+    through for the drift guard to name."""
     stamped: list[FactRow] = []
     for row in rows:
         table = schema.get(row.table)
@@ -180,6 +259,10 @@ def stamp_rows(
         extra: dict[str, object] = {}
         if tenant_id is not None and is_tenant_owned(table) and TENANT_COLUMN not in row.values:
             extra[TENANT_COLUMN] = tenant_id
+        if project_id is not None and _needs_project_id(row, table):
+            extra[PROJECT_COLUMN] = project_id
+        if project_id is not None and _needs_declaration(row, table):
+            extra[SERVED_PROJECTS_COLUMN] = served_declaration(project_id)
         if row.table == SCOPES_TABLE and SCOPE_ID_COLUMN in table.columns and SCOPE_ID_COLUMN not in row.values:
             extra[SCOPE_ID_COLUMN] = mint_scope_id()
         stamped.append(FactRow(table=row.table, values={**row.values, **extra}) if extra else row)
@@ -190,13 +273,14 @@ class ISeedStore(Protocol):
     """The store operations a concept composition needs — owned by the domain."""
 
     def write(self, rows: Sequence[FactRow]) -> None:
-        """Stamp ``rows`` with the store's tenant (:func:`stamp_rows`), validate them
+        """Stamp ``rows`` with the store's tenant and project (:func:`stamp_rows`), validate them
         against the live schema, then insert them
         transactionally, FK-safe (parents before children). Raises
         :class:`SeedIntegrityError` when a row violates a constraint the
         schema drift guard doesn't check (a dangling foreign key, a unique
-        clash), and :class:`TenantResolutionError` when a row is tenant-owned and the
-        store's tenant can't be settled."""
+        clash), :class:`TenantResolutionError` when a row is tenant-owned and the
+        store's tenant can't be settled, and :class:`ProjectResolutionError` when a row
+        needs the tenant's project (:func:`needs_project`) and it can't be settled."""
         ...
 
     def reset(self, boundary: ResetBoundary = CLEAR_EVERYTHING) -> ResetSummary:

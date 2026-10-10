@@ -29,7 +29,8 @@ def compose_runner_registration(
     binding of a runner that registered then and was last seen then; ``None`` composes
     one added but never connected, every connection column NULL. ``subscriptions`` is the
     declared roster's JSON (``runner_subscription_seed.compose_declared_roster``); ``None``
-    stores no roster."""
+    stores no roster. The projects the runner serves are not composed: the store declares
+    its tenant's project wherever the table carries a declaration (``seeding.stamp_rows``)."""
     registered_at = added_at if workspace_id is not None else None
     return FactRow(
         table="runner_registrations",

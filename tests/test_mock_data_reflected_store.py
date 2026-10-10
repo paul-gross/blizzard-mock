@@ -9,6 +9,7 @@ order the caller supplied them in.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 from blizzard_mock.mock_data.domain.seeding import (
     HUB_GLOBAL_TABLES,
+    ProjectResolutionError,
     SeedIntegrityError,
     TenantResolutionError,
     hub_reset_boundary,
@@ -388,6 +390,126 @@ def test_query_reads_only_the_resolved_tenants_rows(tmp_path: Path) -> None:
     with pytest.raises(TenantResolutionError):
         _store(url).query("runner_registrations")
     assert _store(url).query("users") == []
+
+
+# --- project stamping -----------------------------------------------------------
+
+_PROJECT_A = "proj_01HK153X00AAAAAAAAAAAAAAAA"
+_PROJECT_A2 = "proj_01HK153X00CCCCCCCCCCCCCCCC"
+_PROJECT_B = "proj_01HK153X00BBBBBBBBBBBBBBBB"
+
+
+def _projected_hub_store(tmp_path: Path, projects: dict[str, list[str]]) -> tuple[str, MetaData]:
+    """``_tenanted_hub_store`` once projects land: a tenant-owned ``projects`` table
+    holding ``projects`` (tenant -> project ids, the first slugged ``default``), a
+    ``chunks`` table whose ``project_id`` is required, a ``config_changes`` table whose
+    ``project_id`` is nullable, and ``runner_registrations`` carrying its nullable
+    served-projects declaration."""
+    url, _tenanted = _tenanted_hub_store(tmp_path, *projects)
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE runner_registrations ADD COLUMN projects TEXT"))
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    project_table = Table(
+        "projects",
+        meta,
+        Column("project_id", String, primary_key=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("slug", String, nullable=False),
+        Column("name", String, nullable=False),
+    )
+    Table(
+        "chunks",
+        meta,
+        Column("chunk_id", String, primary_key=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("project_id", String, ForeignKey("projects.project_id"), nullable=False),
+    )
+    Table(
+        "config_changes",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False),
+        Column("project_id", String, ForeignKey("projects.project_id"), nullable=True),
+    )
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        for tenant_id, project_ids in projects.items():
+            for index, project_id in enumerate(project_ids):
+                slug = "default" if index == 0 else f"p{index}"
+                conn.execute(
+                    project_table.insert().values(
+                        project_id=project_id, tenant_id=tenant_id, slug=slug, name=slug.title()
+                    )
+                )
+    return url, meta
+
+
+def _chunk(chunk_id: str, **extra: object) -> FactRow:
+    return FactRow(table="chunks", values={"chunk_id": chunk_id, **extra})
+
+
+def test_write_stamps_the_tenants_only_project_where_one_is_required(tmp_path: Path) -> None:
+    """A row of a table whose ``project_id`` is required lands in its tenant's only
+    project — never another tenant's; a nullable ``project_id`` left out stays NULL."""
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: [_PROJECT_A], _TENANT_B: [_PROJECT_B]})
+    _store(url, tenant=_TENANT_A).write([_chunk("c1"), FactRow(table="config_changes", values={})])
+    assert _rows(url, "chunks", "chunk_id", "tenant_id", "project_id") == [("c1", _TENANT_A, _PROJECT_A)]
+    assert _rows(url, "config_changes", "tenant_id", "project_id") == [(_TENANT_A, None)]
+
+
+def test_write_keeps_a_project_the_row_already_carries(tmp_path: Path) -> None:
+    """A composer that names its project is never second-guessed — not even in a tenant
+    of several projects, where the store could not pick one itself."""
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: [_PROJECT_A, _PROJECT_A2]})
+    _store(url).write([_chunk("c1", project_id=_PROJECT_A2)])
+    assert _rows(url, "chunks", "chunk_id", "project_id") == [("c1", _PROJECT_A2)]
+
+
+def test_write_refuses_a_tenant_of_several_projects_when_the_row_names_none(tmp_path: Path) -> None:
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: [_PROJECT_A, _PROJECT_A2]})
+    with pytest.raises(ProjectResolutionError) as excinfo:
+        _store(url).write([_registration("r1"), _chunk("c1")])
+    message = str(excinfo.value)
+    assert "2 projects" in message
+    assert _PROJECT_A in message and _PROJECT_A2 in message and "default" in message
+    assert _rows(url, "chunks", "chunk_id") == []
+    assert _rows(url, "runner_registrations", "runner_id") == []
+
+
+def test_write_refuses_a_tenant_holding_no_project(tmp_path: Path) -> None:
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: []})
+    with pytest.raises(ProjectResolutionError, match="holds no project"):
+        _store(url).write([_chunk("c1")])
+
+
+def test_write_declares_a_seeded_runner_serves_the_tenants_project(tmp_path: Path) -> None:
+    """A seeded runner registration declares it serves the tenant's project, in the very
+    JSON the hub's migration gives a runner that declared nothing: one entry naming the
+    project by its id, resolved to it."""
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: [_PROJECT_A]})
+    _store(url).write([_registration("r1")])
+    [(declaration,)] = _rows(url, "runner_registrations", "projects")
+    assert declaration == f'[{{"entry": "{_PROJECT_A}", "project_id": "{_PROJECT_A}"}}]'
+    assert json.loads(str(declaration)) == [{"entry": _PROJECT_A, "project_id": _PROJECT_A}]
+
+
+def test_write_keeps_a_declaration_the_registration_already_carries(tmp_path: Path) -> None:
+    """A composed declaration wins, ``None`` included — a runner serving nothing — and
+    composing every one leaves no project to resolve, so a tenant of several is fine."""
+    url, _meta = _projected_hub_store(tmp_path, {_TENANT_A: [_PROJECT_A, _PROJECT_A2]})
+    _store(url).write([_registration("r1", projects=None), _registration("r2", projects="[]")])
+    assert _rows(url, "runner_registrations", "runner_id", "projects") == [("r1", None), ("r2", "[]")]
+
+
+def test_write_without_project_columns_resolves_no_project(tmp_path: Path) -> None:
+    """A store from before projects — no ``projects`` table, no project column — is
+    written as it always was, with no project looked up."""
+    url, meta = _tenanted_hub_store(tmp_path, _TENANT_A)
+    _store(url).write([_registration("r1")])
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(meta.tables["runner_registrations"].c.runner_id)).scalars().all() == ["r1"]
 
 
 # --- reset (unmigrated store) --------------------------------------------------
