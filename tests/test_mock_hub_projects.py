@@ -220,7 +220,7 @@ def test_the_matched_peek_offers_only_chunks_of_served_projects(client: FleetCli
     (entry,) = _peek(client)
 
     assert entry["chunk_id"] == mine
-    assert entry["position"] == 0  # its place in the order the runner may take from
+    assert entry["position"] == 1  # its whole-order index, behind the other project's chunk
     assert (entry["project_id"], entry["project_slug"], entry["project_name"]) == (
         FIRST_PROJECT_ID,
         DEFAULT_PROJECT_SLUG,
