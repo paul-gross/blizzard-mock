@@ -24,6 +24,7 @@ from blizzard_mock.mock_hub.api.deps import (
     get_principal,
     get_service,
     get_tenant,
+    named_tenant,
     presented_bearer,
 )
 from blizzard_mock.mock_hub.domain.models import (
@@ -515,6 +516,13 @@ def add_runner(body: RunnerAddBody, tenant: Tenant, service: Annotated[MockHubSe
     minted together and the token returned once; it stays never connected until it registers with
     that token."""
     return service.add_runner(name=body.name, tenant_id=tenant)
+
+
+@operator_router.get("/me")
+def me(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """The caller and the tenants it may enter — the implicit operator of a hub without sign-in, a
+    member of every tenant. A header naming no tenant resolves none here, never a 404."""
+    return service.me(named_tenant(request))
 
 
 @operator_router.post("/runners/{runner_id}/enrollments", status_code=201)

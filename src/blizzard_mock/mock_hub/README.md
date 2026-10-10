@@ -82,6 +82,7 @@ work at a time.
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
 | `GET /api/fleet/identity` | The caller's `{runner_id, runner_name, tenant_id, tenant_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
 | `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name, plus the tenant refusals above |
+| `GET /api/me` | The implicit operator of a hub without sign-in → `{user_id, username, display_name, role, permissions, assignable_roles, tenants, hub_admin}`, `tenants` holding every tenant ordered by id as `{tenant_id, name, role: "admin", permissions}`; `role` is the tenant `X-Blizzard-Tenant` names, else the only one's, else `null`; `permissions` lists are empty |
 | `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added in the request's tenant, **409** for a retired runner |
 | `GET /api/fleet/questions/{id}` | The runner's answer poll |
 | `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first |

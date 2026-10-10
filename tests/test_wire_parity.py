@@ -359,6 +359,8 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
+    "MeTenantView": ("MeTenant", frozenset()),
+    "MeView": ("MeResponse", frozenset()),
     "NodeConfig": ("NodeConfig", frozenset()),
     "NodeEnvelope": ("NodeEnvelope", frozenset()),
     "QuestionView": ("QuestionView", frozenset()),
