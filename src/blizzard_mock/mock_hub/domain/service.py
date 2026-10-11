@@ -79,6 +79,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     EnvelopeChoice,
     ExternalSubscriptionUsageWindowView,
     FindingView,
+    GardenProposalsPageView,
     GardenProposalView,
     GraphArtifact,
     HubAdvanceResponse,
@@ -274,6 +275,10 @@ class ChunkNotFound(Exception):
 
 class QuestionNotFound(Exception):
     """No question with that id."""
+
+
+class MalformedCursor(Exception):
+    """A page cursor this mock did not issue."""
 
 
 class NoRunContext(Exception):
@@ -785,6 +790,26 @@ class MockHubService:
         return [
             _proposal_view(p, routine_name=chunk.garden_run.routine_name, now=now, project=project) for p in proposals
         ]
+
+    def garden_proposals_page(
+        self, chunk_id: str, *, state: RoutineProposalState, cursor: str | None, limit: int
+    ) -> GardenProposalsPageView:
+        """One page of :meth:`garden_proposals`' docket — mirrors ``GET
+        /api/fleet/chunks/{id}/garden/proposals/page``. The cursor is the offset into the filtered
+        docket; raises :class:`MalformedCursor` on one that is not. Same 404s as the unpaged read."""
+        docket = self.garden_proposals(chunk_id, state=state)
+        offset = 0
+        if cursor is not None:
+            try:
+                offset = int(cursor.removeprefix("o:")) if cursor.startswith("o:") else -1
+            except ValueError:
+                offset = -1
+            if offset < 0:
+                raise MalformedCursor(cursor)
+        end = offset + limit
+        return GardenProposalsPageView(
+            proposals=docket[offset:end], next_cursor=f"o:{end}" if end < len(docket) else None
+        )
 
     def _garden_run_or_404(self, chunk_id: str) -> ChunkState:
         """The chunk a worker's own routine-run-scoped read is confined to — shared by

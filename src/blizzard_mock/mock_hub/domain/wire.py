@@ -563,3 +563,12 @@ class GardenProposalView(BaseModel):
     project_id: str | None = None
     project_slug: str | None = None
     project_name: str | None = None
+
+
+class GardenProposalsPageView(BaseModel):
+    """One keyset page of a routine's garden proposals — mirrors
+    ``blizzard.wire.garden_proposal.GardenProposalsPageView``; ``next_cursor`` is ``None``
+    exactly on the last page."""
+
+    proposals: list[GardenProposalView] = []
+    next_cursor: str | None = None
