@@ -40,6 +40,7 @@ from blizzard_mock.mock_hub.domain.service import (
     ClaimIncompatible,
     DependencyUnmet,
     FindingNotInAnsweredSet,
+    MalformedCursor,
     MockHubService,
     NoAnsweredProposal,
     NoRunContext,
@@ -276,6 +277,25 @@ def get_garden_proposals(
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except NoRunContext as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.get("/chunks/{chunk_id}/garden/proposals/page")
+def get_garden_proposals_page(
+    chunk_id: str,
+    service: Annotated[MockHubService, Depends(get_service)],
+    state: RoutineProposalState = RoutineProposalState.OPEN,
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+) -> object:
+    """One keyset page of the chunk's own routine's proposal bucket — mirrors the real hub's
+    ``GET /api/fleet/chunks/{id}/garden/proposals/page`` (limit bounds and 422 on a malformed
+    cursor included)."""
+    try:
+        return service.garden_proposals_page(chunk_id, state=state, cursor=cursor, limit=limit)
+    except (ChunkNotFound, NoRunContext) as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except MalformedCursor:
+        return JSONResponse(status_code=422, content={"detail": "malformed cursor"})
 
 
 @fleet_router.get("/chunks/{chunk_id}/analytics/counts/files")

@@ -3116,6 +3116,51 @@ def test_garden_proposals_state_all_returns_open_and_closed(client: TestClient) 
     assert [row["proposal_id"] for row in proposals.json()] == ["prop_open", "prop_closed"]
 
 
+def _paged_proposal_spec() -> dict:
+    return _proposal_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
+        garden_proposals=[
+            {"proposal_id": f"prop_{n}", "class": "mechanize", "title": "t", "body": "b", "findings": ["fin_1"]}
+            | ({"closure": {"closure": "passed", "reason": "no"}} if n % 2 else {})
+            for n in range(5)
+        ],
+    )
+
+
+@pytest.mark.parametrize("state", ["open", "closed", "all"])
+def test_garden_proposals_page_follows_next_cursor_to_the_unpaged_docket(client: TestClient, state: str) -> None:
+    chunk_id = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()["chunk_id"]
+    whole = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": state}).json()
+
+    collected: list[dict] = []
+    params: dict[str, object] = {"state": state, "limit": 2}
+    while True:
+        page = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals/page", params=params)
+        assert page.status_code == 200, page.text
+        body = page.json()
+        assert len(body["proposals"]) <= 2
+        collected += body["proposals"]
+        if body["next_cursor"] is None:
+            break
+        params = {**params, "cursor": body["next_cursor"]}
+
+    assert collected == whole
+
+
+def test_garden_proposals_page_refuses_a_malformed_cursor_and_an_out_of_range_limit(client: TestClient) -> None:
+    chunk_id = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()["chunk_id"]
+    url = f"/api/fleet/chunks/{chunk_id}/garden/proposals/page"
+
+    assert client.get(url, params={"cursor": "junk"}).status_code == 422
+    assert client.get(url, params={"limit": 0}).status_code == 422
+    assert client.get(url, params={"limit": 1001}).status_code == 422
+
+
+def test_garden_proposals_page_404s_on_no_run_context_and_an_unknown_chunk(client: TestClient) -> None:
+    assert client.get(f"/api/fleet/chunks/{_seed(client)}/garden/proposals/page").status_code == 404
+    assert client.get("/api/fleet/chunks/ch_ghost/garden/proposals/page").status_code == 404
+
+
 def test_garden_proposals_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
     chunk_id = _seed(client)  # the plain `_SPEC` chunk seeds no `garden_run` at all
 
