@@ -16,6 +16,7 @@ from blizzard_mock.levers import InMemoryLeverStore
 from blizzard_mock.mock_hub.api.control import captured_router, levers_router, seed_router
 from blizzard_mock.mock_hub.api.middleware import HubLeverMiddleware, RequestCaptureMiddleware
 from blizzard_mock.mock_hub.api.routes import fleet_router as hub_fleet_router
+from blizzard_mock.mock_hub.api.routes import host_router as hub_host_router
 from blizzard_mock.mock_hub.api.routes import identity_router as hub_identity_router
 from blizzard_mock.mock_hub.api.routes import operator_router as hub_operator_router
 from blizzard_mock.mock_hub.api.routes import router as hub_router
@@ -50,6 +51,7 @@ def create_app(config: MockHubConfig | None = None, *, clock: Clock | None = Non
     app.include_router(hub_router)
     # Ahead of the gated fleet router, so the identity route answers a refused token itself.
     app.include_router(hub_identity_router)
+    app.include_router(hub_host_router)
     app.include_router(hub_fleet_router)
     app.include_router(hub_operator_router)
     app.include_router(seed_router)

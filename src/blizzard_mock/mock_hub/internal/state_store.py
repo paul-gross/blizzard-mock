@@ -11,6 +11,7 @@ from datetime import datetime
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
 from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
+    HostRow,
     IHubState,
     ProjectRow,
     ReportedRunnerFacts,
@@ -36,6 +37,11 @@ class InMemoryHubState:
         self._tokens: dict[str, str] = {}
         #: Revoked or rotated-away token -> the runner it was issued to.
         self._revoked_tokens: dict[str, str] = {}
+        self._hosts: dict[str, HostRow] = {}
+        #: Plaintext host bearer token -> the host it is the current token of; as for runners.
+        self._host_tokens: dict[str, str] = {}
+        #: Revoked or rotated-away host token -> the host it was issued to.
+        self._revoked_host_tokens: dict[str, str] = {}
         self._reported: dict[str, ReportedRunnerFacts] = {}
         self._questions: dict[str, QuestionState] = {}
         self._system_artifacts: dict[str, str] = {}
@@ -132,6 +138,32 @@ class InMemoryHubState:
     def list_runners(self) -> list[RunnerRow]:
         return list(self._runners.values())
 
+    def add_host(self, row: HostRow, *, token: str) -> None:
+        if row.host_id in self._hosts:
+            raise ValueError(f"host {row.host_id} is already added")
+        self._hosts[row.host_id] = row
+        self._host_tokens[token] = row.host_id
+
+    def get_host(self, host_id: str) -> HostRow | None:
+        return self._hosts.get(host_id)
+
+    def list_hosts(self) -> list[HostRow]:
+        return list(self._hosts.values())
+
+    def host_for_token(self, token: str) -> HostRow | None:
+        host_id = self._host_tokens.get(token)
+        return self._hosts.get(host_id) if host_id is not None else None
+
+    def revoked_token_host_id(self, token: str) -> str | None:
+        return self._revoked_host_tokens.get(token)
+
+    def replace_host_token(self, host_id: str, *, token: str | None) -> None:
+        for held in [t for t, owner in self._host_tokens.items() if owner == host_id]:
+            del self._host_tokens[held]
+            self._revoked_host_tokens[held] = host_id
+        if token is not None:
+            self._host_tokens[token] = host_id
+
     def put_question(self, question: QuestionState) -> None:
         self._questions[question.question_id] = question
 
@@ -163,6 +195,9 @@ class InMemoryHubState:
         self._runners.clear()
         self._tokens.clear()
         self._revoked_tokens.clear()
+        self._hosts.clear()
+        self._host_tokens.clear()
+        self._revoked_host_tokens.clear()
         self._questions.clear()
         self._system_artifacts.clear()
         self._scopes.clear()

@@ -359,6 +359,9 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "GardenProposalView": ("GardenProposalView", frozenset()),
     "GardenProposalsPageView": ("GardenProposalsPageView", frozenset()),
     "GraphArtifact": ("GraphArtifact", frozenset()),
+    "HostAddResponse": ("HostAddResponse", frozenset()),
+    "HostRecordResponse": ("HostRecordResponse", frozenset()),
+    "HostRunnerView": ("HostRunnerView", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
     "LeaseTranscriptView": ("LeaseTranscriptView", frozenset()),
     "MeTenantView": ("MeTenant", frozenset()),
@@ -398,10 +401,15 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 
 #: Request-body mirrors, invisible to ``_mirror_models`` since they live in ``mock_hub.api.deps``.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
+    "HostAddBody": ("HostAddRequest", frozenset()),
+    "HostReportBody": ("HostReportRequest", frozenset()),
+    "HostRunnerAddBody": ("HostRunnerAddRequest", frozenset()),
+    "HostWorkspaceBody": ("HostWorkspace", frozenset()),
     "QueuePeekBody": ("QueuePeekRequest", frozenset()),
     "RunnerAddBody": ("RunnerAddRequest", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
     "RunnerRegistrationBody": ("RunnerRegistrationRequest", frozenset()),
+    "RunnerRetireBody": ("RunnerRetireRequest", frozenset()),
     "RunnerSubscriptionDeclarationBody": ("RunnerSubscriptionDeclaration", frozenset()),
     "SidechainSegmentBody": ("SidechainSegmentView-Input", frozenset()),
     "ToolCallSegmentBody": ("ToolCallSegmentView", frozenset()),

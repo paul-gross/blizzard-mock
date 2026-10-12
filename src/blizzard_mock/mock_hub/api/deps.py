@@ -16,9 +16,11 @@ from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.service import (
     TENANT_HEADER,
     ForeignTenantNamed,
+    HostRetiredError,
     MockHubService,
     NoSuchTenant,
     TenantRequired,
+    UnresolvableHost,
     UnresolvableRunner,
 )
 
@@ -46,6 +48,18 @@ def get_principal(request: Request, service: Annotated[MockHubService, Depends(g
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+def get_host_principal(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
+    """The calling host's id, resolved from its bearer token — the one identity a host call carries. A missing,
+    revoked or unknown token is refused ``401`` and a retired host's ``403``, before any handler runs, as the real
+    host gate does; a runner's token resolves no host."""
+    try:
+        return service.host_principal(presented_bearer(request))
+    except UnresolvableHost as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except HostRetiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 def named_tenant(request: Request) -> str | None:
     """The tenant id an ``X-Blizzard-Tenant`` header names, else ``None``."""
     return request.headers.get(TENANT_HEADER) or None
@@ -61,6 +75,19 @@ def fleet_tenant_bound(
     resolution does; one naming the token's own tenant is accepted."""
     try:
         service.refuse_foreign_tenant(runner_id, named_tenant(request))
+    except ForeignTenantNamed as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def host_tenant_bound(
+    request: Request,
+    host_id: Annotated[str, Depends(get_host_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> None:
+    """A host router dependency after :func:`get_host_principal`: the host token decides the call's tenant, so an
+    ``X-Blizzard-Tenant`` naming another one is refused ``400``."""
+    try:
+        service.refuse_foreign_host_tenant(host_id, named_tenant(request))
     except ForeignTenantNamed as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -257,6 +284,47 @@ class RunnerAddBody(MirroredWireBody):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     # The projects the runner is added serving, by id or slug — ``None`` serves the tenant's only project.
     projects: list[str] | None = None
+    # The host the runner is added under; an unknown or retired one refuses the add.
+    host_id: str | None = None
+
+
+class HostWorkspaceBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.host.HostWorkspace`` field-for-field — one workspace a host reports."""
+
+    workspace_id: str
+    env_capacity: int | None = None
+
+
+class HostReportBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.host.HostReportRequest`` field-for-field — what the calling host reports about itself.
+    ``workspaces`` and ``subscriptions`` replace what the hub holds, whole."""
+
+    name: str | None = None
+    url: str | None = None
+    redirect_uris: list[str] = Field(default_factory=list)
+    workspaces: list[HostWorkspaceBody] = Field(default_factory=list)
+    subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(default_factory=list)
+
+
+class HostRunnerAddBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.host.HostRunnerAddRequest`` field-for-field — a runner added under the calling host."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    projects: list[str] | None = None
+
+
+class HostAddBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.host.HostAddRequest`` field-for-field — stripped, and a blank name refused ``422``."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    adopt: list[str] = Field(default_factory=list)
+
+
+class RunnerRetireBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerRetireRequest`` field-for-field — who retires, and whether to ``force``."""
+
+    by: str = "operator"
+    force: bool = False
 
 
 class RunnerSeedControlBody(BaseModel):
