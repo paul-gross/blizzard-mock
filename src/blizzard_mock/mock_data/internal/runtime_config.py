@@ -10,7 +10,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from sqlalchemy import MetaData, Table, create_engine, select
+from sqlalchemy import Engine, MetaData, Table, create_engine, select
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
 #: The runner store's singleton identity table — the id and name of its latest registration.
@@ -54,9 +54,7 @@ def resolve_runner_id(runtime_dir: Path) -> str:
     db_url = resolve_db_url(runtime_dir, store="runner")
     engine = create_engine(db_url)
     try:
-        identity = Table(_IDENTITY_TABLE, MetaData(), autoload_with=engine)
-        with engine.connect() as conn:
-            row = conn.execute(select(identity.c.runner_id).order_by(identity.c.id.desc()).limit(1)).first()
+        runner_id = read_identity_runner_id(engine)
     except NoSuchTableError as exc:
         raise RuntimeConfigError(
             f"the runner store at {db_url} has no {_IDENTITY_TABLE} table — is it migrated? "
@@ -66,9 +64,19 @@ def resolve_runner_id(runtime_dir: Path) -> str:
         raise RuntimeConfigError(f"could not read the runner store at {db_url}: {exc}") from exc
     finally:
         engine.dispose()
-    if row is None:
+    if runner_id is None:
         raise RuntimeConfigError(
             f"the runner at {runtime_dir} has never registered with its hub, so it holds no id yet "
             "— start it once against its hub, or pass --runner-id directly"
         )
-    return str(row.runner_id)
+    return runner_id
+
+
+def read_identity_runner_id(engine: Engine) -> str | None:
+    """The id of a runner store's latest registration, from its identity row; ``None`` when
+    the runner has never registered. Raises ``NoSuchTableError`` against a store with no
+    identity table."""
+    identity = Table(_IDENTITY_TABLE, MetaData(), autoload_with=engine)
+    with engine.connect() as conn:
+        row = conn.execute(select(identity.c.runner_id).order_by(identity.c.id.desc()).limit(1)).first()
+    return None if row is None else str(row.runner_id)

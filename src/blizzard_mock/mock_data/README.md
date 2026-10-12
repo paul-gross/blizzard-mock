@@ -357,7 +357,12 @@ before.
   `project_id` left out stays `NULL`, the tenant-level row it means, and a value the
   composer supplies always wins. The project is read per write, and only when some row
   needs it. A `scopes` row likewise gets a minted `scp_<ulid>` `scope_id` once the table
-  carries that column. Because all of these are conditional on the column, the same
+  carries that column. A runner store — one with a `runner_identity` table — gets its
+  runner stamped the same way: each row of a table carrying `runner_id`, the identity
+  table aside, takes the id `scenario fleet` pins (`--runner-id`, or `--runner-dir`'s
+  identity row), else the store's own latest identity row. A runner that never
+  registered leaves them `NULL`, for the runner to stamp when it binds. A hub store's
+  `runner_id` columns are never stamped. Because all of these are conditional on the column, the same
   composers seed a store from before tenancy or projects and one after them unchanged.
 - **Referential integrity is enforced, not just column shape**: the drift guard above
   validates a `FactRow`'s shape, not whether an id it names (a `--chunk`/`--runner-id`

@@ -512,6 +512,93 @@ def test_write_without_project_columns_resolves_no_project(tmp_path: Path) -> No
         assert conn.execute(select(meta.tables["runner_registrations"].c.runner_id)).scalars().all() == ["r1"]
 
 
+# --- runner stamping --------------------------------------------------------------
+
+_RUNNER_A = "run_01HK153X00AAAAAAAAAAAAAAAA"
+_RUNNER_B = "run_01HK153X00BBBBBBBBBBBBBBBB"
+
+
+def _runner_store(tmp_path: Path, *registered: str) -> tuple[str, MetaData]:
+    """A sqlite store shaped like a keyed runner store: a ``runner_identity`` table holding
+    one row per id in ``registered`` (the latest last), a runner-scoped ``local_pause_facts``
+    carrying a nullable ``runner_id``, and an ``outbound_facts`` table that carries none."""
+    url = f"sqlite:///{tmp_path / 'runner.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    identity = Table(
+        "runner_identity",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=False),
+        Column("name", String, nullable=False),
+    )
+    Table(
+        "local_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=True),
+        Column("paused", Boolean, nullable=False),
+    )
+    Table("outbound_facts", meta, Column("id", Integer, primary_key=True, autoincrement=True))
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        for runner_id in registered:
+            conn.execute(identity.insert().values(runner_id=runner_id, name="r"))
+    return url, meta
+
+
+def _pause() -> FactRow:
+    return FactRow(table="local_pause_facts", values={"paused": True})
+
+
+def _pause_runner_ids(url: str, meta: MetaData) -> list[str | None]:
+    with create_engine(url).begin() as conn:
+        return list(conn.execute(select(meta.tables["local_pause_facts"].c.runner_id)).scalars().all())
+
+
+def test_write_stamps_a_runner_stores_latest_identity_on_its_scoped_rows(tmp_path: Path) -> None:
+    url, meta = _runner_store(tmp_path, _RUNNER_A, _RUNNER_B)
+    _store(url).write([_pause(), FactRow(table="outbound_facts", values={})])
+    assert _pause_runner_ids(url, meta) == [_RUNNER_B]
+
+
+def test_write_stamps_the_named_runner_over_the_identity(tmp_path: Path) -> None:
+    url, meta = _runner_store(tmp_path, _RUNNER_A)
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_pause()])
+    assert _pause_runner_ids(url, meta) == [_RUNNER_B]
+
+
+def test_write_leaves_a_never_registered_runner_stores_rows_unowned(tmp_path: Path) -> None:
+    """No identity row and no named runner: the rows land NULL, for the runner to stamp when it binds."""
+    url, meta = _runner_store(tmp_path)
+    _store(url).write([_pause()])
+    assert _pause_runner_ids(url, meta) == [None]
+
+
+def test_write_keeps_a_runner_the_row_already_carries(tmp_path: Path) -> None:
+    url, meta = _runner_store(tmp_path, _RUNNER_A)
+    _store(url).write([FactRow(table="local_pause_facts", values={"paused": True, "runner_id": _RUNNER_B})])
+    assert _pause_runner_ids(url, meta) == [_RUNNER_B]
+
+
+def test_write_never_stamps_the_identity_table_itself(tmp_path: Path) -> None:
+    url, meta = _runner_store(tmp_path, _RUNNER_A)
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write(
+        [FactRow(table="runner_identity", values={"runner_id": _RUNNER_A, "name": "again"})]
+    )
+    with create_engine(url).begin() as conn:
+        ids = conn.execute(select(meta.tables["runner_identity"].c.runner_id)).scalars().all()
+    assert ids == [_RUNNER_A, _RUNNER_A]
+
+
+def test_write_never_stamps_a_hub_stores_runner_columns(tmp_path: Path) -> None:
+    """A hub store has no ``runner_identity``, so a named runner touches none of its ``runner_id`` columns."""
+    url, registrations, _ = _hub_store(tmp_path)
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_registration("r1")])
+    with create_engine(url).begin() as conn:
+        assert conn.execute(select(registrations.c.runner_id)).scalars().all() == ["r1"]
+
+
 # --- reset (unmigrated store) --------------------------------------------------
 
 

@@ -6,8 +6,8 @@ a concept composition needs, owned inward. ``SeedService`` is the ``concept
 
 Also owns the tenant and project rules every write and read applies: which tenant
 a tenanted store resolves to (:func:`resolve_tenant`), which project its rows land
-in (:func:`resolve_project`), and the column-conditional stamping that carries both
-onto a composed row (:func:`stamp_rows`). Composers name neither; the store stamps
+in (:func:`resolve_project`), and the column-conditional stamping that carries both,
+and a runner store's own runner id, onto a composed row (:func:`stamp_rows`). Composers name neither; the store stamps
 them wherever its schema has the column, so the same composition seeds a store from
 before tenancy or projects and one after them.
 """
@@ -27,6 +27,13 @@ TENANTS_TABLE = "tenants"
 
 #: The column every tenant-owned table carries; a table holds one tenant's rows exactly when it has it.
 TENANT_COLUMN = "tenant_id"
+
+#: A runner store's identity table — the id its hub minted, held in the table's own ``runner_id``.
+#: Its presence is what marks a store as a runner store; its rows are never stamped.
+RUNNER_IDENTITY_TABLE = "runner_identity"
+
+#: The column every runner-scoped table of a runner store carries — the id of the runner whose row it is.
+RUNNER_COLUMN = "runner_id"
 
 #: A scope's surrogate key, minted by the writer once the store's ``scopes`` table carries it.
 SCOPES_TABLE = "scopes"
@@ -235,19 +242,29 @@ def is_tenant_owned(table: ReflectedTable) -> bool:
     return TENANT_COLUMN in table.columns
 
 
+def is_runner_scoped(table_name: str, table: ReflectedTable) -> bool:
+    """Whether ``table`` — a runner store's — holds one runner's rows: it carries
+    :data:`RUNNER_COLUMN` and is not the identity table that column names into."""
+    return table_name != RUNNER_IDENTITY_TABLE and RUNNER_COLUMN in table.columns
+
+
 def stamp_rows(
     rows: Sequence[FactRow],
     schema: Mapping[str, ReflectedTable],
     tenant_id: str | None,
     mint_scope_id: Callable[[], str],
     project_id: str | None = None,
+    runner_id: str | None = None,
 ) -> list[FactRow]:
     """``rows`` with what the live schema asks of every writer and no composer supplies:
     ``tenant_id`` on each row of a tenant-owned table (when a tenant was resolved); when a
     project was resolved, ``project_id`` on each row of a table that requires it and a
     declaration serving that project on each runner registration whose table carries
     one; and a minted ``scope_id`` on each ``scopes`` row once that table carries the
-    column. A value the composer already supplied wins — a nullable ``project_id`` left
+    column. ``runner_id`` is given only for a runner store: it lands on each row of a
+    runner-scoped table (:func:`is_runner_scoped`); a runner store whose runner never
+    registered passes none, and its rows stay NULL for the runner to stamp when it binds.
+    A value the composer already supplied wins — a nullable ``project_id`` left
     out stays NULL, the tenant-level row it means; a table the schema lacks is passed
     through for the drift guard to name."""
     stamped: list[FactRow] = []
@@ -259,6 +276,8 @@ def stamp_rows(
         extra: dict[str, object] = {}
         if tenant_id is not None and is_tenant_owned(table) and TENANT_COLUMN not in row.values:
             extra[TENANT_COLUMN] = tenant_id
+        if runner_id is not None and is_runner_scoped(row.table, table) and RUNNER_COLUMN not in row.values:
+            extra[RUNNER_COLUMN] = runner_id
         if project_id is not None and _needs_project_id(row, table):
             extra[PROJECT_COLUMN] = project_id
         if project_id is not None and _needs_declaration(row, table):
@@ -273,7 +292,7 @@ class ISeedStore(Protocol):
     """The store operations a concept composition needs — owned by the domain."""
 
     def write(self, rows: Sequence[FactRow]) -> None:
-        """Stamp ``rows`` with the store's tenant and project (:func:`stamp_rows`), validate them
+        """Stamp ``rows`` with the store's tenant, project and runner (:func:`stamp_rows`), validate them
         against the live schema, then insert them
         transactionally, FK-safe (parents before children). Raises
         :class:`SeedIntegrityError` when a row violates a constraint the
