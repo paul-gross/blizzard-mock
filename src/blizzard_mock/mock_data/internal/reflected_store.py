@@ -2,7 +2,8 @@
 
 Reflects the target store's live schema once per invocation (never imports
 ``blizzard``), and writes every row in a single FK-safe transaction — parents
-before children. Rows are stamped with the store's tenant and its project first,
+before children. Rows are stamped with the store's tenant and its project — or, in a
+runner store, its runner — first,
 then the drift guard runs; both rule sets live in the domain.
 """
 
@@ -42,6 +43,7 @@ from blizzard_mock.mock_data.domain.schema_contract import (
 from blizzard_mock.mock_data.domain.seeding import (
     CLEAR_EVERYTHING,
     PROJECTS_TABLE,
+    RUNNER_IDENTITY_TABLE,
     TENANT_COLUMN,
     TENANTS_TABLE,
     ISeedStore,
@@ -57,6 +59,7 @@ from blizzard_mock.mock_data.domain.seeding import (
     resolve_tenant,
     stamp_rows,
 )
+from blizzard_mock.mock_data.internal.runtime_config import read_identity_runner_id
 
 # A live daemon may hold the same sqlite file open — set a busy timeout so a
 # lock waits rather than immediately raising (pinned by tests/test_pin_mock.py).
@@ -138,11 +141,17 @@ class ReflectedStore:
     are filtered to; unnamed, the store's only tenant. It is resolved once, on the first
     write or read that touches a tenant-owned table, and only against a store that has
     a ``tenants`` table — so a store from before tenancy writes exactly as it always has.
+
+    ``runner`` names the runner id a runner store's runner-scoped rows are stamped with;
+    unnamed, the id in the store's own identity row, or NULL when its runner never
+    registered. Only a store with a ``runner_identity`` table is a runner store — a hub
+    store's ``runner_id`` columns are never stamped.
     """
 
-    def __init__(self, engine: Engine, *, tenant: str | None = None) -> None:
+    def __init__(self, engine: Engine, *, tenant: str | None = None, runner: str | None = None) -> None:
         self._engine = engine
         self._named_tenant = tenant
+        self._named_runner = runner
         self._resolved_tenant: str | None = None
         self._scope_rng = random.Random()
 
@@ -197,6 +206,15 @@ class ReflectedStore:
             ]
         return resolve_project(records)
 
+    def _runner_for(self, meta: MetaData) -> str | None:
+        """The runner id a runner store's rows are stamped with; ``None`` in a hub store,
+        and in a runner store whose runner never registered and was named none."""
+        if RUNNER_IDENTITY_TABLE not in meta.tables:
+            return None
+        if self._named_runner is not None:
+            return self._named_runner
+        return read_identity_runner_id(self._engine)
+
     def _mint_scope_id(self) -> str:
         return mint(SCOPE_PREFIX, SystemClock(), self._scope_rng)
 
@@ -207,7 +225,8 @@ class ReflectedStore:
         schema = _snapshot(meta)
         tenant_id = self._tenant_for(meta, {row.table for row in rows})
         project_id = self._resolve_project(meta) if needs_project(rows, schema) else None
-        rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id, project_id)
+        runner_id = self._runner_for(meta)
+        rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id, project_id, runner_id)
         check_drift(schema, rows)
         by_table: dict[str, list[FactRow]] = {}
         for row in rows:

@@ -262,7 +262,9 @@ def _create_fleet_engine(label: str, url: str) -> Engine:
         raise click.ClickException(f"cannot open the {label} store at {url!r}: {exc}") from exc
 
 
-def _connect_fleet_store(label: str, url: str, engine: Engine, *, tenant: str | None = None) -> SeedService:
+def _connect_fleet_store(
+    label: str, url: str, engine: Engine, *, tenant: str | None = None, runner: str | None = None
+) -> SeedService:
     """Open one real connection against ``label``'s already-constructed engine, before
     either store is written. An unreachable target (``sqlalchemy.exc.OperationalError``,
     raised on first connect — e.g. a sqlite path whose parent directory doesn't exist)
@@ -273,7 +275,7 @@ def _connect_fleet_store(label: str, url: str, engine: Engine, *, tenant: str | 
             pass
     except SQLAlchemyError as exc:
         raise click.ClickException(f"cannot open the {label} store at {url!r}: {exc}") from exc
-    return SeedService(ReflectedStore(engine, tenant=tenant))
+    return SeedService(ReflectedStore(engine, tenant=tenant, runner=runner))
 
 
 def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: random.Random) -> GraphContext:
@@ -1725,7 +1727,7 @@ def scenario_fleet(
     hub_engine = _create_fleet_engine("hub", resolved_hub_url)
     runner_engine = _create_fleet_engine("runner", resolved_runner_url)
     hub_service = _connect_fleet_store("hub", resolved_hub_url, hub_engine, tenant=_named_tenant())
-    runner_service = _connect_fleet_store("runner", resolved_runner_url, runner_engine)
+    runner_service = _connect_fleet_store("runner", resolved_runner_url, runner_engine, runner=pinned_runner_id)
 
     # One Clock/Random pair across both halves, so --seed reproduces both.
     clock = _seeded_clock(seed)
