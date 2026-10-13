@@ -221,6 +221,9 @@ def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[Te
         "runner_id": "runner-mock",
         "runner_name": "runner-mock",
         "first_registration": True,
+        "bindings": None,
+        "subscription": None,
+        "subscription_unrostered": False,
         "tenant_id": FIRST_TENANT_ID,
         "tenant_name": FIRST_TENANT_NAME,
         "projects": [
