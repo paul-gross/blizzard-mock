@@ -438,6 +438,16 @@ class RunnerFactAck(BaseModel):
     route_ended: list[int] = Field(default_factory=list)
 
 
+class HostFactAck(BaseModel):
+    """Mirrors ``blizzard.wire.facts.HostFactAck`` — the acknowledgement against the host's own high-water mark."""
+
+    host_id: str
+    high_water: int
+    applied: list[int] = Field(default_factory=list)
+    already_applied: list[int] = Field(default_factory=list)
+    rejected: list[int] = Field(default_factory=list)
+
+
 class TranscriptSegmentAck(BaseModel):
     """Mirrors ``blizzard.wire.transcript_segment.TranscriptSegmentAck``, distinct from :class:`RunnerFactAck`.
     ``capped`` lists records over the per-record or per-chunk cap, acknowledged so the mark advances past

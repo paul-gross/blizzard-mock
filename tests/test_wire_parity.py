@@ -360,6 +360,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "GardenProposalsPageView": ("GardenProposalsPageView", frozenset()),
     "GraphArtifact": ("GraphArtifact", frozenset()),
     "HostAddResponse": ("HostAddResponse", frozenset()),
+    "HostFactAck": ("HostFactAck", frozenset()),
     "HostRecordResponse": ("HostRecordResponse", frozenset()),
     "HostRunnerView": ("HostRunnerView", frozenset()),
     "HubAdvanceResponse": ("HubAdvanceResponse", frozenset()),
@@ -403,6 +404,8 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 #: Request-body mirrors, invisible to ``_mirror_models`` since they live in ``mock_hub.api.deps``.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "HostAddBody": ("HostAddRequest", frozenset()),
+    "HostFactBatchBody": ("HostFactBatch", frozenset()),
+    "HostFactBody": ("RunnerFact", frozenset()),
     "HostReportBody": ("HostReportRequest", frozenset()),
     "HostRunnerAddBody": ("HostRunnerAddRequest", frozenset()),
     "HostWorkspaceBody": ("HostWorkspace", frozenset()),

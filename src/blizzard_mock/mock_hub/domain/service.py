@@ -85,6 +85,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     GardenProposalView,
     GraphArtifact,
     HostAddResponse,
+    HostFactAck,
     HostRecordResponse,
     HostRunnerView,
     HubAdvanceResponse,
@@ -460,6 +461,7 @@ class MockHubService:
         #: Per-runner fact high-water mark — a seq at/under this mark is
         #: re-acked as ``already_applied`` rather than re-applied.
         self._fact_high_water: dict[str, int] = {}
+        self._host_fact_high_water: dict[str, int] = {}
         #: The transcript lane's own high-water mark — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
@@ -519,6 +521,7 @@ class MockHubService:
         self._found_first_tenant()
         self._levers.clear_all()
         self._fact_high_water.clear()
+        self._host_fact_high_water.clear()
         self._transcript_high_water.clear()
         self._epoch_owners.clear()
         self._transcript_chunk_bytes.clear()
@@ -965,6 +968,47 @@ class MockHubService:
         return RunnerFactAck(
             runner_id=runner_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
         )
+
+    def ingest_host_facts(self, host_id: str, facts: list[dict[str, Any]]) -> HostFactAck:
+        """Apply a host's batched ``POST /api/fleet/host/events`` push against the host's own high-water mark: a seq at
+        or under it is re-acked, an applied fact advances it, and a fact of any kind but the two usage kinds is
+        rejected and holds the mark behind it."""
+        row = self._host(host_id)
+        mark = self._host_fact_high_water.get(host_id, 0)
+        applied: list[int] = []
+        already_applied: list[int] = []
+        rejected: list[int] = []
+        for fact in sorted(facts, key=lambda f: int(f.get("seq", 0))):
+            seq = int(fact.get("seq", 0))
+            if seq <= mark:
+                already_applied.append(seq)
+                continue
+            payload = fact.get("payload")
+            if self._apply_host_fact(row, str(fact.get("kind", "")), payload if isinstance(payload, dict) else {}):
+                applied.append(seq)
+                mark = seq
+            else:
+                rejected.append(seq)
+        self._host_fact_high_water[host_id] = mark
+        return HostFactAck(
+            host_id=host_id, high_water=mark, applied=applied, already_applied=already_applied, rejected=rejected
+        )
+
+    def _apply_host_fact(self, row: HostRow, kind: str, payload: dict[str, Any]) -> bool:
+        """Store one host usage fact per slug on the host's row; ``False`` for any other kind or a malformed payload."""
+        slug = payload.get("slug")
+        if kind not in (EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED, EXTERNAL_SUBSCRIPTION_USAGE_MISSED):
+            return False
+        if not isinstance(slug, str) or not slug:
+            return False
+        if kind == EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED:
+            row.subscription_usage[slug] = self._usage_view(payload, slug=slug)
+            return True
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return False
+        row.subscription_usage_misses[slug] = self._usage_miss(payload, slug=slug)
+        return True
 
     # -- transcript intake (its own lane, its own high-water) ---------
 
@@ -1770,7 +1814,7 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
-            subscriptions=self._usage_condition_views(reported, declared_subscriptions=row.declared_subscriptions),
+            subscriptions=self._runner_subscriptions(row, reported),
             capabilities=[
                 RunnerCapabilityView(
                     harness_id=c.harness_id,
@@ -1842,6 +1886,23 @@ class MockHubService:
             name=str(name) if name else slug,
             missed_at=self._parse_instant(payload.get("missed_at")),
             reason=str(reason) if reason else "",
+        )
+
+    def _runner_subscriptions(self, row: RunnerRow, reported: ReportedRunnerFacts) -> list[SubscriptionUsageView]:
+        """The usage views a runner presents. A runner under a host reads its host's sample, miss and roster entry for
+        the slug it registered — none when it registered none — in place of any report of its own, as the real hub's
+        registry hydrates it; a runner standing alone reads its own."""
+        host = self._state.get_host(row.host_id) if row.host_id is not None else None
+        if host is None:
+            return self._usage_condition_views(reported, declared_subscriptions=row.declared_subscriptions)
+        spent = ReportedRunnerFacts()
+        slug = row.subscription
+        if slug is not None and slug in host.subscription_usage:
+            spent.subscription_usage[slug] = host.subscription_usage[slug]
+        if slug is not None and slug in host.subscription_usage_misses:
+            spent.subscription_usage_misses[slug] = host.subscription_usage_misses[slug]
+        return self._usage_condition_views(
+            spent, declared_subscriptions=tuple(d for d in host.subscriptions if d.slug == slug)
         )
 
     @staticmethod
