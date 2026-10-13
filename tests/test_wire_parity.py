@@ -382,6 +382,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
     "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
     "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset()),
+    "RunnerBindingView": ("RunnerBindingView", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
     # Scopes are the deployment's global vocabulary in the mock, held in no project.
     "ScopeView": ("ScopeView", frozenset({"project_id", "project_slug", "project_name"})),
@@ -407,6 +408,7 @@ _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "HostWorkspaceBody": ("HostWorkspace", frozenset()),
     "QueuePeekBody": ("QueuePeekRequest", frozenset()),
     "RunnerAddBody": ("RunnerAddRequest", frozenset()),
+    "RunnerBindingBody": ("RunnerBinding", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
     "RunnerRegistrationBody": ("RunnerRegistrationRequest", frozenset()),
     "RunnerRetireBody": ("RunnerRetireRequest", frozenset()),

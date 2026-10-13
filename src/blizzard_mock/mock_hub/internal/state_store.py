@@ -15,6 +15,7 @@ from blizzard_mock.mock_hub.domain.state import (
     IHubState,
     ProjectRow,
     ReportedRunnerFacts,
+    RunnerBinding,
     RunnerCapability,
     RunnerRow,
     ScopeRow,
@@ -94,6 +95,8 @@ class InMemoryHubState:
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
         projects: tuple[ServedEntry, ...] | None = None,
+        bindings: tuple[RunnerBinding, ...] | None = None,
+        subscription: str | None = None,
     ) -> bool:
         row = self._runners.get(runner_id)
         if row is None:
@@ -111,6 +114,8 @@ class InMemoryHubState:
         row.capabilities = capabilities
         row.declared_subscriptions = declared_subscriptions
         row.gates = gates
+        row.bindings = bindings
+        row.subscription = subscription
         if projects is not None:
             row.projects = projects
         return first

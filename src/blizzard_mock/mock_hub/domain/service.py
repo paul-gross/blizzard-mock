@@ -59,6 +59,7 @@ from blizzard_mock.mock_hub.domain.state import (
     IHubState,
     ProjectRow,
     ReportedRunnerFacts,
+    RunnerBinding,
     RunnerCapability,
     RunnerRow,
     ScopeRow,
@@ -100,6 +101,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RouteTokenRekeyResponse,
     RouteView,
     RunnerAddResponse,
+    RunnerBindingView,
     RunnerCapabilityView,
     RunnerEnrollmentResponse,
     RunnerFactAck,
@@ -590,19 +592,20 @@ class MockHubService:
         return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
     def peek_matched(
-        self, runner_id: str, *, capabilities: Sequence[RunnerCapability], policy: str
+        self, runner_id: str, *, capabilities: Sequence[RunnerCapability], policy: str, project: str | None = None
     ) -> QueuePeekResponse:
         """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
         flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
         blocked, policy applied to both the capability and blocked-dependency dimensions before
         selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
         from its stored declaration, so another project's chunk is never its head and ``hold``
-        cannot stall it on one. Narrowing selects from the ready order without renumbering it: a
-        position is the chunk's index in the whole ready order, as :meth:`peek` reports it. Like
-        the real verb it answers any resolved principal, registered or not — the fleet router has
-        already refused a call whose token names no runner."""
+        cannot stall it on one. A project reached only through a binding the host's report withholds is not served
+        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names. Narrowing selects
+        from the ready order without renumbering it: a position is the chunk's index in the whole ready order, as
+        :meth:`peek` reports it. Like the real verb it answers any resolved principal, registered or not — the fleet
+        router has already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
-        served = self._served_project_ids(self._added(runner_id))
+        served = self._offered_project_ids(self._added(runner_id), project)
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         for position, chunk in enumerate(ready):
             if chunk.project_id not in served:
@@ -1378,6 +1381,59 @@ class MockHubService:
     def _served_project_ids(row: RunnerRow) -> set[str]:
         return {e.project_id for e in row.projects if e.project_id is not None}
 
+    def _host_report(self, row: RunnerRow) -> HostRow | None:
+        """The host the runner stands under when it has reported — the only one a declaration is checked against."""
+        host = self._state.get_host(row.host_id) if row.host_id is not None else None
+        return host if host is not None and host.registered_at is not None else None
+
+    def _withheld(self, row: RunnerRow, binding: RunnerBinding) -> bool:
+        """Whether no work is offered through ``binding``: the host has not reported its workspace, or the subscription
+        every binding spends is outside the host's roster."""
+        host = self._host_report(row)
+        if host is None:
+            return False
+        return self._workspace_unreported(host, binding) or self._subscription_unrostered(host, row.subscription)
+
+    @staticmethod
+    def _workspace_unreported(host: HostRow, binding: RunnerBinding) -> bool:
+        return binding.workspace_id not in {workspace_id for workspace_id, _ in host.workspaces}
+
+    @staticmethod
+    def _subscription_unrostered(host: HostRow, subscription: str | None) -> bool:
+        return subscription is not None and subscription not in {s.slug for s in host.subscriptions}
+
+    def _binding_views(self, row: RunnerRow) -> tuple[list[RunnerBindingView] | None, bool]:
+        """The runner's bindings each flagged against its host's latest report, and whether its subscription is
+        outside the roster; ``None`` and ``False`` for a runner with no host report to check against."""
+        host = self._host_report(row)
+        views = (
+            None
+            if row.bindings is None
+            else [
+                RunnerBindingView(
+                    project=b.project,
+                    workspace_id=b.workspace_id,
+                    agents=b.agents,
+                    workspace_unreported=host is not None and self._workspace_unreported(host, b),
+                )
+                for b in row.bindings
+            ]
+        )
+        return views, host is not None and self._subscription_unrostered(host, row.subscription)
+
+    def _offered_project_ids(self, row: RunnerRow, project: str | None) -> set[str]:
+        """The projects the matched peek may offer ``row`` work from: its served ones, less those reached only
+        through withheld bindings when it declared bindings, narrowed to the entry ``project`` names — by the entry as
+        declared or the id it resolved to."""
+        entries = row.projects
+        if row.bindings is not None:
+            reachable = {b.project for b in row.bindings if not self._withheld(row, b)}
+            entries = tuple(e for e in entries if e.entry in reachable)
+        if project is not None:
+            named = {e.project_id for e in row.projects if project in (e.entry, e.project_id)}
+            return {e.project_id for e in entries if e.project_id is not None and e.project_id in named}
+        return {e.project_id for e in entries if e.project_id is not None}
+
     def _served_views(self, row: RunnerRow) -> list[ServedProjectView]:
         """The runner's stored declaration with each entry's project read now, so a renamed project shows its
         current slug and name."""
@@ -1648,14 +1704,18 @@ class MockHubService:
         subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
         projects: Sequence[str] | None = None,
+        bindings: tuple[RunnerBinding, ...] | None = None,
+        subscription: str | None = None,
     ) -> RunnerRegistrationResponse:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its
         token. A blank or absent ``name`` keeps the held one. ``projects`` replaces the served
-        declaration — ``[]`` with none — and ``None`` keeps it. Registration doubles as the
+        declaration — ``[]`` with none — and ``None`` keeps it; sent ``bindings`` replace it with their projects, in
+        binding order, and are stored as sent with ``subscription``. Registration doubles as the
         heartbeat, so it never refuses over the declaration: an entry no project answers to is
         stored unresolved, and resolved afresh at the next registration that declares it."""
         tenant_id = self._added(runner_id).tenant_id
-        declaration = self._declared(tenant_id, projects) if projects is not None else None
+        declared = projects if bindings is None else [b.project for b in bindings]
+        declaration = self._declared(tenant_id, declared) if declared is not None else None
         first = self._state.record_registration(
             runner_id,
             name=(name or "").strip() or None,
@@ -1668,8 +1728,11 @@ class MockHubService:
             declared_subscriptions=subscriptions,
             gates=gates,
             projects=declaration,
+            bindings=bindings,
+            subscription=subscription,
         )
         row = self._added(runner_id)
+        binding_views, unrostered = self._binding_views(row)
         return RunnerRegistrationResponse(
             runner_id=runner_id,
             runner_name=row.name,
@@ -1677,6 +1740,9 @@ class MockHubService:
             tenant_id=row.tenant_id,
             tenant_name=self._tenant_name(row.tenant_id),
             projects=self._served_views(row),
+            bindings=binding_views,
+            subscription=row.subscription,
+            subscription_unrostered=unrostered,
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
@@ -1691,6 +1757,7 @@ class MockHubService:
         # Reported facts are merged in at the read, so one that arrived before this
         # registration surfaces the moment the registration lands.
         reported = self._state.reported_facts(runner_id)
+        binding_views, unrostered = self._binding_views(row)
         return RunnerView(
             runner_id=row.runner_id,
             runner_name=row.name,
@@ -1716,6 +1783,9 @@ class MockHubService:
             ],
             gates=list(row.gates),
             projects=self._served_views(row),
+            bindings=binding_views,
+            subscription=row.subscription,
+            subscription_unrostered=unrostered,
         )
 
     def _parse_instant(self, value: Any) -> datetime:

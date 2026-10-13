@@ -66,6 +66,7 @@ from blizzard_mock.mock_hub.domain.state import (
     ClaimDeniedPaused,
     ClaimDeniedUnregistered,
     DeclaredSubscription,
+    RunnerBinding,
     RunnerCapability,
 )
 
@@ -133,6 +134,7 @@ def peek_matched_queue(
             for c in body.capabilities
         ),
         policy=body.policy,
+        project=body.project,
     )
 
 
@@ -522,6 +524,14 @@ def register_runner(
         subscriptions=subscriptions,
         gates=tuple(body.gates),
         projects=body.projects,
+        bindings=(
+            None
+            if body.bindings is None
+            else tuple(
+                RunnerBinding(project=b.project, workspace_id=b.workspace_id, agents=b.agents) for b in body.bindings
+            )
+        ),
+        subscription=body.subscription,
     )
 
 

@@ -4083,12 +4083,14 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
             "name": DEFAULT_PROJECT_NAME,
         }
     ]
+    unbound = {"bindings": None, "subscription": None, "subscription_unrostered": False}
     assert first.json() == {
         "runner_id": added["runner_id"],
         "runner_name": "r-claude",
         "first_registration": True,
         **tenant,
         "projects": served,
+        **unbound,
     }
     assert renamed.json() == {
         "runner_id": added["runner_id"],
@@ -4096,6 +4098,7 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
         "first_registration": False,
         **tenant,
         "projects": served,
+        **unbound,
     }
     assert kept.json()["runner_name"] == "r-renamed"
     view = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"])).json()

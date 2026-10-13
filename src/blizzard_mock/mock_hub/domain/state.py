@@ -125,6 +125,16 @@ class ServedEntry:
     project_id: str | None
 
 
+@dataclass(frozen=True, kw_only=True)
+class RunnerBinding:
+    """One project a runner serves through one workspace of its host — mirrors one element of the real hub's
+    ``runner_registrations.bindings``: the project by id or slug, the host workspace it works in, and its agents."""
+
+    project: str
+    workspace_id: str
+    agents: int
+
+
 class RunnerRow:
     """An added runner's mutable registry row. Mirrors the real hub's ``runner_registrations`` row.
 
@@ -156,6 +166,10 @@ class RunnerRow:
         # The projects the runner serves — set when it is added, replaced by a registration that declares some,
         # kept by one that declares none.
         self.projects: tuple[ServedEntry, ...] = ()
+        # The bindings and subscription slug the runner last sent, ``None`` when it sent none — replaced on every
+        # registration, like the roster. Their flags against the host's report are derived on read, never stored.
+        self.bindings: tuple[RunnerBinding, ...] | None = None
+        self.subscription: str | None = None
         self.paused = False
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
@@ -256,12 +270,14 @@ class IHubState(Protocol):
         declared_subscriptions: tuple[DeclaredSubscription, ...] | None = None,
         gates: tuple[str, ...] = (),
         projects: tuple[ServedEntry, ...] | None = None,
+        bindings: tuple[RunnerBinding, ...] | None = None,
+        subscription: str | None = None,
     ) -> bool:
         """Register/heartbeat an added runner; return ``True`` on its first registration.
 
         Never inserts — an id no ``add`` wrote raises ``LookupError``. ``name`` replaces the held
-        name and ``projects`` the held declaration unless ``None``; everything else is overwritten
-        on every call."""
+        name and ``projects`` the held declaration unless ``None``; everything else, ``bindings`` and
+        ``subscription`` included, is overwritten on every call."""
         ...
 
     def runner_for_token(self, token: str) -> RunnerRow | None:
