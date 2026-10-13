@@ -159,10 +159,32 @@ class RunnerRow:
         self.paused = False
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
+        # The host the runner stands under; ``None`` for a runner that stands alone.
+        self.host_id: str | None = None
 
     def never_connected(self) -> bool:
         """Added but never registered — the hub knows its id and name, and nothing it reports."""
         return self.registered_at is None
+
+
+class HostRow:
+    """An added host's mutable registry row. Mirrors the real hub's ``hosts`` row: ``add`` writes it never
+    connected, and each report refreshes the rest, replacing ``workspaces`` and ``subscriptions`` whole."""
+
+    def __init__(self, host_id: str, *, tenant_id: str, name: str, added_at: datetime) -> None:
+        self.host_id = host_id
+        # The tenant the host was added in, for life — its bearer token resolves to it.
+        self.tenant_id = tenant_id
+        self.name = name
+        self.added_at = added_at
+        self.registered_at: datetime | None = None
+        self.last_seen_at: datetime | None = None
+        self.url: str | None = None
+        self.redirect_uris: tuple[str, ...] = ()
+        self.workspaces: tuple[tuple[str, int | None], ...] = ()
+        self.subscriptions: tuple[DeclaredSubscription, ...] = ()
+        self.retired_at: datetime | None = None
+        self.retired_by: str | None = None
 
 
 class ClaimDeniedUnregistered(Exception):
@@ -257,6 +279,26 @@ class IHubState(Protocol):
 
     def get_runner(self, runner_id: str) -> RunnerRow | None: ...
     def list_runners(self) -> list[RunnerRow]: ...
+
+    def add_host(self, row: HostRow, *, token: str) -> None:
+        """Insert a never-connected host holding ``token`` as its current bearer token."""
+        ...
+
+    def get_host(self, host_id: str) -> HostRow | None: ...
+    def list_hosts(self) -> list[HostRow]: ...
+
+    def host_for_token(self, token: str) -> HostRow | None:
+        """The host ``token`` is the current bearer token of, else ``None``."""
+        ...
+
+    def revoked_token_host_id(self, token: str) -> str | None:
+        """The host a revoked or rotated-away ``token`` was issued to, else ``None``."""
+        ...
+
+    def replace_host_token(self, host_id: str, *, token: str | None) -> None:
+        """Make ``token`` the host's current bearer token (``None``: it holds none); the token it held until now is
+        revoked."""
+        ...
 
     def reported_facts(self, runner_id: str) -> ReportedRunnerFacts:
         """This runner's self-reported facts, minting an empty set on first touch — never

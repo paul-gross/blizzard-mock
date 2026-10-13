@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from blizzard_mock.clock import Clock
-from blizzard_mock.ids import PROJECT_PREFIX, RUNNER_PREFIX, TENANT_PREFIX, mint
+from blizzard_mock.ids import HOST_PREFIX, PROJECT_PREFIX, RUNNER_PREFIX, TENANT_PREFIX, mint
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
 from blizzard_mock.mock_hub.domain.levers import HubLever
@@ -55,6 +55,7 @@ from blizzard_mock.mock_hub.domain.state import (
     FIRST_TENANT_ID,
     FIRST_TENANT_NAME,
     DeclaredSubscription,
+    HostRow,
     IHubState,
     ProjectRow,
     ReportedRunnerFacts,
@@ -82,6 +83,9 @@ from blizzard_mock.mock_hub.domain.wire import (
     GardenProposalsPageView,
     GardenProposalView,
     GraphArtifact,
+    HostAddResponse,
+    HostRecordResponse,
+    HostRunnerView,
     HubAdvanceResponse,
     LeaseTranscriptView,
     MeTenantView,
@@ -302,6 +306,43 @@ class SystemArtifactNotFound(Exception):
 class UnresolvableRunner(Exception):
     """A fleet call's bearer token names no runner — absent, revoked, or never issued here.
     Mirrors the real fleet gate's ``401``; there is no tokenless fleet call."""
+
+
+class UnresolvableHost(Exception):
+    """A host call's bearer token names no host — absent, revoked, or never issued here. Mirrors the real host
+    gate's ``401``; there is no tokenless host call."""
+
+
+class HostRetiredError(Exception):
+    """A retired host's token, or an add under a retired host — refused."""
+
+    def __init__(self, host_id: str) -> None:
+        super().__init__(f"host {host_id} is retired")
+        self.host_id = host_id
+
+
+class UnknownHost(Exception):
+    """No host with that id was ever added in the request's tenant."""
+
+    def __init__(self, host_id: str) -> None:
+        super().__init__(f"unknown host {host_id}")
+        self.host_id = host_id
+
+
+class HostNameTaken(Exception):
+    """A live host of the tenant already holds the name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"a live host is already named {name!r}")
+        self.name = name
+
+
+class RunnerAlreadyHosted(Exception):
+    """An adoption named a runner that already stands under a host, or is retired."""
+
+    def __init__(self, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} already stands under a host, or is retired")
+        self.runner_id = runner_id
 
 
 class RunnerTokenRefused(Exception):
@@ -1376,6 +1417,7 @@ class MockHubService:
         runner_id: str | None = None,
         token: str | None = None,
         projects: Sequence[str] | None = None,
+        host_id: str | None = None,
     ) -> RunnerAddResponse:
         """Add a runner under the initial ``name`` in ``tenant_id``, never connected — the hub mints
         its id and bearer token together (``POST /api/runners``), and the runner serves that tenant
@@ -1391,6 +1433,8 @@ class MockHubService:
         issued = token or f"mock-runner-token-{secrets.token_urlsafe(18)}"
         row = RunnerRow(added_id, tenant_id=tenant.tenant_id, name=name, added_at=self._clock.now())
         row.projects = declaration
+        if host_id is not None:
+            row.host_id = self.add_runner_under_host(host_id, tenant_id=tenant.tenant_id).host_id
         self._state.add_runner(row, token=issued)
         return RunnerAddResponse(runner_id=added_id, runner_name=name, token=issued)
 
@@ -1417,6 +1461,143 @@ class MockHubService:
         row.retired_at = self._clock.now()
         row.retired_by = by
         self._state.replace_token(runner_id, token=None)
+
+    # -- hosts --------------------------------------------------------------
+
+    def add_host(
+        self,
+        *,
+        name: str,
+        tenant_id: str = FIRST_TENANT_ID,
+        adopt: Sequence[str] = (),
+        host_id: str | None = None,
+        token: str | None = None,
+    ) -> HostAddResponse:
+        """Add a host under ``name`` in ``tenant_id``, never connected — its id and bearer token are minted together
+        (``POST /api/hosts``) and the host serves that tenant for life. ``host_id``/``token`` let a scenario pin
+        either. A name a live host of the tenant holds raises :class:`HostNameTaken`; an ``adopt`` runner the tenant
+        does not hold raises :class:`UnknownRunner`, one under a host or retired :class:`RunnerAlreadyHosted`, and
+        nothing is added."""
+        tenant = self._tenant(tenant_id)
+        if any(h.name == name and h.retired_at is None for h in self._tenant_hosts(tenant.tenant_id)):
+            raise HostNameTaken(name)
+        adopting = list(dict.fromkeys(adopt))
+        runners = [self._tenant_runner(tenant.tenant_id, runner_id) for runner_id in adopting]
+        for runner in runners:
+            if runner.host_id is not None or runner.retired_at is not None:
+                raise RunnerAlreadyHosted(runner.runner_id)
+        added_id = host_id or mint(HOST_PREFIX, self._clock, self._rng)
+        issued = token or f"mock-host-token-{secrets.token_urlsafe(18)}"
+        self._state.add_host(
+            HostRow(added_id, tenant_id=tenant.tenant_id, name=name, added_at=self._clock.now()), token=issued
+        )
+        for runner in runners:
+            runner.host_id = added_id
+        return HostAddResponse(host_id=added_id, host_name=name, token=issued, adopted=adopting)
+
+    def host_principal(self, token: str | None) -> str:
+        """The id of the host ``token`` is the current token of — the one identity a host call carries — else
+        :class:`UnresolvableHost` with the real gate's reason; a retired host's is :class:`HostRetiredError`."""
+        if token is None:
+            raise UnresolvableHost("missing or malformed Authorization header")
+        row = self._state.host_for_token(token)
+        if row is not None:
+            if row.retired_at is not None:
+                raise HostRetiredError(row.host_id)
+            return row.host_id
+        if self._state.revoked_token_host_id(token) is not None:
+            raise UnresolvableHost("bearer token has been revoked")
+        raise UnresolvableHost("bearer token does not resolve to a known host")
+
+    def refuse_foreign_host_tenant(self, host_id: str, named: str | None) -> None:
+        """Refuse a host call whose ``X-Blizzard-Tenant`` names a tenant other than its host's."""
+        if named and named != self._host(host_id).tenant_id:
+            raise ForeignTenantNamed()
+
+    def report_host(
+        self,
+        host_id: str,
+        *,
+        name: str | None,
+        url: str | None,
+        redirect_uris: Sequence[str],
+        workspaces: Sequence[tuple[str, int | None]],
+        subscriptions: Sequence[DeclaredSubscription],
+    ) -> HostRecordResponse:
+        """Record the calling host's report, replacing what it reported whole, and answer its record. A blank name,
+        or one another live host of the tenant holds, keeps the held name — a report is never refused over its
+        content."""
+        row = self._host(host_id)
+        wanted = (name or "").strip()
+        taken = any(
+            h.name == wanted and h.host_id != host_id and h.retired_at is None
+            for h in self._tenant_hosts(row.tenant_id)
+        )
+        if wanted and not taken:
+            row.name = wanted
+        now = self._clock.now()
+        if row.registered_at is None:
+            row.registered_at = now
+        row.last_seen_at = now
+        row.url = url
+        row.redirect_uris = tuple(redirect_uris)
+        row.workspaces = tuple(workspaces)
+        row.subscriptions = tuple(subscriptions)
+        return self.host_record(host_id)
+
+    def host_record(self, host_id: str) -> HostRecordResponse:
+        """The calling host's own record and the runners standing under it that are not retired."""
+        row = self._host(host_id)
+        return HostRecordResponse(
+            host_id=row.host_id,
+            tenant_id=row.tenant_id,
+            host_name=row.name,
+            registered_at=None if row.registered_at is None else row.registered_at.isoformat(),
+            last_seen_at=None if row.last_seen_at is None else row.last_seen_at.isoformat(),
+            runners=[
+                HostRunnerView(runner_id=r.runner_id, runner_name=r.name)
+                for r in self._state.list_runners()
+                if r.host_id == host_id and r.retired_at is None
+            ],
+        )
+
+    def add_host_runner(self, host_id: str, *, name: str, projects: Sequence[str] | None = None) -> RunnerAddResponse:
+        """Add a runner under the calling host, in the host's tenant, as ``POST /api/runners`` does."""
+        row = self._host(host_id)
+        return self.add_runner(name=name, tenant_id=row.tenant_id, projects=projects, host_id=host_id)
+
+    def retire_host_runner(self, *, host_id: str, runner_id: str, by: str = "operator") -> RunnerRow:
+        """Retire a runner under the calling host; a runner not under it is :class:`UnknownRunner`. The mock models
+        no held routes, so ``force`` has nothing to release."""
+        runner = self._state.get_runner(runner_id)
+        if runner is None or runner.host_id != host_id:
+            raise UnknownRunner(runner_id)
+        self.retire(runner_id, by=by)
+        return runner
+
+    def add_runner_under_host(self, host_id: str, *, tenant_id: str) -> HostRow:
+        """The live host an operator's ``host_id`` add names, else :class:`UnknownHost` or :class:`HostRetiredError`."""
+        row = self._state.get_host(host_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise UnknownHost(host_id)
+        if row.retired_at is not None:
+            raise HostRetiredError(host_id)
+        return row
+
+    def _host(self, host_id: str) -> HostRow:
+        row = self._state.get_host(host_id)
+        if row is None:
+            raise UnknownHost(host_id)
+        return row
+
+    def _tenant_hosts(self, tenant_id: str) -> list[HostRow]:
+        return [h for h in self._state.list_hosts() if h.tenant_id == tenant_id]
+
+    def _tenant_runner(self, tenant_id: str, runner_id: str) -> RunnerRow:
+        row = self._state.get_runner(runner_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise UnknownRunner(runner_id)
+        return row
 
     def identity(self, token: str | None) -> RunnerIdentityView:
         """Whom ``token`` names, or :class:`RunnerTokenRefused` saying why not — the real

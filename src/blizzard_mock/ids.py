@@ -17,6 +17,8 @@ _RAND_CHARS = 16  # 80 bits of randomness
 
 #: A runner's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.RUNNER``.
 RUNNER_PREFIX = "rn"
+#: A host's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.HOST``.
+HOST_PREFIX = "hs"
 #: A tenant's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.TENANT``.
 TENANT_PREFIX = "ten"
 #: A project's hub-minted id prefix — kept in step by hand with the real ``IdPrefix.PROJECT``.

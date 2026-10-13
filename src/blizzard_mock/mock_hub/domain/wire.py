@@ -338,6 +338,34 @@ class RunnerEnrollmentResponse(BaseModel):
     token: str
 
 
+class HostRunnerView(BaseModel):
+    """Mirrors ``blizzard.wire.host.HostRunnerView`` — one runner standing under a host."""
+
+    runner_id: str
+    runner_name: str
+
+
+class HostRecordResponse(BaseModel):
+    """Mirrors ``blizzard.wire.host.HostRecordResponse`` — a host's own record: its id, tenant, held name, and the
+    runners the hub holds under it that are not retired."""
+
+    host_id: str
+    tenant_id: str
+    host_name: str
+    registered_at: str | None = None
+    last_seen_at: str | None = None
+    runners: list[HostRunnerView] = Field(default_factory=list)
+
+
+class HostAddResponse(BaseModel):
+    """Mirrors ``blizzard.wire.host.HostAddResponse`` — the minted id and its bearer token, returned once."""
+
+    host_id: str
+    host_name: str
+    token: str
+    adopted: list[str] = Field(default_factory=list)
+
+
 class RunnerIdentityView(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerIdentityView`` — whom a bearer token names, and the
     tenant it was added in, read as registration reads it."""

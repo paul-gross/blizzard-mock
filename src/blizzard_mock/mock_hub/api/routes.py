@@ -14,16 +14,22 @@ from fastapi.responses import JSONResponse
 from blizzard_mock.mock_hub.api.deps import (
     CompletionBody,
     DecisionBody,
+    HostAddBody,
+    HostReportBody,
+    HostRunnerAddBody,
     QueuePeekBody,
     RouteClaimBody,
     RunnerAddBody,
     RunnerFactBatchBody,
     RunnerRegistrationBody,
+    RunnerRetireBody,
     TranscriptSegmentBatchBody,
     fleet_tenant_bound,
+    get_host_principal,
     get_principal,
     get_service,
     get_tenant,
+    host_tenant_bound,
     named_tenant,
     presented_bearer,
 )
@@ -40,15 +46,19 @@ from blizzard_mock.mock_hub.domain.service import (
     ClaimIncompatible,
     DependencyUnmet,
     FindingNotInAnsweredSet,
+    HostNameTaken,
+    HostRetiredError,
     MalformedCursor,
     MockHubService,
     NoAnsweredProposal,
     NoRunContext,
     QuestionNotFound,
+    RunnerAlreadyHosted,
     RunnerNeverConnected,
     RunnerRetired,
     RunnerTokenRefused,
     SystemArtifactNotFound,
+    UnknownHost,
     UnknownProjects,
     UnknownRunner,
 )
@@ -67,6 +77,12 @@ router = APIRouter(prefix="/api", tags=["hub"])
 #: and acts in that runner's tenant.
 fleet_router = APIRouter(
     prefix="/api/fleet", tags=["hub"], dependencies=[Depends(get_principal), Depends(fleet_tenant_bound)]
+)
+
+#: The host-facing hub mirror — every route answers only a caller whose bearer token names a host, and acts in that
+#: host's tenant. A runner's token resolves no host here, and a host's resolves no runner on ``fleet_router``.
+host_router = APIRouter(
+    prefix="/api/fleet/host", tags=["hub"], dependencies=[Depends(get_host_principal), Depends(host_tenant_bound)]
 )
 
 #: ``GET /api/fleet/identity`` alone — outside the gate, since it is how a runner learns why its token is refused.
@@ -543,9 +559,28 @@ def add_runner(body: RunnerAddBody, tenant: Tenant, service: Annotated[MockHubSe
     that token. It serves the ``projects`` named, each by id or slug — one naming no project of the
     tenant refuses the add ``422`` — or, naming none, the tenant's only project."""
     try:
-        return service.add_runner(name=body.name, tenant_id=tenant, projects=body.projects)
+        return service.add_runner(name=body.name, tenant_id=tenant, projects=body.projects, host_id=body.host_id)
     except UnknownProjects as exc:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+    except UnknownHost as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except HostRetiredError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@operator_router.post("/hosts", status_code=201)
+def add_host(body: HostAddBody, tenant: Tenant, service: Annotated[MockHubService, Depends(get_service)]) -> object:
+    """Add a host under ``name`` in the request's tenant — its id and bearer token are minted together and the token
+    returned once. ``adopt`` places existing runners under it: one the tenant does not hold is ``404``, one under a
+    host or retired ``409``, a name a live host holds ``409``, and nothing is added."""
+    try:
+        return service.add_host(name=body.name, tenant_id=tenant, adopt=body.adopt)
+    except HostNameTaken as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except RunnerAlreadyHosted as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @operator_router.get("/me")
@@ -581,3 +616,68 @@ def hub_advance(chunk_id: str, service: Annotated[MockHubService, Depends(get_se
         return service.hub_advance(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@host_router.post("")
+def report_host(
+    body: HostReportBody,
+    host_id: Annotated[str, Depends(get_host_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> object:
+    """Record the calling host's report — replacing its workspaces and subscriptions whole — and answer its record."""
+    return service.report_host(
+        host_id,
+        name=body.name,
+        url=body.url,
+        redirect_uris=body.redirect_uris,
+        workspaces=[(w.workspace_id, w.env_capacity) for w in body.workspaces],
+        subscriptions=[DeclaredSubscription(slug=d.slug, name=d.name, provider=d.provider) for d in body.subscriptions],
+    )
+
+
+@host_router.get("")
+def get_host_record(
+    host_id: Annotated[str, Depends(get_host_principal)], service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """The calling host's own record and the runners standing under it that are not retired."""
+    return service.host_record(host_id)
+
+
+@host_router.post("/runners", status_code=201)
+def add_host_runner(
+    body: HostRunnerAddBody,
+    host_id: Annotated[str, Depends(get_host_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> object:
+    """Add a runner under the calling host, in the host's tenant — its id and bearer token are minted together and the
+    token returned once; a ``projects`` entry no project of the tenant answers to refuses the add ``422``."""
+    try:
+        return service.add_host_runner(host_id, name=body.name, projects=body.projects)
+    except UnknownProjects as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+@host_router.post("/runners/{runner_id}/retire")
+def retire_host_runner(
+    runner_id: str,
+    body: RunnerRetireBody,
+    host_id: Annotated[str, Depends(get_host_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> object:
+    """Retire a runner under the calling host; a runner that does not stand under it is ``404``. The mock holds no
+    routes to refuse over or release, so ``force`` changes nothing, and the answer names only the fields the retire
+    sets on the runner."""
+    try:
+        runner = service.retire_host_runner(host_id=host_id, runner_id=runner_id, by=body.by)
+    except UnknownRunner as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return {
+        "runner": {
+            "runner_id": runner.runner_id,
+            "runner_name": runner.name,
+            "retired": True,
+            "retired_by": runner.retired_by,
+            "host_id": runner.host_id,
+        },
+        "released_chunk_ids": [],
+    }
