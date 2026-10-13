@@ -147,6 +147,8 @@ class QueuePeekBody(MirroredWireBody):
 
     capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
     policy: str = "pass-over"
+    # Narrows the peek to one project of the runner's declaration, by entry or resolved id.
+    project: str | None = None
 
 
 class RouteClaimBody(BaseModel):
@@ -167,6 +169,14 @@ class DecisionBody(BaseModel):
     from_node_id: str
     epoch: int
     artifacts: list[dict[str, object]] = Field(default_factory=list)
+
+
+class RunnerBindingBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerBinding`` field-for-field."""
+
+    project: str
+    workspace_id: str
+    agents: int
 
 
 class RunnerRegistrationBody(MirroredWireBody):
@@ -190,6 +200,10 @@ class RunnerRegistrationBody(MirroredWireBody):
     gates: list[str] = Field(default_factory=list)
     # The projects the runner serves, by id or slug — ``None`` keeps the declaration the hub holds.
     projects: list[str] | None = None
+    # The projects it serves through its host's workspaces; sent, they replace ``projects`` as the declaration.
+    bindings: list[RunnerBindingBody] | None = None
+    # The host subscription slug every binding spends.
+    subscription: str | None = None
 
 
 class RunnerFactBody(BaseModel):

@@ -276,6 +276,16 @@ class ServedProjectView(BaseModel):
     name: str | None = None
 
 
+class RunnerBindingView(BaseModel):
+    """A runner's binding as the hub holds it — mirrors ``blizzard.wire.runner.RunnerBindingView``.
+    ``workspace_unreported`` is derived on read from the host's latest report."""
+
+    project: str
+    workspace_id: str
+    agents: int
+    workspace_unreported: bool = False
+
+
 class RunnerView(BaseModel):
     runner_id: str
     runner_name: str | None = None
@@ -302,6 +312,10 @@ class RunnerView(BaseModel):
     gates: list[str] = Field(default_factory=list)
     # The projects the runner serves, one entry per declared entry.
     projects: list[ServedProjectView] = Field(default_factory=list)
+    # The bindings the runner declared, flagged against its host's latest report; ``None`` when it sent none.
+    bindings: list[RunnerBindingView] | None = None
+    subscription: str | None = None
+    subscription_unrostered: bool = False
 
 
 class RunnerRegistrationResponse(BaseModel):
@@ -320,6 +334,10 @@ class RunnerRegistrationResponse(BaseModel):
     # The declaration the registration left stored, as the hub resolved it. The mock always fills it; the
     # real model leaves it optional for a hub that predates projects.
     projects: list[ServedProjectView] | None = None
+    # The bindings the registration left stored, each flagged against the host's latest report.
+    bindings: list[RunnerBindingView] | None = None
+    subscription: str | None = None
+    subscription_unrostered: bool = False
 
 
 class RunnerAddResponse(BaseModel):

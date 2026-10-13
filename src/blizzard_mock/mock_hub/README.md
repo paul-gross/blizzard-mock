@@ -83,9 +83,19 @@ registration that declares it. Registration and the own-runner read answer the d
 `projects: [{entry, project_id, slug, name}]`, each project read at answer time so a rename
 shows at once; an unresolved entry carries `project_id`, `slug` and `name` as `null`.
 
+A registration may also send `bindings` — `[{project, workspace_id, agents}]` — and a `subscription` slug. Sent
+bindings replace `projects` as the declaration, each binding's project in binding order (`[]` serves nothing). Both
+are stored as sent on every registration and answered as `bindings: [{project, workspace_id, agents,
+workspace_unreported}]`, `subscription` and `subscription_unrostered`, here and on the own-runner read. The flags are
+read from the host's latest report when the runner stands under a host that has reported: `workspace_unreported`
+when the report lacks the binding's workspace, `subscription_unrostered` when it lacks the slug. A runner with no
+host, or whose host has never reported, is never flagged.
+
 The matched peek narrows the ready order to the projects the caller serves before it scans
 it, so another project's chunk is never its head and `hold` never stalls on one; an entry's
-`position` is its place in that narrowed order. The unmatched `GET` peek is not narrowed. A
+`position` is its place in that narrowed order. A project reached only through a flagged binding is left out, and
+every project is under an unrostered subscription. The peek body's `project` keeps only the declaration entry it
+names, by the entry or its resolved id, so an unserved or unresolved project is offered nothing. The unmatched `GET` peek is not narrowed. A
 claim rechecks the declaration after the dependency check and before the capability check: a
 chunk of a project the runner does not serve is refused with the incompatible **409**,
 `reason: "project"` and `detail` `runner does not serve project '<slug>'`. A capability
@@ -110,7 +120,7 @@ refusal carries `reason: "capability"`.
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
 | `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
-| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`, `projects`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name, projects}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
+| `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`, `projects`, `bindings`, `subscription`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name, projects, bindings, subscription, subscription_unrostered}` / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
 | `GET /api/fleet/identity` | The caller's `{runner_id, runner_name, tenant_id, tenant_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
 | `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant, serving the `projects` named → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name or a `projects` entry no project of the tenant answers to, plus the tenant refusals above |
 | `POST /api/hosts` | Add a host under a non-blank `name` in the request's tenant, `adopt` placing existing runners under it → **201** `{host_id, host_name, token, adopted}`, the token returned once; **409** for a name a live host of the tenant holds or an adopted runner under a host or retired, **404** for an adopted runner the tenant does not hold, **422** for a blank name; nothing is added on a refusal |
