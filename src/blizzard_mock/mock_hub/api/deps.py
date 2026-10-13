@@ -216,6 +216,21 @@ class RunnerFactBatchBody(BaseModel):
     facts: list[RunnerFactBody] = Field(default_factory=list)
 
 
+class HostFactBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.facts.RunnerFact`` field-for-field — one buffered fact on a host's lane, whose item shape
+    is the runner lane's."""
+
+    seq: int
+    kind: str
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class HostFactBatchBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.facts.HostFactBatch`` field-for-field — a host's push, ordered by seq."""
+
+    facts: list[HostFactBody]
+
+
 class ToolCallSegmentBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.transcript_segment.ToolCallSegmentView`` field-for-field,
     required-ness included, so a real field rename fails `service-test` rather than

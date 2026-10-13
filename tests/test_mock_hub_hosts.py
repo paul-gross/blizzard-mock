@@ -1,4 +1,4 @@
-"""The mock hub's hosts: ``POST /api/hosts``, a host's bearer token on the four ``/api/fleet/host*`` routes and on
+"""The mock hub's hosts: ``POST /api/hosts``, a host's bearer token on the five ``/api/fleet/host*`` routes and on
 nothing else, and a runner added under a host."""
 
 from __future__ import annotations
@@ -169,3 +169,84 @@ def test_a_reset_forgets_every_host_and_its_token(client: FleetClient) -> None:
     assert client.post("/_seed/reset").status_code in {200, 204}
 
     assert client.get("/api/fleet/host", headers=_bearer(added["token"])).status_code == 401
+
+
+def _sample(seq: int, slug: str = "anthropic") -> dict[str, Any]:
+    return {
+        "seq": seq,
+        "kind": "external_subscription_usage.sampled",
+        "payload": {
+            "slug": slug,
+            "sampled_at": "2026-07-13T00:00:00+00:00",
+            "windows": [
+                {
+                    "window": "5h",
+                    "utilization_pct": 12.0,
+                    "resets_at": "2026-07-13T05:00:00+00:00",
+                    "window_seconds": 18000,
+                }
+            ],
+        },
+    }
+
+
+def test_a_host_pushes_usage_facts_against_a_mark_of_its_own(client: FleetClient) -> None:
+    added = _add(client)
+    headers = _bearer(added["token"])
+    miss = {"seq": 2, "kind": "external_subscription_usage.missed", "payload": {"slug": "anthropic", "reason": "x"}}
+
+    first = client.post("/api/fleet/host/events", json={"facts": [_sample(1), miss]}, headers=headers).json()
+    replay = client.post("/api/fleet/host/events", json={"facts": [_sample(1), miss]}, headers=headers).json()
+
+    assert first == {
+        "host_id": added["host_id"],
+        "high_water": 2,
+        "applied": [1, 2],
+        "already_applied": [],
+        "rejected": [],
+    }
+    assert (replay["applied"], replay["already_applied"], replay["high_water"]) == ([], [1, 2], 2)
+
+
+def test_a_host_lane_rejects_other_kinds_and_holds_the_mark_behind_them(client: FleetClient) -> None:
+    added = _add(client)
+    headers = _bearer(added["token"])
+    other = {"seq": 2, "kind": "lease.minted", "payload": {}}
+    no_slug = {"seq": 3, "kind": "external_subscription_usage.sampled", "payload": {}}
+
+    ack = client.post("/api/fleet/host/events", json={"facts": [_sample(1), other, no_slug]}, headers=headers).json()
+
+    assert (ack["applied"], ack["rejected"], ack["high_water"]) == ([1], [2, 3], 1)
+
+
+def test_a_runner_token_and_a_retired_host_are_refused_the_host_lane(client: FleetClient) -> None:
+    added = _add(client)
+    runner = client.post("/api/runners", json={"name": "r"}).json()
+
+    assert (
+        client.post("/api/fleet/host/events", json={"facts": []}, headers=_bearer(runner["token"])).status_code == 401
+    )
+    assert client.post("/api/fleet/host/events", json={"facts": []}).status_code == 401
+    assert client.post("/api/fleet/host/events", json={"facts": []}, headers=_bearer(added["token"])).status_code == 200
+
+
+def test_a_hosted_runner_reads_its_hosts_sample_for_the_slug_it_registered(client: FleetClient) -> None:
+    added = _add(client)
+    host = _bearer(added["token"])
+    assert client.post("/api/fleet/host", json=_REPORT, headers=host).status_code == 200
+    spender = client.post("/api/fleet/host/runners", json={"name": "r1"}, headers=host).json()
+    bare = client.post("/api/fleet/host/runners", json={"name": "r2"}, headers=host).json()
+    for runner, subscription in ((spender, "claude-max"), (bare, None)):
+        registered = client.post(
+            "/api/fleet/runners",
+            json={"workspace_id": "w1", "subscription": subscription},
+            headers=_bearer(runner["token"]),
+        )
+        assert registered.status_code == 201, registered.text
+
+    client.post("/api/fleet/host/events", json={"facts": [_sample(1, "claude-max")]}, headers=host)
+
+    shown = client.get(f"/api/fleet/runners/{spender['runner_id']}", headers=_bearer(spender["token"])).json()
+    none = client.get(f"/api/fleet/runners/{bare['runner_id']}", headers=_bearer(bare["token"])).json()
+    assert [(s["slug"], s["windows"][0]["utilization_pct"]) for s in shown["subscriptions"]] == [("claude-max", 12.0)]
+    assert none["subscriptions"] == []

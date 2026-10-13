@@ -199,6 +199,10 @@ class HostRow:
         self.subscriptions: tuple[DeclaredSubscription, ...] = ()
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
+        # The host's newest sample and miss per slug, from its own fact lane; the mirror of the real hub's
+        # ``host_external_usage`` and ``host_external_usage_misses`` rows.
+        self.subscription_usage: dict[str, SubscriptionUsageView] = {}
+        self.subscription_usage_misses: dict[str, SubscriptionUsageMiss] = {}
 
 
 class ClaimDeniedUnregistered(Exception):

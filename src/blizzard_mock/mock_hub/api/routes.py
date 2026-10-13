@@ -15,6 +15,7 @@ from blizzard_mock.mock_hub.api.deps import (
     CompletionBody,
     DecisionBody,
     HostAddBody,
+    HostFactBatchBody,
     HostReportBody,
     HostRunnerAddBody,
     QueuePeekBody,
@@ -651,6 +652,17 @@ def get_host_record(
 ) -> object:
     """The calling host's own record and the runners standing under it that are not retired."""
     return service.host_record(host_id)
+
+
+@host_router.post("/events")
+def push_host_facts(
+    body: HostFactBatchBody,
+    host_id: Annotated[str, Depends(get_host_principal)],
+    service: Annotated[MockHubService, Depends(get_service)],
+) -> object:
+    """Land the calling host's own facts — its subscription usage samples and misses — against a mark of the host's
+    own, apart from every runner's."""
+    return service.ingest_host_facts(host_id, [f.model_dump() for f in body.facts])
 
 
 @host_router.post("/runners", status_code=201)
