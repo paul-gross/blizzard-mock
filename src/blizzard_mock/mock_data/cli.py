@@ -90,7 +90,10 @@ from blizzard_mock.mock_data.domain.runner.scenario_seed import (
     compose_runner_fleet,
     minimum_chunks_for_mirror,
 )
-from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import compose_transcript_segment
+from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import (
+    compose_final_marker,
+    compose_transcript_segment,
+)
 from blizzard_mock.mock_data.domain.runner.usage_seed import UsageCompositionError as RunnerUsageCompositionError
 from blizzard_mock.mock_data.domain.runner.usage_seed import compose_usage as compose_runner_usage
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError, require_column
@@ -103,7 +106,7 @@ from blizzard_mock.mock_data.domain.seeding import (
     TenantResolutionError,
     hub_reset_boundary,
 )
-from blizzard_mock.mock_data.domain.store_targets import HUB, STORE_TARGETS, store_mismatch_message
+from blizzard_mock.mock_data.domain.store_targets import HUB, RUNNER, STORE_TARGETS, store_mismatch_message
 from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore, create_seed_engine
 from blizzard_mock.mock_data.internal.runtime_config import RuntimeConfigError, resolve_db_url, resolve_runner_id
 
@@ -248,8 +251,20 @@ def _hub_global_tables() -> frozenset[str]:
     return frozenset(str(name) for name in cast("frozenset[object]", declared))
 
 
-def _seed_service(url: str) -> SeedService:
-    return SeedService(ReflectedStore(create_seed_engine(url), tenant=_named_tenant()))
+def _seed_service(url: str, runner: str | None = None) -> SeedService:
+    return SeedService(ReflectedStore(create_seed_engine(url), tenant=_named_tenant(), runner=runner))
+
+
+def _dir_seed_service(store: str, url: str | None, runtime_dir: str | None) -> SeedService:
+    """The service for ``--store``/``--url``/``--dir``. A runner store named by ``--dir`` stamps its
+    rows with the host file's ``[[runner]] id``; one named by ``--url`` with its identity row's."""
+    resolved = _resolve_url(store, url, runtime_dir)
+    if store != RUNNER or not runtime_dir:
+        return _seed_service(resolved)
+    try:
+        return _seed_service(resolved, runner=resolve_runner_id(Path(runtime_dir)))
+    except RuntimeConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _create_fleet_engine(label: str, url: str) -> Engine:
@@ -439,7 +454,10 @@ def cli() -> None:
 
 
 _URL_HELP = "Store URL (sqlite path or postgres DSN). Defaults to $DATABASE_URL."
-_DIR_HELP = "A hub/runner runtime dir — reads its blizzard-hub.toml/blizzard-runner.toml `db_url` (sugar for --url)."
+_DIR_HELP = (
+    "A hub or host runtime dir — reads its blizzard-hub.toml/blizzard-host.toml `db_url` (sugar for --url); "
+    "a host dir also pins runner rows to its [[runner]] id and must already hold its data/host.db."
+)
 
 
 @cli.command()
@@ -455,7 +473,7 @@ def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
     each tenant's own row, ``work_item_sequence`` row, and ``default``
     project. Any other store is emptied whole.
     """
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _seed_service(_resolve_url(store, url, runtime_dir))  # a reset stamps nothing
     boundary = hub_reset_boundary(_hub_global_tables()) if store == HUB else CLEAR_EVERYTHING
     try:
         summary = service.reset(boundary)
@@ -548,7 +566,7 @@ def create_runner(
         flag = "--subscription" if subscriptions else "--declare-empty-roster"
         raise click.UsageError(f"{flag} contradicts --never-connected — a runner declares its roster when it registers")
     _require_store("runner", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     now = SystemClock().now()
     names_by_slug = {slug: slug_name for slug, slug_name, _provider in subscriptions}
     declared_roster = compose_declared_roster(subscriptions) if subscriptions or declare_empty_roster else None
@@ -611,7 +629,7 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
     existing name. Prints the minted graph id, alone, on stdout.
     """
     _require_store("graph", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     minted = compose_graph(name, _seeded_clock(seed), seeded_rng(seed))
     try:
         service.seed(minted.rows)
@@ -676,7 +694,7 @@ def create_chunk(
     graph when the store holds none; prints the minted chunk id on stdout.
     """
     _require_store("chunk", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
@@ -758,7 +776,7 @@ def create_artifact(
 
     ``--kind`` constrains the accepted payload flags (README)."""
     _require_store("artifact", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
@@ -870,7 +888,7 @@ def create_usage(
         raise click.UsageError("--cost-usd and --no-cost are mutually exclusive")
     if cost_usd is None and not no_cost:
         raise click.UsageError("pass exactly one of --cost-usd or --no-cost")
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
 
     if store == "runner":
         if runner_id is not None:
@@ -1001,7 +1019,7 @@ def create_lease(
     owner already holds is refused. Runner: one ``leases`` row plus its ``lease_context`` sibling,
     always together (``domain/runner/lease_seed.py``)."""
     _require_store("lease", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
 
     if store == "runner":
         if runner_id is not None:
@@ -1098,7 +1116,7 @@ def create_escalation(
     derives from an open (no later lease/requeue) escalation. Does **not** also write
     an ``event_log`` row (``domain/hub/event_seed.py``; see ``create event``'s docstring)."""
     _require_store("escalation", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     try:
         row = compose_escalation(
             chunk_id=chunk_id,
@@ -1146,7 +1164,7 @@ def create_bounce(
     """Land one ``chunk_bounces`` row against an already-seeded chunk
     (``domain/hub/bounce_seed.py``)."""
     _require_store("bounce", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     try:
         row = compose_bounce(
             chunk_id=chunk_id,
@@ -1211,7 +1229,7 @@ def create_question(
     _require_store("question", store)
     if resumed and not delivered:
         raise click.UsageError("--resumed requires --delivered — there is no fact beyond delivery for a resume")
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
@@ -1290,7 +1308,7 @@ def create_decision(
     """
     _require_store("decision", store)
     choices = [DecisionChoice(name, description) for name, _, description in (c.partition("=") for c in raw_choices)]
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
@@ -1385,7 +1403,7 @@ def create_garden_proposal(
         except ValueError as exc:
             raise click.UsageError(f"--created-at {created_at_raw!r} is not ISO-8601") from exc
         created_at = created_at.astimezone(UTC) if created_at.tzinfo is not None else created_at.replace(tzinfo=UTC)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
@@ -1441,7 +1459,7 @@ def create_event(
     naming no runner, chunk or node, one ``hub_event_log`` row, the hub's own occurrence.
     Independent of ``create escalation`` (``domain/hub/event_seed.py``)."""
     _require_store("event", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     try:
         resolved_runner_id = _resolve_event_runner_id(service, kind=kind, chunk_id=chunk_id, runner_id=runner_id)
         row = compose_event(
@@ -1508,7 +1526,7 @@ def create_runner_pause(
         )
     if store == "hub" and runner_id is None:
         raise click.UsageError("--runner-id is required with --store hub — the pause fact names the runner it brakes")
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     try:
         if runner_id is None:
             row = compose_local_pause(reason=reason, set_at=SystemClock().now())
@@ -1572,7 +1590,7 @@ def create_transcript_segment(
     runner-only, no hub counterpart (``domain/runner/transcript_segment_seed.py``).
     Prints the minted segment id, alone, on stdout."""
     _require_store("transcript-segment", store)
-    service = _seed_service(_resolve_url(store, url, runtime_dir))
+    service = _dir_seed_service(store, url, runtime_dir)
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     now = clock.now()
@@ -1594,8 +1612,9 @@ def create_transcript_segment(
         finalized_at=now if finalized else None,
         stamped_at=now,
     )
+    rows = [row, compose_final_marker(row, created_at=now)] if finalized else [row]
     try:
-        service.seed([row])
+        service.seed(rows)
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(row.values["segment_id"])
@@ -1668,14 +1687,14 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
     "--runner-dir",
     "runner_dir",
     default=None,
-    help="A runner runtime dir — reads its blizzard-runner.toml `db_url` (sugar) and its store's registered "
-    "identity (the pinned runner).",
+    help="A host runtime dir — reads its blizzard-host.toml `db_url` (sugar) and its [[runner]] id (the pinned "
+    "runner).",
 )
 @click.option(
     "--runner-id",
     "runner_id",
     default=None,
-    help="The pinned runner's hub-minted id — required with --runner-url; read from --runner-dir's store otherwise.",
+    help="The pinned runner's hub-minted id — required with --runner-url; from --runner-dir's host file otherwise.",
 )
 @click.option(
     "--chunks", "chunks", type=int, default=DEFAULT_CHUNKS, show_default=True, help="How many chunks to seed."
@@ -1739,8 +1758,8 @@ def scenario_fleet(
         register_runner = not hub_service.query("runner_registrations", {"runner_id": pinned_runner_id})
         if register_runner and runner_dir:
             raise click.ClickException(
-                f"the hub store holds no runner {pinned_runner_id!r}, the id {runner_dir} last registered "
-                "under; nothing landed. If it registered with another hub, pass that hub's store "
+                f"the hub store holds no runner {pinned_runner_id!r}, the id {runner_dir}'s host file names;"
+                " nothing landed. If it registered with another hub, pass that hub's store "
                 "(--hub-url/--hub-dir). If this hub's data was reset, re-add it with "
                 f"`blizzard runner init --allow-readd {runner_dir}`, let it register once, then re-run"
             )

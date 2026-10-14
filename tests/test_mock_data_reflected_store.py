@@ -21,6 +21,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     MetaData,
+    PrimaryKeyConstraint,
     String,
     Table,
     create_engine,
@@ -597,6 +598,116 @@ def test_write_never_stamps_a_hub_stores_runner_columns(tmp_path: Path) -> None:
     ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_registration("r1")])
     with create_engine(url).begin() as conn:
         assert conn.execute(select(registrations.c.runner_id)).scalars().all() == ["r1"]
+
+
+def _tight_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
+    """A runner store at the tightened revision: ``runner_id`` required on every runner-scoped
+    table, an ``outbound_buffer`` keyed ``(runner_id, seq)`` with a plain integer ``seq``, the
+    ``outbox_counters`` it draws from, and an identity table with no row (never registered)."""
+    url = f"sqlite:///{tmp_path / 'host.db'}"
+    engine = create_engine(url)
+    meta = MetaData()
+    Table(
+        "runner_identity",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=False),
+    )
+    Table(
+        "local_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("runner_id", String, nullable=False),
+        Column("paused", Boolean, nullable=False),
+    )
+    Table(
+        "outbox_counters",
+        meta,
+        Column("runner_id", String, nullable=False),
+        Column("lane", String, nullable=False),
+        Column("last_seq", Integer, nullable=False),
+        PrimaryKeyConstraint("runner_id", "lane"),
+    )
+    for name in ("outbound_buffer", "transcript_outbound_buffer"):
+        Table(
+            name,
+            meta,
+            Column("seq", Integer, nullable=False, autoincrement=False),
+            Column("kind", String, nullable=False),
+            Column("runner_id", String, nullable=False),
+            PrimaryKeyConstraint("runner_id", "seq"),
+        )
+    meta.create_all(engine)
+    return url, meta
+
+
+def _fact(table: str = "outbound_buffer") -> FactRow:
+    return FactRow(table=table, values={"kind": "question.asked"})
+
+
+def _seqs(url: str, meta: MetaData, table: str = "outbound_buffer") -> list[tuple[str, int]]:
+    buffer = meta.tables[table]
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(buffer.c.runner_id, buffer.c.seq).order_by(buffer.c.runner_id, buffer.c.seq))
+        return [(row.runner_id, row.seq) for row in rows]
+
+
+def _counters(url: str, meta: MetaData) -> dict[tuple[str, str], int]:
+    counters = meta.tables["outbox_counters"]
+    with create_engine(url).begin() as conn:
+        return {(row.runner_id, row.lane): row.last_seq for row in conn.execute(select(counters))}
+
+
+def test_write_stamps_a_named_runner_into_a_never_registered_tight_store(tmp_path: Path) -> None:
+    """The id a host file names seeds a store whose identity table holds no row."""
+    url, meta = _tight_runner_store(tmp_path)
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_A).write([_pause()])
+    assert _pause_runner_ids(url, meta) == [_RUNNER_A]
+
+
+def test_write_refuses_a_required_runner_id_it_cannot_stamp(tmp_path: Path) -> None:
+    url, meta = _tight_runner_store(tmp_path)
+    with pytest.raises(SeedIntegrityError, match="--dir"):
+        _store(url).write([_pause()])
+    assert _pause_runner_ids(url, meta) == []
+
+
+def test_write_draws_each_outbox_seq_from_the_runners_counter(tmp_path: Path) -> None:
+    url, meta = _tight_runner_store(tmp_path)
+    store = ReflectedStore(create_seed_engine(url), runner=_RUNNER_A)
+    store.write([_fact(), _fact(), _fact("transcript_outbound_buffer")])
+    store.write([_fact()])
+    assert _seqs(url, meta) == [(_RUNNER_A, 1), (_RUNNER_A, 2), (_RUNNER_A, 3)]
+    assert _seqs(url, meta, "transcript_outbound_buffer") == [(_RUNNER_A, 1)]
+    assert _counters(url, meta) == {(_RUNNER_A, "outbound"): 3, (_RUNNER_A, "transcript"): 1}
+
+
+def test_two_runners_in_one_store_count_independently(tmp_path: Path) -> None:
+    url, meta = _tight_runner_store(tmp_path)
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_A).write([_fact(), _fact()])
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_fact()])
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_A).write([_fact()])
+    assert _seqs(url, meta) == [(_RUNNER_A, 1), (_RUNNER_A, 2), (_RUNNER_A, 3), (_RUNNER_B, 1)]
+    assert _counters(url, meta) == {(_RUNNER_A, "outbound"): 3, (_RUNNER_B, "outbound"): 1}
+
+
+def test_write_never_reissues_a_seq_the_counter_issued(tmp_path: Path) -> None:
+    """A pruned lane's counter stays ahead of its rows; the next seq counts on from the counter."""
+    url, meta = _tight_runner_store(tmp_path)
+    with create_engine(url).begin() as conn:
+        conn.execute(meta.tables["outbox_counters"].insert().values(runner_id=_RUNNER_A, lane="outbound", last_seq=7))
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_A).write([_fact()])
+    assert _seqs(url, meta) == [(_RUNNER_A, 8)]
+    assert _counters(url, meta) == {(_RUNNER_A, "outbound"): 8}
+
+
+def test_a_failed_write_leaves_the_counter_unmoved(tmp_path: Path) -> None:
+    url, meta = _tight_runner_store(tmp_path)
+    store = ReflectedStore(create_seed_engine(url), runner=_RUNNER_A)
+    with pytest.raises(SchemaDriftError):
+        store.write([_fact(), FactRow(table="local_pause_facts", values={"paused": True, "bogus": 1})])
+    assert _counters(url, meta) == {}
+    assert _seqs(url, meta) == []
 
 
 # --- reset (unmigrated store) --------------------------------------------------

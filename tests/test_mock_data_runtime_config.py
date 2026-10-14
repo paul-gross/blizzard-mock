@@ -1,12 +1,11 @@
 """Unit coverage for ``--dir`` runtime-config resolution (``blizzard-mock:unit-test``).
 
-``internal/runtime_config.resolve_db_url`` reads a written ``blizzard-hub.toml``/
-``blizzard-runner.toml`` independently — no ``blizzard`` import, no store connection.
+``internal/runtime_config`` reads a written ``blizzard-hub.toml``/``blizzard-host.toml``
+independently — no ``blizzard`` import, no store connection.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -19,9 +18,9 @@ def test_resolves_db_url_from_a_written_hub_toml(tmp_path: Path) -> None:
     assert resolve_db_url(tmp_path, store="hub") == "sqlite:///hub.db"
 
 
-def test_resolves_db_url_from_a_written_runner_toml(tmp_path: Path) -> None:
-    (tmp_path / "blizzard-runner.toml").write_text('db_url = "sqlite:///runner.db"\n')
-    assert resolve_db_url(tmp_path, store="runner") == "sqlite:///runner.db"
+def test_resolves_db_url_from_a_written_host_toml(tmp_path: Path) -> None:
+    (tmp_path / "blizzard-host.toml").write_text('db_url = "sqlite:///elsewhere.db"\n')
+    assert resolve_db_url(tmp_path, store="runner") == "sqlite:///elsewhere.db"
 
 
 def test_resolves_a_postgres_db_url_too(tmp_path: Path) -> None:
@@ -38,52 +37,70 @@ def test_missing_config_file_fails_naming_the_file(tmp_path: Path) -> None:
 
 
 def test_config_missing_db_url_falls_back_to_the_stores_default_path(tmp_path: Path) -> None:
-    """Blizzard's issue-#234 scaffold omits ``db_url`` when it is the default; the
-    resolver derives the same ``sqlite:///<dir>/data/<store>.db`` the daemons do."""
+    """A daemon's scaffold omits ``db_url`` when it is the default; the resolver derives
+    the same ``sqlite:///<dir>/data/<store>.db`` the daemons do."""
     (tmp_path / "blizzard-hub.toml").write_text('host = "127.0.0.1"\n')
     assert resolve_db_url(tmp_path, store="hub") == f"sqlite:///{(tmp_path / 'data' / 'hub.db').resolve()}"
 
 
-def test_config_missing_db_url_falls_back_to_the_runner_default_too(tmp_path: Path) -> None:
-    (tmp_path / "blizzard-runner.toml").write_text('host = "127.0.0.1"\n')
-    assert resolve_db_url(tmp_path, store="runner") == f"sqlite:///{(tmp_path / 'data' / 'runner.db').resolve()}"
+def test_host_toml_missing_db_url_falls_back_to_the_host_store(tmp_path: Path) -> None:
+    (tmp_path / "blizzard-host.toml").write_text('host = "127.0.0.1"\n')
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "host.db").touch()
+    assert resolve_db_url(tmp_path, store="runner") == f"sqlite:///{(tmp_path / 'data' / 'host.db').resolve()}"
 
 
-def _runner_store(tmp_path: Path, *rows: tuple[str, str]) -> None:
-    """A runner runtime whose store carries the identity table (hand-made, as the runner's
-    migration shapes it) holding ``rows`` of ``(runner_id, runner_name)``, oldest first."""
-    db = tmp_path / "runner.db"
-    (tmp_path / "blizzard-runner.toml").write_text(f'db_url = "sqlite:///{db}"\n')
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            "CREATE TABLE runner_identity (id INTEGER PRIMARY KEY AUTOINCREMENT, runner_id TEXT NOT NULL, "
-            "runner_name TEXT NOT NULL, registered_at TEXT NOT NULL)"
-        )
-        conn.executemany(
-            "INSERT INTO runner_identity (runner_id, runner_name, registered_at) VALUES (?, ?, '2026-07-13')", rows
-        )
+def test_a_host_without_its_default_store_is_refused_naming_migrate_and_creates_nothing(tmp_path: Path) -> None:
+    (tmp_path / "blizzard-host.toml").write_text('host = "127.0.0.1"\n')
+
+    with pytest.raises(RuntimeConfigError, match=r"blizzard runner migrate --dir"):
+        resolve_db_url(tmp_path, store="runner")
+
+    assert not (tmp_path / "data").exists()
 
 
-def test_resolves_the_runner_id_from_the_runner_store_identity_row(tmp_path: Path) -> None:
-    _runner_store(tmp_path, ("rn_01OLDER0000000000000000000", "runner-local"), ("rn_01NEWER0000000000000000000", "r"))
-    assert resolve_runner_id(tmp_path) == "rn_01NEWER0000000000000000000"
+def test_a_legacy_runner_toml_is_not_a_host_runtime(tmp_path: Path) -> None:
+    (tmp_path / "blizzard-runner.toml").write_text('db_url = "sqlite:///runner.db"\n')
+    with pytest.raises(RuntimeConfigError, match=r"blizzard-host\.toml does not exist"):
+        resolve_db_url(tmp_path, store="runner")
 
 
-def test_a_runner_that_never_registered_fails_saying_so(tmp_path: Path) -> None:
-    _runner_store(tmp_path)
-    with pytest.raises(RuntimeConfigError, match="never registered"):
+_RUNNER_ID = "rn_01JA0000000000000000000000"
+
+
+def _host_toml(tmp_path: Path, *runners: str) -> None:
+    (tmp_path / "blizzard-host.toml").write_text('hub_url = "http://127.0.0.1:8001"\n' + "".join(runners))
+
+
+def test_resolves_the_runner_id_from_the_host_files_runner(tmp_path: Path) -> None:
+    """Read from the file alone — no store exists to hold an identity row."""
+    _host_toml(tmp_path, f'\n[[runner]]\nid = "{_RUNNER_ID}"\nname = "runner-local"\nsubscription = "anthropic"\n')
+    assert resolve_runner_id(tmp_path) == _RUNNER_ID
+
+
+def test_a_runner_with_no_id_fails_saying_so(tmp_path: Path) -> None:
+    _host_toml(tmp_path, '\n[[runner]]\nname = "runner-local"\n')
+    with pytest.raises(RuntimeConfigError, match=r"\[\[runner\]\] has no id"):
         resolve_runner_id(tmp_path)
 
 
-def test_an_unmigrated_runner_store_fails_naming_the_identity_table(tmp_path: Path) -> None:
-    (tmp_path / "blizzard-runner.toml").write_text(f'db_url = "sqlite:///{tmp_path / "runner.db"}"\n')
-    with pytest.raises(RuntimeConfigError, match="runner_identity"):
+def test_a_host_with_no_runner_fails_saying_so(tmp_path: Path) -> None:
+    _host_toml(tmp_path)
+    with pytest.raises(RuntimeConfigError, match=r"declares no \[\[runner\]\]"):
         resolve_runner_id(tmp_path)
 
 
-def test_missing_runner_toml_fails_naming_the_file(tmp_path: Path) -> None:
+def test_a_host_of_several_runners_names_none(tmp_path: Path) -> None:
+    _host_toml(
+        tmp_path, f'\n[[runner]]\nid = "{_RUNNER_ID}"\nname = "a"\n', '\n[[runner]]\nid = "rn_01JB"\nname = "b"\n'
+    )
+    with pytest.raises(RuntimeConfigError, match=r"2 \[\[runner\]\] entries.*--runner-id"):
+        resolve_runner_id(tmp_path)
+
+
+def test_missing_host_toml_fails_naming_the_file(tmp_path: Path) -> None:
     with pytest.raises(RuntimeConfigError) as excinfo:
         resolve_runner_id(tmp_path)
     message = str(excinfo.value)
-    assert "blizzard-runner.toml" in message
+    assert "blizzard-host.toml" in message
     assert str(tmp_path) in message

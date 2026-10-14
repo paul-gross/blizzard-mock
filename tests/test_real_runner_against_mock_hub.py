@@ -5,7 +5,7 @@ hub stays in-process (a bound ``uvicorn`` socket) so the assertion can read the 
 registry row directly — the capability snapshot has no wire-exposed read surface, the
 same reason ``tests/test_runner_registration_federation.py`` reads its hub directly. The
 same real runner's ``init`` and ``store reset`` verbs are driven over the mock hub's resets,
-the runner's store read back from its SQLite file."""
+the host directory's store read back from its SQLite file."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import tomllib
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
@@ -68,21 +69,36 @@ def _await_health(port: int, *, timeout: float = 10.0) -> None:
     raise AssertionError(f"mock hub never answered health on port {port}")
 
 
+#: The scaffolded runner's name, and the token variable it reads (``BZ_HUB_TOKEN_<NAME>``).
+_RUNNER_NAME = "runner-local"
+_TOKEN_VARIABLE = "BZ_HUB_TOKEN_RUNNER_LOCAL"
+
+#: The ``[[subscription]]`` the scaffold declares and its runner names.
+_SCAFFOLD_SUBSCRIPTION = '[[subscription]]\nslug = "anthropic"\n'
+
+
 def _disable_external_usage_network_call(runner_dir: Path) -> None:
-    """Point the freshly scaffolded config's legacy subscription sampler at a
-    guaranteed-missing credentials file (the real runner's e2e helper's own precedent) —
-    a path that never exists trips the sampler's missing-credentials soft failure before
-    any request is built, so this tick depends on no ambient
-    ``~/.claude/.credentials.json`` a dev machine happens to carry."""
-    config_path = runner_dir / "blizzard-runner.toml"
+    """Point the scaffolded host file's ``[[subscription]]`` sampler at a guaranteed-missing
+    credentials file (the real runner's e2e helper's own precedent) — a path that never
+    exists trips the sampler's missing-credentials soft failure before any request is
+    built, so this tick depends on no ambient ``~/.claude/.credentials.json`` a dev
+    machine happens to carry."""
+    config_path = runner_dir / "blizzard-host.toml"
     text = config_path.read_text()
     patched = text.replace(
-        "[external_subscription_usage]\n",
-        '[external_subscription_usage]\ncredentials_path = "/nonexistent/no-such-credentials.json"\n',
+        _SCAFFOLD_SUBSCRIPTION,
+        _SCAFFOLD_SUBSCRIPTION + 'credentials_path = "/nonexistent/no-such-credentials.json"\n',
         1,
     )
-    assert patched != text, "the scaffolded config's [external_subscription_usage] header moved"
+    assert patched != text, "the scaffolded host file's anthropic [[subscription]] moved"
     config_path.write_text(patched)
+
+
+def _host_runner_id(runner_dir: Path) -> str | None:
+    """The ``[[runner]] id`` ``runner init`` wrote into the host file once the runner joined."""
+    raw = tomllib.loads((runner_dir / "blizzard-host.toml").read_text())
+    [runner] = raw["runner"]
+    return runner.get("id")
 
 
 def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_back(tmp_path: Path) -> None:
@@ -122,8 +138,9 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
     # `runner init` added the runner at this hub — the hub minted its id and token — and the
     # tick registered it under the scaffold's default name with the token init wrote.
     assert row.runner_id.startswith("rn_")
-    assert (row.name, row.never_connected()) == ("runner-local", False)
+    assert (row.name, row.never_connected()) == (_RUNNER_NAME, False)
     assert _env_token(runner_dir) is not None
+    assert _host_runner_id(runner_dir) == row.runner_id
     assert row.gates == ("build", "review")
 
     # `known_harnesses` now binds two adapters (the OpenCode binding joined
@@ -149,17 +166,17 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
 def _scrubbed_env() -> dict[str, str]:
     """The test process's environment minus any ambient runner token — a process-env token
     outranks ``<dir>/.env``, so one leaking in from a dev shell would decide what init does."""
-    return {key: value for key, value in os.environ.items() if key != "BZ_HUB_TOKEN"}
+    return {key: value for key, value in os.environ.items() if not key.startswith("BZ_HUB_TOKEN")}
 
 
 def _env_token(runner_dir: Path) -> str | None:
-    """The ``BZ_HUB_TOKEN`` line ``runner init`` wrote into ``<dir>/.env``, if any."""
+    """The ``BZ_HUB_TOKEN_<NAME>`` line ``runner init`` wrote into ``<dir>/.env`` for its runner, if any."""
     env_file = runner_dir / ".env"
     if not env_file.exists():
         return None
     for line in env_file.read_text().splitlines():
         key, _, value = line.partition("=")
-        if key.strip() == "BZ_HUB_TOKEN":
+        if key.strip() == _TOKEN_VARIABLE:
             return value.strip().strip('"')
     return None
 
@@ -214,13 +231,14 @@ def test_runner_init_reuses_its_token_and_re_adds_after_a_hub_reset_only_with_al
         fresh_token = _env_token(runner_dir)
         assert fresh_token is not None and fresh_token != token
         assert service.identity(fresh_token).runner_id == fresh.runner_id != added.runner_id
+        assert _host_runner_id(runner_dir) == fresh.runner_id
     finally:
         server.should_exit = True
         thread.join(timeout=10)
 
 
-#: A runner store moved aside: ``runner.db`` under its UTC set-aside stamp.
-_ASIDE_DB = re.compile(r"^runner\.db\.\d{8}T\d{6}Z$")
+#: A host store moved aside: ``host.db`` under its UTC set-aside stamp.
+_ASIDE_DB = re.compile(r"^host\.db\.\d{8}T\d{6}Z$")
 #: The files beside a SQLite database that hold part of it, moved aside under the database's new name.
 _SQLITE_SIBLINGS = ("-wal", "-shm", "-journal")
 
@@ -242,7 +260,7 @@ def _serving_mock_hub() -> Iterator[tuple[str, MockHubService]]:
 
 
 class _RealRunner:
-    """The sibling checkout's runner binary, run as one-shot verbs over one runner directory."""
+    """The sibling checkout's runner binary, run as one-shot verbs over one host directory."""
 
     def __init__(self, runner_dir: Path, hub_url: str) -> None:
         self.dir = runner_dir
@@ -266,7 +284,7 @@ class _RealRunner:
 
     @property
     def store(self) -> Path:
-        return self.data / "runner.db"
+        return self.data / "host.db"
 
     def set_aside(self) -> list[Path]:
         """The databases moved aside in the data directory, oldest stamp first."""
@@ -320,9 +338,10 @@ def test_a_real_runner_re_added_after_a_hub_reset_sets_its_old_store_aside_befor
         for suffix in siblings_before:
             assert aside.with_name(aside.name + suffix).exists(), f"the store's {suffix} sibling was not set aside"
         assert _stored_runner_id(aside) == old_runner_id, "the set-aside store lost the old runner's identity"
-        # The store was set aside before the add, so the fresh one holds no identity until it registers.
+        # The store was set aside before the add; init records the re-added runner in the fresh one.
         assert runner.store.is_file()
-        assert _stored_runner_id(runner.store) is None
+        assert _stored_runner_id(runner.store) == new_runner_id
+        assert _host_runner_id(runner.dir) == new_runner_id
 
         runner.tick()
         assert _stored_runner_id(runner.store) == new_runner_id

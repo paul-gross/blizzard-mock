@@ -666,6 +666,17 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("acked_at", DateTime, nullable=True),
     )
     Table(
+        "transcript_outbound_buffer",
+        meta,
+        Column("seq", Integer, primary_key=True, autoincrement=True),
+        Column("segment_id", String, nullable=False),
+        Column("chunk_id", String, nullable=False),
+        Column("final", Boolean, nullable=False),
+        Column("payload", Text, nullable=False),
+        Column("created_at", DateTime, nullable=False),
+        Column("acked_at", DateTime, nullable=True),
+    )
+    Table(
         "local_pause_facts",
         meta,
         Column("id", Integer, primary_key=True, autoincrement=True),
@@ -3377,6 +3388,33 @@ def test_create_runner_pause_store_runner_local_without_a_reason_lands_none(tmp_
     assert [(r.paused, r.reason) for r in rows] == [(True, None)]
 
 
+def test_create_runner_pause_store_runner_dir_stamps_the_host_files_runner(tmp_path: Path) -> None:
+    """``--dir`` on a host directory pins the row to its ``[[runner]] id``, in a store with no identity row."""
+    url = f"sqlite:///{tmp_path / 'host.db'}"
+    meta = MetaData()
+    Table("runner_identity", meta, Column("id", Integer, primary_key=True), Column("runner_id", String, nullable=False))
+    Table(
+        "local_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("paused", Boolean, nullable=False),
+        Column("set_at", DateTime, nullable=False),
+        Column("set_by", String, nullable=False),
+        Column("reason", String, nullable=True),
+        Column("runner_id", String, nullable=False),
+    )
+    meta.create_all(create_engine(url))
+    runtime_dir = _host_dir(tmp_path, url, "rn_01JA0000000000000000000000")
+
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "runner", "--dir", str(runtime_dir), "--local"]
+    )
+    assert result.exit_code == 0, result.output
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "local_pause_facts"))).all()
+    assert [r.runner_id for r in rows] == ["rn_01JA0000000000000000000000"]
+
+
 def test_create_runner_pause_store_runner_fleet_is_rejected(tmp_path: Path) -> None:
     """The runner store carries no fleet-brake mirror of its own — ``--fleet`` only means
     something against ``--store hub``."""
@@ -3644,32 +3682,24 @@ def test_scenario_fleet_requires_runner_id_without_runner_dir(tmp_path: Path) ->
     assert "--runner-id" in result.output
 
 
-def _registered_runner_dir(tmp_path: Path, runner_url: str, runner_meta: MetaData, runner_id: str) -> Path:
-    """A runner runtime dir whose store recorded ``runner_id`` at a registration."""
-    with create_engine(runner_url).begin() as conn:
-        conn.execute(
-            insert(_table(runner_meta, "runner_identity")),
-            [
-                {
-                    "runner_id": runner_id,
-                    "runner_name": "runner-local",
-                    "registered_at": datetime(2026, 1, 1, tzinfo=UTC),
-                }
-            ],
-        )
-    runtime_dir = tmp_path / "runner-runtime"
+def _host_dir(tmp_path: Path, runner_url: str, runner_id: str | None) -> Path:
+    """A host directory whose one ``[[runner]]`` carries ``runner_id`` (none when ``None``), its store at ``runner_url``."""
+    runtime_dir = tmp_path / "host-runtime"
     runtime_dir.mkdir()
-    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nname = "runner-local"\n')
+    id_line = f'id = "{runner_id}"\n' if runner_id is not None else ""
+    (runtime_dir / "blizzard-host.toml").write_text(
+        f'db_url = "{runner_url}"\n\n[[runner]]\n{id_line}name = "runner-local"\nsubscription = "anthropic"\n'
+    )
     return runtime_dir
 
 
 def test_scenario_fleet_reads_the_pinned_runner_id_from_runner_dir(tmp_path: Path) -> None:
-    """The pinned id is the runner store's registered identity — the toml names only a label —
-    and the hub store's registration for it is reused."""
+    """The pinned id is the host file's ``[[runner]] id`` — the store holds no identity row — and the hub
+    store's registration for it is reused."""
     registered_id = "rn_01JA0000000000000000000000"
     hub_url, hub_meta = _full_hub_store(tmp_path)
-    runner_url, runner_meta = _full_runner_store(tmp_path)
-    runtime_dir = _registered_runner_dir(tmp_path, runner_url, runner_meta, registered_id)
+    runner_url, _runner_meta = _full_runner_store(tmp_path)
+    runtime_dir = _host_dir(tmp_path, runner_url, registered_id)
     with create_engine(hub_url).begin() as conn:
         conn.execute(
             insert(_table(hub_meta, "runner_registrations")),
@@ -3701,7 +3731,7 @@ def test_scenario_fleet_refuses_a_runner_dir_id_the_hub_store_does_not_hold(tmp_
     store, or a re-add after a reset — rather than seeding a fleet the runner can never own."""
     hub_url, hub_meta = _full_hub_store(tmp_path)
     runner_url, runner_meta = _full_runner_store(tmp_path)
-    runtime_dir = _registered_runner_dir(tmp_path, runner_url, runner_meta, "rn_01JA0000000000000000000000")
+    runtime_dir = _host_dir(tmp_path, runner_url, "rn_01JA0000000000000000000000")
 
     result = _runner().invoke(cli, ["scenario", "fleet", "--hub-url", hub_url, "--runner-dir", str(runtime_dir)])
 
@@ -3715,24 +3745,20 @@ def test_scenario_fleet_refuses_a_runner_dir_id_the_hub_store_does_not_hold(tmp_
         assert conn.execute(select(_table(runner_meta, "local_pause_facts"))).all() == []
 
 
-def test_scenario_fleet_refuses_a_runner_dir_whose_runner_never_registered(tmp_path: Path) -> None:
+def test_scenario_fleet_refuses_a_runner_dir_whose_runner_has_no_id(tmp_path: Path) -> None:
     hub_url, _hub_meta = _full_hub_store(tmp_path)
     runner_url, _runner_meta = _full_runner_store(tmp_path)
-    runtime_dir = tmp_path / "runner-runtime"
-    runtime_dir.mkdir()
-    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nname = "runner-local"\n')
+    runtime_dir = _host_dir(tmp_path, runner_url, None)
 
     result = _runner().invoke(cli, ["scenario", "fleet", "--hub-url", hub_url, "--runner-dir", str(runtime_dir)])
     assert result.exit_code != 0
-    assert "never registered" in result.output
+    assert "has no id" in result.output
 
 
 def test_scenario_fleet_refuses_runner_id_redundant_with_runner_dir(tmp_path: Path) -> None:
     hub_url, _hub_meta = _full_hub_store(tmp_path)
     runner_url, _runner_meta = _full_runner_store(tmp_path)
-    runtime_dir = tmp_path / "runner-runtime"
-    runtime_dir.mkdir()
-    (runtime_dir / "blizzard-runner.toml").write_text(f'db_url = "{runner_url}"\nrunner_id = "runner-local"\n')
+    runtime_dir = _host_dir(tmp_path, runner_url, "rn_01JA0000000000000000000000")
 
     result = _runner().invoke(
         cli,

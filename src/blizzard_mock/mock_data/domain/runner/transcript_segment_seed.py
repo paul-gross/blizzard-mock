@@ -7,6 +7,7 @@ segment is still open.
 
 from __future__ import annotations
 
+import json
 import random
 from datetime import datetime
 
@@ -60,5 +61,23 @@ def compose_transcript_segment(
             "supersedes": None,
             "finalized_at": finalized_at,
             "stamped_at": stamped_at,
+        },
+    )
+
+
+def compose_final_marker(segment: FactRow, *, created_at: datetime, acked_at: datetime | None = None) -> FactRow:
+    """The ``transcript_outbound_buffer`` row buffering the final marker of a finalized ``segment``.
+
+    A finalized segment holds exactly one, so a seeded one carries it for the invariant checker."""
+    segment_id = segment.values["segment_id"]
+    return FactRow(
+        table="transcript_outbound_buffer",
+        values={
+            "segment_id": segment_id,
+            "chunk_id": segment.values["chunk_id"],
+            "final": True,
+            "payload": json.dumps({"segment_id": segment_id}),
+            "created_at": created_at,
+            "acked_at": acked_at,
         },
     )

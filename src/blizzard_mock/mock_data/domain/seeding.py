@@ -35,6 +35,14 @@ RUNNER_IDENTITY_TABLE = "runner_identity"
 #: The column every runner-scoped table of a runner store carries — the id of the runner whose row it is.
 RUNNER_COLUMN = "runner_id"
 
+#: A runner store's outbox counters: one ``(runner_id, lane, last_seq)`` row per runner and lane, the
+#: greatest ``seq`` that lane has issued. Once the store carries it, each outbox row's ``seq`` comes from it.
+OUTBOX_COUNTERS_TABLE = "outbox_counters"
+OUTBOX_SEQ_COLUMN = "seq"
+
+#: Each outbox table and the counter lane its ``seq`` is drawn from.
+OUTBOX_LANES: Mapping[str, str] = {"outbound_buffer": "outbound", "transcript_outbound_buffer": "transcript"}
+
 #: A scope's surrogate key, minted by the writer once the store's ``scopes`` table carries it.
 SCOPES_TABLE = "scopes"
 SCOPE_ID_COLUMN = "scope_id"
@@ -262,8 +270,8 @@ def stamp_rows(
     declaration serving that project on each runner registration whose table carries
     one; and a minted ``scope_id`` on each ``scopes`` row once that table carries the
     column. ``runner_id`` is given only for a runner store: it lands on each row of a
-    runner-scoped table (:func:`is_runner_scoped`); a runner store whose runner never
-    registered passes none, and its rows stay NULL for the runner to stamp when it binds.
+    runner-scoped table (:func:`is_runner_scoped`); a store that can name no runner passes
+    none, refused by :func:`require_runner` where the column is required, else left NULL.
     A value the composer already supplied wins — a nullable ``project_id`` left
     out stays NULL, the tenant-level row it means; a table the schema lacks is passed
     through for the drift guard to name."""
@@ -286,6 +294,48 @@ def stamp_rows(
             extra[SCOPE_ID_COLUMN] = mint_scope_id()
         stamped.append(FactRow(table=row.table, values={**row.values, **extra}) if extra else row)
     return stamped
+
+
+def require_runner(rows: Sequence[FactRow], schema: Mapping[str, ReflectedTable]) -> None:
+    """Refuse a row of a runner-scoped table that requires :data:`RUNNER_COLUMN` and was
+    stamped none — a runner store named by ``--url`` whose runner never registered."""
+    for row in rows:
+        table = schema.get(row.table)
+        if table is None or not is_runner_scoped(row.table, table) or RUNNER_COLUMN in row.values:
+            continue
+        if table.columns[RUNNER_COLUMN].is_required:
+            raise SeedIntegrityError(
+                f"{row.table!r} rows need a runner id, and this runner store names none — pass --dir with the "
+                "host directory (its [[runner]] id), or --runner-id where the verb takes one"
+            )
+
+
+def assign_outbox_seqs(
+    rows: Sequence[FactRow], last_issued: Callable[[str, str], int]
+) -> tuple[list[FactRow], dict[tuple[str, str], int]]:
+    """``rows`` with each outbox row (:data:`OUTBOX_LANES`) that composes no ``seq`` given the
+    next one of its ``(runner_id, lane)``, counting on from ``last_issued(runner_id, lane)``;
+    and the last ``seq`` each touched lane now holds, for the counter to advance to. A ``seq``
+    a composer supplied is kept and counted, so no later row reuses it. Rows must already
+    carry their ``runner_id``; one that does not is passed through."""
+    issued: dict[tuple[str, str], int] = {}
+    assigned: list[FactRow] = []
+    for row in rows:
+        lane = OUTBOX_LANES.get(row.table)
+        runner_id = row.values.get(RUNNER_COLUMN)
+        if lane is None or runner_id is None:
+            assigned.append(row)
+            continue
+        key = (str(runner_id), lane)
+        last = issued[key] if key in issued else last_issued(*key)
+        supplied = row.values.get(OUTBOX_SEQ_COLUMN)
+        if isinstance(supplied, int):
+            issued[key] = max(last, supplied)
+            assigned.append(row)
+            continue
+        issued[key] = last + 1
+        assigned.append(FactRow(table=row.table, values={**row.values, OUTBOX_SEQ_COLUMN: last + 1}))
+    return assigned, issued
 
 
 class ISeedStore(Protocol):

@@ -160,3 +160,17 @@ def test_compose_runner_fleet_is_reproducible_with_the_same_seed() -> None:
     _census_a, fleet_a = _fleet(seed=42)
     _census_b, fleet_b = _fleet(seed=42)
     assert fleet_a.rows == fleet_b.rows
+
+
+def test_every_finalized_segment_buffers_exactly_one_final_marker() -> None:
+    _census, fleet = _fleet()
+    finalized = {
+        str(row.values["segment_id"])
+        for row in _rows_for(fleet.rows, "transcript_segments")
+        if row.values["finalized_at"]
+    }
+    markers = [str(row.values["segment_id"]) for row in _rows_for(fleet.rows, "transcript_outbound_buffer")]
+
+    assert finalized
+    assert sorted(markers) == sorted(finalized)
+    assert all(row.values["final"] is True for row in _rows_for(fleet.rows, "transcript_outbound_buffer"))

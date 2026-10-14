@@ -32,7 +32,10 @@ from blizzard_mock.mock_data.domain.runner.outbound_fact_seed import (
     compose_outbound_fact,
 )
 from blizzard_mock.mock_data.domain.runner.takeover_seed import compose_takeover
-from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import compose_transcript_segment
+from blizzard_mock.mock_data.domain.runner.transcript_segment_seed import (
+    compose_final_marker,
+    compose_transcript_segment,
+)
 from blizzard_mock.mock_data.domain.runner.usage_seed import SPAWN, compose_usage
 
 _RETRIES_MAX = 3
@@ -242,22 +245,23 @@ def compose_runner_fleet(
             recorded_at=now,
         )
     )
-    rows.append(
-        compose_transcript_segment(
-            chunk_id=needs_human_entry.chunk_id,
-            node_id=census.build_node_id,
-            epoch=1,
-            generation=1,
-            lease_id=needs_human_lease.lease_id,
-            session_id=needs_human_session_id,
-            harness_id=CLAUDE_CODE_HARNESS_ID,
-            normalizer_version=_NORMALIZER_VERSION,
-            clock=clock,
-            rng=rng,
-            finalized_at=now,
-            stamped_at=now,
-        )
+    finalized_segment = compose_transcript_segment(
+        chunk_id=needs_human_entry.chunk_id,
+        node_id=census.build_node_id,
+        epoch=1,
+        generation=1,
+        lease_id=needs_human_lease.lease_id,
+        session_id=needs_human_session_id,
+        harness_id=CLAUDE_CODE_HARNESS_ID,
+        normalizer_version=_NORMALIZER_VERSION,
+        clock=clock,
+        rng=rng,
+        finalized_at=now,
+        stamped_at=now,
     )
+    rows.append(finalized_segment)
+    rows.append(compose_final_marker(finalized_segment, created_at=now, acked_at=now))
+
     rows.append(
         compose_outbound_fact(
             kind=ESCALATION_RECORDED,
