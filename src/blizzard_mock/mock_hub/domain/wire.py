@@ -153,6 +153,10 @@ class QuestionView(BaseModel):
     # The return leg: the ``answer.delivered`` fact landed.
     delivered: bool = False
     delivered_at: str | None = None
+    # The asking chunk's project — its id, current slug and display name.
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
 
 
 class HubAdvanceResponse(BaseModel):
