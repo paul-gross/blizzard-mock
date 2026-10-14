@@ -3,7 +3,7 @@
 Reflects the target store's live schema once per invocation (never imports
 ``blizzard``), and writes every row in a single FK-safe transaction — parents
 before children. Rows are stamped with the store's tenant and its project — or, in a
-runner store, its runner — first,
+runner store, its runner, and each outbox row its next counted ``seq`` — first,
 then the drift guard runs; both rule sets live in the domain.
 """
 
@@ -23,10 +23,13 @@ from sqlalchemy import (
     create_engine,
     delete,
     event,
+    func,
     insert,
     not_,
     select,
+    update,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.dml import Delete
 
@@ -42,7 +45,11 @@ from blizzard_mock.mock_data.domain.schema_contract import (
 )
 from blizzard_mock.mock_data.domain.seeding import (
     CLEAR_EVERYTHING,
+    OUTBOX_COUNTERS_TABLE,
+    OUTBOX_LANES,
+    OUTBOX_SEQ_COLUMN,
     PROJECTS_TABLE,
+    RUNNER_COLUMN,
     RUNNER_IDENTITY_TABLE,
     TENANT_COLUMN,
     TENANTS_TABLE,
@@ -54,7 +61,9 @@ from blizzard_mock.mock_data.domain.seeding import (
     SeedIntegrityError,
     TenantRecord,
     TenantResolutionError,
+    assign_outbox_seqs,
     needs_project,
+    require_runner,
     resolve_project,
     resolve_tenant,
     stamp_rows,
@@ -134,6 +143,37 @@ def _delete_outside(table: Table, keep: Mapping[str, object] | None) -> Delete:
     return delete(table).where(not_(and_(*(table.c[column] == value for column, value in keep.items()))))
 
 
+def _allocate_outbox_seqs(conn: Connection, meta: MetaData, rows: Sequence[FactRow]) -> list[FactRow]:
+    """``rows`` with each outbox row's ``seq`` drawn from the store's ``outbox_counters``, whose rows
+    advance in ``conn``'s transaction. A store without the table keeps its autoincrement ``seq``.
+    The count resumes from the greater of the counter and the lane's highest ``seq`` held."""
+    counters = meta.tables.get(OUTBOX_COUNTERS_TABLE)
+    if counters is None:
+        return list(rows)
+    lane_tables = {lane: meta.tables[name] for name, lane in OUTBOX_LANES.items() if name in meta.tables}
+
+    def last_issued(runner_id: str, lane: str) -> int:
+        counted = conn.execute(
+            select(counters.c.last_seq).where(counters.c.runner_id == runner_id, counters.c.lane == lane)
+        ).scalar()
+        table = lane_tables.get(lane)
+        held = (
+            conn.execute(
+                select(func.max(table.c[OUTBOX_SEQ_COLUMN])).where(table.c[RUNNER_COLUMN] == runner_id)
+            ).scalar()
+            if table is not None
+            else None
+        )
+        return max(int(counted or 0), int(held or 0))
+
+    assigned, issued = assign_outbox_seqs(rows, last_issued)
+    for (runner_id, lane), last_seq in issued.items():
+        key = (counters.c.runner_id == runner_id) & (counters.c.lane == lane)
+        if not conn.execute(update(counters).where(key).values(last_seq=last_seq)).rowcount:
+            conn.execute(insert(counters).values(runner_id=runner_id, lane=lane, last_seq=last_seq))
+    return assigned
+
+
 class ReflectedStore:
     """The SQLAlchemy reflection adapter implementing ``ISeedStore``.
 
@@ -142,9 +182,11 @@ class ReflectedStore:
     write or read that touches a tenant-owned table, and only against a store that has
     a ``tenants`` table — so a store from before tenancy writes exactly as it always has.
 
-    ``runner`` names the runner id a runner store's runner-scoped rows are stamped with;
-    unnamed, the id in the store's own identity row, or NULL when its runner never
-    registered. Only a store with a ``runner_identity`` table is a runner store — a hub
+    ``runner`` names the runner id a runner store's runner-scoped rows are stamped with —
+    a host directory's ``[[runner]] id``; unnamed, the id in the store's own identity row.
+    A store whose runner-scoped ``runner_id`` is required refuses rows it cannot stamp; an
+    older one leaves them NULL. Each outbox row's ``seq`` comes from ``outbox_counters``
+    once the store carries it. Only a store with a ``runner_identity`` table is a runner store — a hub
     store's ``runner_id`` columns are never stamped.
     """
 
@@ -227,12 +269,14 @@ class ReflectedStore:
         project_id = self._resolve_project(meta) if needs_project(rows, schema) else None
         runner_id = self._runner_for(meta)
         rows = stamp_rows(rows, schema, tenant_id, self._mint_scope_id, project_id, runner_id)
-        check_drift(schema, rows)
-        by_table: dict[str, list[FactRow]] = {}
-        for row in rows:
-            by_table.setdefault(row.table, []).append(row)
+        require_runner(rows, schema)
         try:
             with self._engine.begin() as conn:
+                rows = _allocate_outbox_seqs(conn, meta, rows)
+                check_drift(schema, rows)
+                by_table: dict[str, list[FactRow]] = {}
+                for row in rows:
+                    by_table.setdefault(row.table, []).append(row)
                 for table in meta.sorted_tables:  # parents before children (FK-safe)
                     for row in by_table.get(table.name, []):
                         conn.execute(insert(table).values(**row.values))

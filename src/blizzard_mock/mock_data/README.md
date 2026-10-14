@@ -42,10 +42,13 @@ where the runner schema differs; a flag the selected store has no column for
 is refused, naming it. `transcript-segment` has no hub counterpart at all.
 Every verb except `scenario fleet` resolves its target store as
 `--url <sqlite path|postgres dsn>` (or `$DATABASE_URL`), or as
-`--dir <runtime dir>` — sugar that reads a hub/runner runtime's
-`blizzard-hub.toml`/`blizzard-runner.toml` `db_url`
-(`internal/runtime_config.py`) and resolves to the same `--url` before the
-same code path runs; only `--url` is spelled out per verb below.
+`--dir <runtime dir>` — sugar that reads a hub or host runtime's
+`blizzard-hub.toml`/`blizzard-host.toml` `db_url`, defaulting to its
+`data/hub.db`/`data/host.db` (`internal/runtime_config.py`; a host whose `data/host.db` does not exist is
+refused, naming `blizzard runner migrate`, never created), and resolves to the
+same `--url` before the same code path runs; only `--url` is spelled out per verb
+below. A runner store named by `--dir` also pins the rows it writes to the host
+file's one `[[runner]] id`.
 `scenario fleet` names two stores at once and so takes none of those three —
 its own entry below owns its flags.
 
@@ -295,9 +298,9 @@ before.
   and `--runner-url|--runner-dir` are each **required explicitly** — neither falls
   back to `$DATABASE_URL`, since one env var cannot name two stores. `--runner-id`
   is required when only `--runner-url` names the runner store; given `--runner-dir`,
-  the pinned id is read from its runner store's identity row (`runner_identity`, which
-  the runner writes at each registration) instead — refused for a runner that has never
-  registered — and the two are mutually exclusive, refused together. A `--runner-id` the
+  the pinned id is read from its host file's one `[[runner]] id` (which `blizzard runner
+  init` writes once the runner joins its hub) instead — refused for a host file with no
+  runner, a runner with no `id`, or several runners — and the two are mutually exclusive, refused together. A `--runner-id` the
   hub store holds no registration for lands one under the `runner-seed` name; a `--runner-dir`
   id it holds none for is refused instead, naming the re-add to run first. A `--chunks` too small for the runner
   half's mirror, or either store target that can't even be opened, is refused
@@ -310,11 +313,11 @@ before.
   byte-identically, sharing one `Clock`/`Random` pair across them. See
   `blizzard-context:/tooling/store-seeding.md`
   for the requirement this composes around — `--runner-dir` has no
-  `blizzard-runner.toml` to resolve `db_url` from, nor an identity row to pin, until the
-  runner has registered with this hub at least once. A reset of the hub store makes the
+  `blizzard-host.toml` to resolve `db_url` from, nor a `[[runner]] id` to pin, until the
+  runner has joined this hub. A reset of the hub store makes the
   runner's token unknown there, so the runner re-adds itself (`blizzard runner init
   --allow-readd`, under a new id) before this verb can pin it; a runner that has not
-  re-registered since still holds the id the reset discarded, which this verb refuses —
+  re-joined (`init --allow-readd`) since still holds the id the reset discarded, which this verb refuses —
   as it refuses an id the runner registered with another hub, whose store
   `--hub-url`/`--hub-dir` should name instead.
   Never clear the mirrored runner's local pause from the panel afterward.
@@ -360,8 +363,12 @@ before.
   carries that column. A runner store — one with a `runner_identity` table — gets its
   runner stamped the same way: each row of a table carrying `runner_id`, the identity
   table aside, takes the id `scenario fleet` pins (`--runner-id`, or `--runner-dir`'s
-  identity row), else the store's own latest identity row. A runner that never
-  registered leaves them `NULL`, for the runner to stamp when it binds. A hub store's
+  `[[runner]] id`) or a `--dir` host file names, else the store's own latest identity
+  row. With none of those, a store whose `runner_id` is required refuses the write;
+  an older store leaves them `NULL`, for the tightening revision to stamp. Each
+  `outbound_buffer`/`transcript_outbound_buffer` row of a store carrying
+  `outbox_counters` takes its `seq` from that runner's lane (`outbound`/`transcript`),
+  advancing the counter in the same transaction, so no issued `seq` is reused. A hub store's
   `runner_id` columns are never stamped. Because all of these are conditional on the column, the same
   composers seed a store from before tenancy or projects and one after them unchanged.
 - **Referential integrity is enforced, not just column shape**: the drift guard above
