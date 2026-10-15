@@ -26,6 +26,7 @@ FastAPI app via uvicorn.
 |---------|------|-----|---------|
 | Bind host | `--host` | `BZ_MOCK_HUB_HOST` | `127.0.0.1` |
 | Bind port | `--port` | `BZ_MOCK_HUB_PORT` | `8421` |
+| Host plane absent | `--no-host-plane` | `BZ_MOCK_HUB_NO_HOST_PLANE=1` | off |
 
 A service-tier test points the real runner's `BZ_HUB_URL` at `http://{host}:{port}`.
 
@@ -257,6 +258,7 @@ to either a sample or a miss.
 | `stale_envelope` | — | `GET /chunks/{id}/envelope` stamps a stale (`latest_epoch-1`) fence, so a completion from it is fenced out (D-007) |
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
 | `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency; `GET /queue/peek` marks the same chunk `blocked`, read without consuming — sticky until cleared |
+| `host_plane_absent` | — | Every route under `/api/fleet/host` answers `404 {"detail": "Not Found"}` — a hub from before hosts; every other route, `POST /api/hosts` included, is unaffected. Sticky until cleared. The startup switch (`--no-host-plane`) does the same for the process's life, surviving `/_levers/reset` and `/_seed/reset` |
 
 Every lever is optionally scoped to one `chunk_id` and may self-expire after
 `remaining` affected requests. The control plane and liveness are exempt from the

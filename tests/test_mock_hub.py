@@ -820,7 +820,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_ten(client: TestClient) -> None:
+def test_lever_catalog_lists_all_eleven(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
@@ -833,6 +833,7 @@ def test_lever_catalog_lists_all_ten(client: TestClient) -> None:
         "stale_envelope",
         "chunk_unknown",
         "dependency_unmet",
+        "host_plane_absent",
     }
 
 

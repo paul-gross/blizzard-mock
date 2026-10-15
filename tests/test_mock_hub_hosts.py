@@ -108,6 +108,8 @@ def test_a_host_retires_a_runner_under_itself_and_no_other(client: FleetClient) 
     assert refused.status_code == 404
     assert retired.status_code == 200, retired.text
     assert retired.json()["runner"]["retired"] is True
+    assert retired.json()["runner"]["connection"] == "never_connected"
+    assert {"online", "added_at", "hub_paused", "retired_at"} <= retired.json()["runner"].keys()
     assert client.get("/api/fleet/host", headers=_bearer(added["token"])).json()["runners"] == []
     assert client.get("/api/fleet/identity", headers=_bearer(mine["token"])).status_code == 401
 
