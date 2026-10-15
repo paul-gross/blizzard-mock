@@ -687,8 +687,8 @@ def retire_host_runner(
     service: Annotated[MockHubService, Depends(get_service)],
 ) -> object:
     """Retire a runner under the calling host; a runner that does not stand under it is ``404``. The mock holds no
-    routes to refuse over or release, so ``force`` changes nothing, and the answer names only the fields the retire
-    sets on the runner."""
+    routes to refuse over or release, so ``force`` changes nothing. The answer is the registry view's required fields
+    and the ones the retire sets — a retired runner is never online."""
     try:
         runner = service.retire_host_runner(host_id=host_id, runner_id=runner_id, by=body.by)
     except UnknownRunner as exc:
@@ -697,7 +697,12 @@ def retire_host_runner(
         "runner": {
             "runner_id": runner.runner_id,
             "runner_name": runner.name,
+            "connection": "never_connected" if runner.never_connected() else "offline",
+            "online": False,
+            "added_at": runner.added_at.isoformat(),
+            "hub_paused": runner.paused,
             "retired": True,
+            "retired_at": runner.retired_at.isoformat() if runner.retired_at is not None else None,
             "retired_by": runner.retired_by,
             "host_id": runner.host_id,
         },
