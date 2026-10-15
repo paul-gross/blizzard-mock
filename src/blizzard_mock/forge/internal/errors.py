@@ -1,6 +1,6 @@
 """The injected git-error factory — wraps GitPython failures once, at ERROR.
 
-Follows the factory-injected error pattern (``exemplars/python/repo_pattern.py``):
+Follows the factory-injected error pattern (``blizzard/src/blizzard/hub/store/errors.py``):
 library exceptions become domain ``GitError``/``NotMergeable`` at the boundary,
 logged exactly once here, so callers never re-log.
 """
