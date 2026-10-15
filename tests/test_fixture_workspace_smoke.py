@@ -7,8 +7,7 @@ Two tiers:
   minting structure is asserted without the slow real ``winter ws init``.
 * **Component** — the genuine end-to-end: real git + real ``winter ws init`` +
   real env creation against a local winter source. Slow and environment-bound, so
-  it is skipped unless a winter source is discoverable (``$BLIZZARD_MOCK_WINTER_SOURCE``
-  or an enclosing winter workspace).
+  it is skipped unless ``$BLIZZARD_MOCK_WINTER_SOURCE`` names a local winter workspace.
 """
 
 from __future__ import annotations
@@ -183,6 +182,44 @@ def test_cli_path_prints_workspace_and_origins(tmp_path: Path) -> None:
     assert ws.exit_code == 0
     assert ws.output.strip().endswith("/alpha/workspace")
     assert origins.output.strip().endswith("/alpha/origins")
+
+
+def test_mint_without_a_winter_source_is_winter_free(tmp_path: Path) -> None:
+    svc = FixtureWorkspaceService(git=SubprocessGit(), scratch_root=tmp_path / "scratch")
+    layout = svc.mint("alpha")
+
+    for repo in ("toy-api", "toy-web"):
+        assert layout.origin_path(repo).is_dir()
+    assert layout.workspace.is_dir()
+    assert list(layout.workspace.iterdir()) == []
+    assert json.loads(layout.manifest.read_text())["winter_source"] is None
+
+
+def test_cli_mint_without_a_source_is_winter_free_even_inside_a_winter_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("BLIZZARD_MOCK_WINTER_SOURCE", raising=False)
+    monkeypatch.chdir(_make_winter_source(tmp_path))
+    result = CliRunner().invoke(cli.main, ["mint", "--env", "alpha", "--scratch-root", str(tmp_path / "s")])
+    assert result.exit_code == 0, result.output
+    workspace = Path(result.output.strip())
+    assert workspace.is_dir() and list(workspace.iterdir()) == []
+
+
+def test_cli_winter_source_flag_beats_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BLIZZARD_MOCK_WINTER_SOURCE", str(tmp_path / "from-env"))
+    assert cli._resolve_winter_source(str(tmp_path / "from-flag")) == (tmp_path / "from-flag").resolve()
+    assert cli._resolve_winter_source(None) == (tmp_path / "from-env").resolve()
+    monkeypatch.delenv("BLIZZARD_MOCK_WINTER_SOURCE")
+    assert cli._resolve_winter_source(None) is None
+
+
+def test_mint_with_a_winter_source_but_no_cli_refuses(tmp_path: Path) -> None:
+    svc = FixtureWorkspaceService(
+        git=SubprocessGit(), scratch_root=tmp_path / "scratch", winter_source=_make_winter_source(tmp_path)
+    )
+    with pytest.raises(FixtureError, match="winter CLI"):
+        svc.mint("alpha")
 
 
 def test_cli_help_lists_verbs() -> None:

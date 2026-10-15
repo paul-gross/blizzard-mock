@@ -2,7 +2,9 @@
 
 The composition root: resolves scratch root, env, and local winter source from
 flags / environment (``--env``, ``--scratch-root``, ``--winter-source``) and
-wires the adapters into :class:`FixtureWorkspaceService`.
+wires the adapters into :class:`FixtureWorkspaceService`. The fixture is
+winter-free unless a winter source is named explicitly; the winter adapter is
+constructed only then.
 """
 
 from __future__ import annotations
@@ -42,37 +44,32 @@ def _resolve_winter_source(explicit: str | None) -> Path | None:
     raw = explicit or os.environ.get(_ENV_WINTER)
     if raw:
         return Path(raw).expanduser().resolve()
-    return _discover_winter_source(Path.cwd())
-
-
-def _discover_winter_source(start: Path) -> Path | None:
-    """Walk up from ``start`` for a local winter workspace (``.winter/config.toml`` + ``tools/winter-cli``)."""
-    for directory in [start, *start.parents]:
-        if (directory / ".winter" / "config.toml").is_file() and (directory / "tools" / "winter-cli").is_dir():
-            return directory
     return None
 
 
 def _service(scratch_root: str | None, winter_source: str | None) -> FixtureWorkspaceService:
+    source = _resolve_winter_source(winter_source)
     return FixtureWorkspaceService(
         git=SubprocessGit(),
-        winter=SubprocessWinterCli(),
+        winter=SubprocessWinterCli() if source is not None else None,
         scratch_root=_resolve_scratch_root(scratch_root),
-        winter_source=_resolve_winter_source(winter_source),
+        winter_source=source,
     )
 
 
 _env_opt = click.option("--env", "env_", default=None, help="Feature env keying the fixture (default $WINTER_ENV).")
 _scratch_opt = click.option("--scratch-root", default=None, help=f"Fixtures base dir (default ${_ENV_SCRATCH}).")
 _winter_opt = click.option(
-    "--winter-source", default=None, help=f"Local winter workspace to clone (default ${_ENV_WINTER})."
+    "--winter-source",
+    default=None,
+    help=f"Local winter workspace to clone (default ${_ENV_WINTER}; none gives a winter-free fixture).",
 )
 
 
 @click.group()
 @click.version_option(package_name="blizzard-mock")
 def main() -> None:
-    """Mint and manage disposable, real winter fixture workspaces."""
+    """Mint and manage disposable fixture workspaces (winter-free unless a winter source is given)."""
 
 
 @main.command()
@@ -80,7 +77,7 @@ def main() -> None:
 @_scratch_opt
 @_winter_opt
 def mint(env_: str | None, scratch_root: str | None, winter_source: str | None) -> None:
-    """Mint a fresh fixture workspace (bare origins + real winter workspace + ws init)."""
+    """Mint a fresh fixture workspace (bare origins; with a winter source, also a real winter workspace + ws init)."""
     try:
         layout = _service(scratch_root, winter_source).mint(_resolve_env(env_))
     except FixtureError as exc:

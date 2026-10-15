@@ -27,8 +27,8 @@ and merges — with no in-process shortcuts:
    git ancestry in the bare origin, and the forge's merged-check (``204``).
 
 Slow and environment-bound (a real ``winter ws init``, a real forge subprocess),
-so it is marked ``e2e`` and skipped when no local winter source is discoverable
-(``$BLIZZARD_MOCK_WINTER_SOURCE`` or an enclosing winter workspace).
+so it is marked ``e2e`` and skipped unless ``$BLIZZARD_MOCK_WINTER_SOURCE`` names a
+local winter workspace.
 
 Reproduce with::
 

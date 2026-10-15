@@ -49,14 +49,20 @@ class IWinterCli(Protocol):
 
 
 class FixtureWorkspaceService:
-    """Mints, tears down, and locates per-env fixture workspaces."""
+    """Mints, tears down, and locates per-env fixture workspaces.
+
+    Winter-free by default: ``mint`` produces the seeded bare origins and an empty
+    ``workspace/`` directory. Giving a ``winter_source`` (and the ``winter`` seam to
+    drive it) additionally clones the framework into ``workspace/`` and runs
+    ``ws init`` against the origins.
+    """
 
     def __init__(
         self,
         *,
         git: IGit,
-        winter: IWinterCli,
         scratch_root: Path,
+        winter: IWinterCli | None = None,
         winter_source: Path | None = None,
         clock: Callable[[], datetime] | None = None,
         repos: Sequence[RepoSeed] = TOY_REPOS,
@@ -84,16 +90,15 @@ class FixtureWorkspaceService:
                 f"fixture for env {env!r} already exists at {layout.root} — "
                 f"use `reset` to re-mint from clean, or `destroy` first"
             )
-        if self._winter_source is None:
-            raise FixtureError(
-                "no winter source configured — pass --winter-source, set "
-                "BLIZZARD_MOCK_WINTER_SOURCE, or run from inside a winter workspace"
-            )
-        if not (self._winter_source / "tools" / "winter-cli").is_dir():
-            raise FixtureError(
-                f"winter source {self._winter_source} has no tools/winter-cli — "
-                f"expected a local winter workspace whose committed master ships the CLI"
-            )
+        winter_source = self._winter_source
+        if winter_source is not None:
+            if self._winter is None:
+                raise FixtureError("a winter source needs a winter CLI to drive it")
+            if not (winter_source / "tools" / "winter-cli").is_dir():
+                raise FixtureError(
+                    f"winter source {winter_source} has no tools/winter-cli — "
+                    f"expected a local winter workspace whose committed master ships the CLI"
+                )
 
         layout.origins.mkdir(parents=True, exist_ok=True)
         for repo in self._repos:
@@ -101,13 +106,16 @@ class FixtureWorkspaceService:
             self._git.init_bare(bare)
             self._git.seed_repo(bare, repo.files, repo.message)
 
-        # The winter framework comes from a LOCAL source's committed master — no
-        # network; we replace the cloned config with our own.
-        self._git.clone_local(self._winter_source, layout.workspace)
-        self._write_config(layout)
-
-        self._winter.ensure_ready(layout.workspace)
-        self._winter.run(layout.workspace, ["ws", "init"])
+        if winter_source is None:
+            layout.workspace.mkdir(parents=True, exist_ok=True)
+        else:
+            # The winter framework comes from a LOCAL source's committed master — no
+            # network; we replace the cloned config with our own.
+            self._git.clone_local(winter_source, layout.workspace)
+            self._write_config(layout)
+            assert self._winter is not None
+            self._winter.ensure_ready(layout.workspace)
+            self._winter.run(layout.workspace, ["ws", "init"])
 
         self._write_manifest(layout)
         return layout
@@ -148,7 +156,7 @@ class FixtureWorkspaceService:
             "root": str(layout.root),
             "workspace": str(layout.workspace),
             "origins": str(layout.origins),
-            "winter_source": str(self._winter_source),
+            "winter_source": None if self._winter_source is None else str(self._winter_source),
             "repos": [
                 {
                     "name": repo.name,
