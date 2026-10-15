@@ -299,6 +299,6 @@ def _new_document(session_id: str, cwd: Path, *, title: str, parent_id: str | No
 
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
-# ``blizzard-context:/exemplars/python/repo_pattern.py`` documents.
+# ``blizzard/exemplars/python/exemplar/hub/store/internal/permit_store.py`` documents.
 def _conforms_transcript_writer(x: OpenCodeTranscriptWriter) -> ITranscriptWriter:
     return x

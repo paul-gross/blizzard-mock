@@ -195,6 +195,6 @@ def build_hook_runner(
 
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
-# ``blizzard-context:/exemplars/python/repo_pattern.py`` documents.
+# ``blizzard/exemplars/python/exemplar/hub/store/internal/permit_store.py`` documents.
 def _conforms_hook_runner(x: SettingsHookRunner) -> IHookRunner:
     return x
