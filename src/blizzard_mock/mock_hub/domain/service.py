@@ -2072,6 +2072,7 @@ class MockHubService:
             raise ChunkNotFound(f"unknown chunk {chunk_id}")
 
     def _question_view(self, question: QuestionState) -> QuestionView:
+        chunk = self._state.get_chunk(question.chunk_id)
         return QuestionView(
             question_id=question.question_id,
             chunk_id=question.chunk_id,
@@ -2090,6 +2091,7 @@ class MockHubService:
             answered_at=question.answered_at,
             delivered=question.delivered,
             delivered_at=question.delivered_at,
+            **(self._project_fields(chunk.project_id) if chunk is not None else {}),
         )
 
     def _advance(self, chunk: ChunkState, target: str) -> ApplyResponse:
