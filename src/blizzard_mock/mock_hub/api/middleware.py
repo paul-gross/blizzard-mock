@@ -1,7 +1,8 @@
 """Transport-edge lever middleware — plus request capture.
 
-Four levers: ``unreachable``/``unreachable_transcripts`` answer 503 (every route / the
-transcripts route alone); ``delay``/``delay_transcripts`` sleep first, scoped the same
+``host_plane_absent`` (or the startup switch) answers every ``/api/fleet/host`` route a
+route-missing 404. Four more levers: ``unreachable``/``unreachable_transcripts`` answer
+503 (every route / the transcripts route alone); ``delay``/``delay_transcripts`` sleep first, scoped the same
 way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware`` records every
 ``/api/*`` request."""
 
@@ -16,6 +17,8 @@ from starlette.responses import JSONResponse, Response
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import HubLever
+
+HOST_PLANE_PREFIX = "/api/fleet/host"
 
 _EXEMPT_PREFIXES = ("/_levers", "/_seed", "/_captured", "/api/health", "/api/ready", "/docs", "/openapi.json")
 
@@ -32,18 +35,28 @@ def _chunk_from_path(path: str) -> str | None:
     return None
 
 
+def _on_host_plane(path: str) -> bool:
+    return path == HOST_PLANE_PREFIX or path.startswith(HOST_PLANE_PREFIX + "/")
+
+
 class HubLeverMiddleware(BaseHTTPMiddleware):
     """Applies the transport-edge levers held in ``app.state.levers``."""
 
-    def __init__(self, app: object, levers: ILeverStore) -> None:
+    def __init__(self, app: object, levers: ILeverStore, *, host_plane_absent: bool = False) -> None:
         super().__init__(app)  # type: ignore[arg-type]
         self._levers = levers
+        self._host_plane_absent = host_plane_absent
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
             return await call_next(request)
         chunk_id = _chunk_from_path(path)
+
+        if _on_host_plane(path) and (
+            self._host_plane_absent or self._levers.find(HubLever.HOST_PLANE_ABSENT.value, None) is not None
+        ):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
         unreachable = self._levers.find(HubLever.UNREACHABLE.value, chunk_id)
         if unreachable is not None:

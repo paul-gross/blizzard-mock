@@ -43,6 +43,9 @@ class HubLever(StrEnum):
     #: unmet dependency — sticky until cleared, mirroring the real hub's
     #: standing edge rather than a one-shot fact.
     DEPENDENCY_UNMET = "dependency_unmet"
+    #: Every route under ``/api/fleet/host`` answers a route-missing 404 — a hub from before
+    #: hosts existed. Every other route, ``POST /api/hosts`` included, is unaffected.
+    HOST_PLANE_ABSENT = "host_plane_absent"
 
 
 CATALOG: dict[str, str] = {
@@ -61,5 +64,8 @@ CATALOG: dict[str, str] = {
     HubLever.CHUNK_UNKNOWN.value: "GET chunk/envelope 404s as an unknown chunk — the runner's env-release trigger",
     HubLever.DEPENDENCY_UNMET.value: (
         "POST /routes denies the claim citing payload.prerequisite_chunk_id as the unmet dependency (sticky)"
+    ),
+    HubLever.HOST_PLANE_ABSENT.value: (
+        "every /api/fleet/host route 404s as a missing route — a hub from before hosts (sticky)"
     ),
 }
