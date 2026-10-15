@@ -14,8 +14,8 @@ from pathlib import Path
 @dataclass(frozen=True)
 class FixtureLayout:
     """The resolved on-disk layout of one per-env fixture workspace: ``origins/``
-    (bare git origins), ``workspace/`` (a real winter workspace root), and
-    ``fixture.json``, under a per-env scratch path.
+    (bare git origins), ``workspace/`` (empty, or a real winter workspace root when
+    minted with a winter source), and ``fixture.json``, under a per-env scratch path.
     """
 
     env: str

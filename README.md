@@ -20,7 +20,7 @@ Each package is owned by one component (screaming architecture,
 | ------------------------------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`forge`](src/blizzard_mock/forge/README.md)                                   | `blizzard-mock-forge`                         | Mock GitHub forge — the work-source and delivery seams over one vendor surface, backed by bare git repos.                                                                      |
 | [`harness`](src/blizzard_mock/harness/README.md)                               | `mock-claude-code`, `mock-codex`, `mock-opencode` | Mock coding-harness engine — *the prompt is the program*: one shared `exec()` engine behind the per-harness CLI and wire facades the real adapters are tested against.     |
-| [`fixture_workspace`](src/blizzard_mock/fixture_workspace/README.md)           | `blizzard-mock-fixture`                       | Fixture-workspace scaffold — mints bare `file://` origins plus a real winter workspace for the runner-under-test to drive.                                                     |
+| [`fixture_workspace`](src/blizzard_mock/fixture_workspace/README.md)           | `blizzard-mock-fixture`                       | Fixture-workspace scaffold — mints bare `file://` origins (winter-free by default; a real winter workspace on request) for the runner-under-test to drive.                                                     |
 | [`mock_hub`](src/blizzard_mock/mock_hub/README.md)                             | `blizzard-mock-hub`                           | The subset of the hub API a runner consumes, stateful, mirrored **without importing `blizzard`** — so the real runner can be built and service-tested against it.              |
 | [`mock_runner`](src/blizzard_mock/mock_runner/README.md)                       | `blizzard-mock-runner`                        | The counterpart for the hub. The real runner is outbound-only, so this one is a *driver*, not a server: it performs register → peek → claim → complete, and its levers distort those calls. |
 | [`idp`](src/blizzard_mock/idp/README.md)                                       | `blizzard-mock-idp`                           | Stub OAuth identity provider — generic OIDC and GitHub-style OAuth2 at one origin, with no login UI to drive.                                                                  |
@@ -89,5 +89,4 @@ over HTTP, the harness over its façade CLI, git over real `file://` pushes and 
 uv run pytest -m e2e
 ```
 
-It skips when no local winter source is discoverable (an enclosing winter workspace, or
-`$BLIZZARD_MOCK_WINTER_SOURCE`).
+It skips unless `$BLIZZARD_MOCK_WINTER_SOURCE` names a local winter workspace.
