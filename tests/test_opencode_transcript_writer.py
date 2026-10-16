@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades._opencode_transcript import OpenCodeTranscriptWriter, document_path
 
@@ -189,3 +191,12 @@ def test_a_task_id_continues_the_same_child_document() -> None:
 
         child = _read(document_path(tmp_path, "ses_kid"))
         assert [m["info"]["role"] for m in child["messages"]] == ["user", "assistant", "user", "assistant"]
+
+
+@pytest.mark.parametrize("malformed", ["not a list", {"tool": "read"}, 7])
+def test_a_malformed_child_tool_calls_input_raises_naming_the_key(tmp_path: Path, malformed: object) -> None:
+    """A real check, not an ``assert`` — ``python -O`` must not let the input through."""
+    writer = OpenCodeTranscriptWriter(session_id="sess-bad", root=tmp_path, cwd=tmp_path)
+    writer.record_user("go")
+    with pytest.raises(ValueError, match="child_tool_calls"):
+        writer.record_tool_call("task", {"prompt": "dig in", "child_tool_calls": malformed})

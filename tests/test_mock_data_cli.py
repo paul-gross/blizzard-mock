@@ -3415,6 +3415,40 @@ def test_create_runner_pause_store_runner_dir_stamps_the_host_files_runner(tmp_p
     assert [r.runner_id for r in rows] == ["rn_01JA0000000000000000000000"]
 
 
+def test_create_runner_pause_store_runner_dir_refuses_a_runner_the_identity_row_disagrees_with(tmp_path: Path) -> None:
+    """A host file's ``[[runner]] id`` that differs from the store's identity row is refused, nothing written."""
+    url = f"sqlite:///{tmp_path / 'host.db'}"
+    meta = MetaData()
+    identity = Table(
+        "runner_identity", meta, Column("id", Integer, primary_key=True), Column("runner_id", String, nullable=False)
+    )
+    Table(
+        "local_pause_facts",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("paused", Boolean, nullable=False),
+        Column("set_at", DateTime, nullable=False),
+        Column("set_by", String, nullable=False),
+        Column("reason", String, nullable=True),
+        Column("runner_id", String, nullable=False),
+    )
+    engine = create_engine(url)
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(identity).values(runner_id="rn_01JA0000000000000000000000"))
+    runtime_dir = _host_dir(tmp_path, url, "rn_01JB0000000000000000000000")
+
+    result = _runner().invoke(
+        cli, ["create", "runner-pause", "--store", "runner", "--dir", str(runtime_dir), "--local"]
+    )
+
+    assert result.exit_code != 0
+    assert "rn_01JB0000000000000000000000" in result.output
+    assert "rn_01JA0000000000000000000000" in result.output
+    with engine.begin() as conn:
+        assert conn.execute(select(_table(meta, "local_pause_facts"))).all() == []
+
+
 def test_create_runner_pause_store_runner_fleet_is_rejected(tmp_path: Path) -> None:
     """The runner store carries no fleet-brake mirror of its own — ``--fleet`` only means
     something against ``--store hub``."""

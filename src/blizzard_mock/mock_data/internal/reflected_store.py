@@ -58,6 +58,7 @@ from blizzard_mock.mock_data.domain.seeding import (
     ProjectResolutionError,
     ResetBoundary,
     ResetSummary,
+    RunnerResolutionError,
     SeedIntegrityError,
     TenantRecord,
     TenantResolutionError,
@@ -184,6 +185,7 @@ class ReflectedStore:
 
     ``runner`` names the runner id a runner store's runner-scoped rows are stamped with —
     a host directory's ``[[runner]] id``; unnamed, the id in the store's own identity row.
+    A name that differs from a registered identity row is refused.
     A store whose runner-scoped ``runner_id`` is required refuses rows it cannot stamp; an
     older one leaves them NULL. Each outbox row's ``seq`` comes from ``outbox_counters``
     once the store carries it. Only a store with a ``runner_identity`` table is a runner store — a hub
@@ -250,12 +252,19 @@ class ReflectedStore:
 
     def _runner_for(self, meta: MetaData) -> str | None:
         """The runner id a runner store's rows are stamped with; ``None`` in a hub store,
-        and in a runner store whose runner never registered and was named none."""
+        and in a runner store whose runner never registered and was named none. Raises
+        :class:`RunnerResolutionError` when the named runner differs from a registered identity row."""
         if RUNNER_IDENTITY_TABLE not in meta.tables:
             return None
-        if self._named_runner is not None:
-            return self._named_runner
-        return read_identity_runner_id(self._engine)
+        registered = read_identity_runner_id(self._engine)
+        if self._named_runner is None:
+            return registered
+        if registered is not None and registered != self._named_runner:
+            raise RunnerResolutionError(
+                f"the named runner {self._named_runner!r} disagrees with this store's identity row, "
+                f"{registered!r} — rows stamped with an id the runner never sees"
+            )
+        return self._named_runner
 
     def _mint_scope_id(self) -> str:
         return mint(SCOPE_PREFIX, SystemClock(), self._scope_rng)
