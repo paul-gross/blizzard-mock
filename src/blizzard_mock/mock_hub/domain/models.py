@@ -50,6 +50,14 @@ TERMINAL_STATUSES = frozenset({ChunkStatus.STOPPED, ChunkStatus.DONE})
 #: The unclaimed statuses deletion and a graph re-pin admit (mirrors ``chunk_status.PRE_CLAIM_STATUSES``).
 PRE_CLAIM_STATUSES = frozenset({ChunkStatus.NOT_READY, ChunkStatus.READY})
 
+
+class ChunkDeleteRefusal(StrEnum):
+    """Why a delete would be refused (mirrors the real ``chunk_status.ChunkDeleteRefusal``)."""
+
+    STATUS = "status"
+    DEPENDENTS = "dependents"
+
+
 #: The statuses an operator pause is legal from (mirrors the real ``ChunkVerb.PAUSE`` legality).
 PAUSABLE_STATUSES = frozenset(ChunkStatus) - TERMINAL_STATUSES - {ChunkStatus.DELIVERING}
 

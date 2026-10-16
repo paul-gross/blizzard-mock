@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from blizzard_mock.mock_hub.domain.models import (
     ApplyOutcome,
+    ChunkDeleteRefusal,
     Executor,
     GardenProposalClosureKind,
     GardenProposalItemOutcome,
@@ -188,6 +189,8 @@ class ChunkDetail(BaseModel):
     status_if_paused: str | None = None
     completable: bool = False
     deletable: bool = False
+    delete_refusal: ChunkDeleteRefusal | None = None
+    promotable: bool = False
     graph_editable: bool = False
     terminal: bool = False
     current_node_terminal: bool = False
