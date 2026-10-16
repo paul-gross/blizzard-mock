@@ -101,6 +101,7 @@ from blizzard_mock.mock_data.domain.seeding import (
     CLEAR_EVERYTHING,
     HUB_GLOBAL_TABLES,
     ProjectResolutionError,
+    RunnerResolutionError,
     SeedIntegrityError,
     SeedService,
     TenantResolutionError,
@@ -135,6 +136,7 @@ _COMPOSITION_ERRORS = (
     ScenarioCompositionError,
     RunnerFleetCompositionError,
     GardenProposalCompositionError,
+    RunnerResolutionError,
     TenantResolutionError,
     ProjectResolutionError,
 )

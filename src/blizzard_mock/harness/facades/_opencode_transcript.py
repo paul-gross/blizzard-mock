@@ -143,7 +143,10 @@ class OpenCodeTranscriptWriter:
             child_id = str(tool_input.get("task_id") or _new_id("ses"))
             state["metadata"] = {"parentSessionId": self._session_id, "sessionId": child_id, "truncated": False}
             child_calls = tool_input.get(CHILD_TOOL_CALLS_KEY) or []
-            assert isinstance(child_calls, list)
+            if not isinstance(child_calls, list):
+                raise ValueError(
+                    f"{CHILD_TOOL_CALLS_KEY!r} must be a list of tool calls, got {type(child_calls).__name__}"
+                )
             self._write_child_session(child_id, recorded, child_calls, started_at=started)
         part = self._new_part(message, {"type": "tool", "callID": call_id, "tool": name, "state": state})
         message["parts"].append(part)

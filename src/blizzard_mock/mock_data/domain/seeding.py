@@ -146,6 +146,11 @@ class TenantResolutionError(Exception):
     has no tenants. The message lists the tenants to choose from."""
 
 
+class RunnerResolutionError(Exception):
+    """The runner id a runner store's rows are stamped with can't be settled: the named
+    runner disagrees with the id in the store's own identity row."""
+
+
 @dataclass(frozen=True)
 class TenantRecord:
     """One tenant a store holds — its id, and the name a person reads beside it."""

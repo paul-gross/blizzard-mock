@@ -34,6 +34,7 @@ from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 from blizzard_mock.mock_data.domain.seeding import (
     HUB_GLOBAL_TABLES,
     ProjectResolutionError,
+    RunnerResolutionError,
     SeedIntegrityError,
     TenantResolutionError,
     hub_reset_boundary,
@@ -563,8 +564,15 @@ def test_write_stamps_a_runner_stores_latest_identity_on_its_scoped_rows(tmp_pat
     assert _pause_runner_ids(url, meta) == [_RUNNER_B]
 
 
-def test_write_stamps_the_named_runner_over_the_identity(tmp_path: Path) -> None:
+def test_write_refuses_a_named_runner_that_disagrees_with_the_identity(tmp_path: Path) -> None:
     url, meta = _runner_store(tmp_path, _RUNNER_A)
+    with pytest.raises(RunnerResolutionError, match=_RUNNER_B):
+        ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_pause()])
+    assert _pause_runner_ids(url, meta) == []
+
+
+def test_write_stamps_the_named_runner_of_a_never_registered_store(tmp_path: Path) -> None:
+    url, meta = _runner_store(tmp_path)
     ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write([_pause()])
     assert _pause_runner_ids(url, meta) == [_RUNNER_B]
 
@@ -584,7 +592,7 @@ def test_write_keeps_a_runner_the_row_already_carries(tmp_path: Path) -> None:
 
 def test_write_never_stamps_the_identity_table_itself(tmp_path: Path) -> None:
     url, meta = _runner_store(tmp_path, _RUNNER_A)
-    ReflectedStore(create_seed_engine(url), runner=_RUNNER_B).write(
+    ReflectedStore(create_seed_engine(url), runner=_RUNNER_A).write(
         [FactRow(table="runner_identity", values={"runner_id": _RUNNER_A, "name": "again"})]
     )
     with create_engine(url).begin() as conn:
