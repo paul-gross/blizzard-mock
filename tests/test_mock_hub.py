@@ -3934,6 +3934,26 @@ def test_chunk_detail_derives_each_seeded_status_affordances(client: TestClient,
     assert _affordances(client.get(f"/api/fleet/chunks/{chunk_id}").json()) == expected
 
 
+@pytest.mark.parametrize(
+    ("status", "delete_refusal", "promotable"),
+    [
+        ("not_ready", None, True),
+        ("ready", None, False),
+        ("paused", "status", False),
+        ("needs_human", "status", False),
+        ("delivering", "status", False),
+    ],
+)
+def test_chunk_detail_derives_the_delete_refusal_and_promotable_from_the_seeded_status(
+    client: TestClient, status: str, delete_refusal: str | None, promotable: bool
+) -> None:
+    chunk_id = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()["chunk_id"]
+
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+
+    assert (detail["delete_refusal"], detail["promotable"]) == (delete_refusal, promotable)
+
+
 def test_chunk_detail_of_a_claimed_chunk_is_no_longer_deletable_or_graph_editable(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)

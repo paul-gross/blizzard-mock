@@ -34,6 +34,7 @@ from blizzard_mock.mock_hub.domain.models import (
     AnalyticsCountRowSpec,
     AnalyticsSpendRowSpec,
     ApplyOutcome,
+    ChunkDeleteRefusal,
     ChunkSpec,
     ChunkState,
     ChunkStatus,
@@ -726,6 +727,10 @@ class MockHubService:
             status_if_paused=status_if_paused(status).value,
             completable=status is not ChunkStatus.DONE,
             deletable=status in PRE_CLAIM_STATUSES,
+            # The mock holds no dependency edges, so only the status refusal ever applies.
+            delete_refusal=None if status in PRE_CLAIM_STATUSES else ChunkDeleteRefusal.STATUS,
+            # The mock holds no promotion fact: ``not_ready`` is its one never-promoted status.
+            promotable=status is ChunkStatus.NOT_READY,
             graph_editable=status in PRE_CLAIM_STATUSES and chunk.current_node_id is None,
             terminal=status in TERMINAL_STATUSES,
             current_node_terminal=chunk.current_node_id == TERMINAL,
