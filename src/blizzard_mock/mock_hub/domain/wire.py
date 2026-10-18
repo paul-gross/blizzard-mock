@@ -499,6 +499,7 @@ class WorkItemEntry(BaseModel):
     the mock carries no forge integration."""
 
     source: str
+    slug: str | None = None
     ref: str
     label: str | None = None
     web_url: str | None = None
