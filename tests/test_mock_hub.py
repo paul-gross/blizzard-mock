@@ -820,7 +820,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_eleven(client: TestClient) -> None:
+def test_lever_catalog_lists_all_twelve(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
@@ -834,6 +834,7 @@ def test_lever_catalog_lists_all_eleven(client: TestClient) -> None:
         "chunk_unknown",
         "dependency_unmet",
         "host_plane_absent",
+        "fleet_flags",
     }
 
 
@@ -4160,9 +4161,27 @@ def test_identity_answers_a_current_token_with_its_runner_and_no_side_effects(cl
         "runner_name": "r-claude",
         "tenant_id": FIRST_TENANT_ID,
         "tenant_name": FIRST_TENANT_NAME,
+        "fleet_flags": {},
     }
     still = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"]))
     assert still.status_code == 409  # the identity read registered nothing
+
+
+def test_lever_fleet_flags_sets_the_identity_answers_map_until_replaced_or_cleared(client: TestClient) -> None:
+    added = _add(client, "r-claude")
+    plain = TestClient(client.app)
+
+    def flags() -> object:
+        return plain.get("/api/fleet/identity", headers=_bearer(added["token"])).json()["fleet_flags"]
+
+    assert flags() == {}
+    assert client.post("/_levers/fleet_flags", json={"payload": {"a": True}}).status_code == 200
+    assert flags() == {"a": True}
+    assert flags() == {"a": True}, "sticky: reading does not consume it"
+    client.post("/_levers/fleet_flags", json={"payload": {"b": False}})
+    assert flags() == {"b": False}
+    client.delete("/_levers/fleet_flags")
+    assert flags() == {}
 
 
 def test_me_lists_every_tenant_the_implicit_operator_may_enter_ordered_by_id(client: TestClient) -> None:

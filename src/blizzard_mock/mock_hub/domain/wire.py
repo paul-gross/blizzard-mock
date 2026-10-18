@@ -393,12 +393,13 @@ class HostAddResponse(BaseModel):
 
 class RunnerIdentityView(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerIdentityView`` — whom a bearer token names, and the
-    tenant it was added in, read as registration reads it."""
+    tenant it was added in, read as registration reads it, and the hub's ``fleet`` flags."""
 
     runner_id: str
     runner_name: str
     tenant_id: str | None = None
     tenant_name: str | None = None
+    fleet_flags: dict[str, bool] = Field(default_factory=dict)
 
 
 class RunnerIdentityRefusal(BaseModel):
@@ -498,6 +499,7 @@ class WorkItemEntry(BaseModel):
     the mock carries no forge integration."""
 
     source: str
+    slug: str | None = None
     ref: str
     label: str | None = None
     web_url: str | None = None

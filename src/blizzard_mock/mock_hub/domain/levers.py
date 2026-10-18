@@ -46,6 +46,9 @@ class HubLever(StrEnum):
     #: Every route under ``/api/fleet/host`` answers a route-missing 404 — a hub from before
     #: hosts existed. Every other route, ``POST /api/hosts`` included, is unaffected.
     HOST_PLANE_ABSENT = "host_plane_absent"
+    #: ``GET /api/fleet/identity`` answers ``payload`` as its ``fleet_flags`` — the hub's ``fleet`` flags a runner
+    #: applies on a matched answer. Global and sticky; arming again replaces the map.
+    FLEET_FLAGS = "fleet_flags"
 
 
 CATALOG: dict[str, str] = {
@@ -68,4 +71,5 @@ CATALOG: dict[str, str] = {
     HubLever.HOST_PLANE_ABSENT.value: (
         "every /api/fleet/host route 404s as a missing route — a hub from before hosts (sticky)"
     ),
+    HubLever.FLEET_FLAGS.value: "GET /api/fleet/identity answers payload as its fleet_flags map (sticky, global)",
 }

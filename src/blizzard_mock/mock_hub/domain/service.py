@@ -1720,6 +1720,7 @@ class MockHubService:
                 runner_name=current.name,
                 tenant_id=current.tenant_id,
                 tenant_name=self._tenant_name(current.tenant_id),
+                fleet_flags=self._fleet_flags(),
             )
         revoked_id = self._state.revoked_token_runner_id(token)
         revoked_for = self._state.get_runner(revoked_id) if revoked_id is not None else None
@@ -1727,6 +1728,11 @@ class MockHubService:
             raise RunnerTokenRefused(TOKEN_UNKNOWN)
         reason = TOKEN_RETIRED if revoked_for.retired_at is not None else TOKEN_REVOKED
         raise RunnerTokenRefused(reason, runner_id=revoked_for.runner_id)
+
+    def _fleet_flags(self) -> dict[str, bool]:
+        """The map the ``fleet_flags`` lever holds, or ``{}`` while it is unarmed."""
+        lever = self._levers.find(HubLever.FLEET_FLAGS.value, None)
+        return {name: bool(on) for name, on in lever.payload.items()} if lever is not None else {}
 
     def principal(self, token: str | None) -> str:
         """The id of the runner ``token`` is the current token of — the one identity a fleet call

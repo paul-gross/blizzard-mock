@@ -259,6 +259,7 @@ to either a sample or a miss.
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
 | `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency; `GET /queue/peek` marks the same chunk `blocked`, read without consuming — sticky until cleared |
 | `host_plane_absent` | — | Every route under `/api/fleet/host` answers `404 {"detail": "Not Found"}` — a hub from before hosts; every other route, `POST /api/hosts` included, is unaffected. Sticky until cleared. The startup switch (`--no-host-plane`) does the same for the process's life, surviving `/_levers/reset` and `/_seed/reset` |
+| `fleet_flags` | `{<flag>: bool, …}` | `GET /api/fleet/identity` answers the payload as its `fleet_flags` map; `{}` while unarmed. Global and sticky — arming again replaces the map, `DELETE /_levers/fleet_flags` clears it |
 
 Every lever is optionally scoped to one `chunk_id` and may self-expire after
 `remaining` affected requests. The control plane and liveness are exempt from the
