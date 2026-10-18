@@ -168,6 +168,7 @@ class CompletionBody(BaseModel):
 class DecisionBody(BaseModel):
     from_node_id: str
     epoch: int
+    check_results: list[dict[str, object]] = Field(default_factory=list)
     artifacts: list[dict[str, object]] = Field(default_factory=list)
 
 
