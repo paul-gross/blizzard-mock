@@ -49,8 +49,6 @@ class HubLever(StrEnum):
     #: ``GET /api/fleet/identity`` answers ``payload`` as its ``fleet_flags`` — the hub's ``fleet`` flags a runner
     #: applies on a matched answer. Global and sticky; arming again replaces the map.
     FLEET_FLAGS = "fleet_flags"
-    #: ``POST /api/fleet/runners`` from ``payload.runner_id`` alone answers ``409`` with a ``RunnerVersionRefusal``
-    #: body built from the payload, recording nothing — every other runner registers as usual. Sticky until cleared.
     VERSION_REFUSED = "version_refused"
 
 

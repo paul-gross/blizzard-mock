@@ -442,8 +442,6 @@ class ClaimIncompatible(Exception):
 
 
 class RunnerVersionRefused(Exception):
-    """The ``version_refused`` lever refused the registering runner — the real hub's ``409``, carrying its body."""
-
     def __init__(self, refusal: RunnerVersionRefusal) -> None:
         super().__init__(refusal.detail)
         self.refusal = refusal
@@ -1773,14 +1771,12 @@ class MockHubService:
         subscription: str | None = None,
         version: str | None = None,
     ) -> RunnerRegistrationResponse:
-        """Register the runner ``runner_id`` names — always the caller's own, resolved from its
-        token. A blank or absent ``name`` keeps the held one. ``projects`` replaces the served
-        declaration — ``[]`` with none — and ``None`` keeps it; sent ``bindings`` replace it with their projects, in
-        binding order, and are stored as sent with ``subscription``. Registration doubles as the
-        heartbeat, so it never refuses over the declaration: an entry no project answers to is
-        stored unresolved, and resolved afresh at the next registration that declares it. ``version`` is accepted
-        and never judged: only the ``version_refused`` lever, armed for this runner, refuses it, before anything is
-        recorded."""
+        """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
+        ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
+        keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
+        ``subscription``. Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no
+        project answers to is stored unresolved, and resolved afresh at the next registration that declares it.
+        ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
         self._refuse_version(runner_id, version)
         declared = projects if bindings is None else [b.project for b in bindings]
@@ -1817,8 +1813,6 @@ class MockHubService:
         )
 
     def _refuse_version(self, runner_id: str, version: str | None) -> None:
-        """Raise :class:`RunnerVersionRefused` when the ``version_refused`` lever names ``runner_id``; the payload's
-        ``reason``, ``hub_version``, ``floor`` and ``detail`` fill the body, each defaulting to a too-old refusal."""
         lever = self._levers.find(HubLever.VERSION_REFUSED.value, None)
         if lever is None or lever.payload.get("runner_id") != runner_id:
             return

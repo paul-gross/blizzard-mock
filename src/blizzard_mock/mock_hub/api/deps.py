@@ -205,7 +205,6 @@ class RunnerRegistrationBody(MirroredWireBody):
     bindings: list[RunnerBindingBody] | None = None
     # The host subscription slug every binding spends.
     subscription: str | None = None
-    # The blizzard version the runner runs — accepted and never judged; the ``version_refused`` lever refuses.
     version: str | None = None
 
 
@@ -336,7 +335,6 @@ class HostReportBody(MirroredWireBody):
     redirect_uris: list[str] = Field(default_factory=list)
     workspaces: list[HostWorkspaceBody] = Field(default_factory=list)
     subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(default_factory=list)
-    # The blizzard version the host runs — accepted and never judged, as the real hub never refuses a report.
     version: str | None = None
 
 
