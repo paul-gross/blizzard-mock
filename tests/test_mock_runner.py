@@ -234,6 +234,8 @@ def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[Te
                 "name": DEFAULT_PROJECT_NAME,
             }
         ],
+        "hub_version": "0.2.0",
+        "window": {"floor": "0.2", "ceiling": "0.2"},
     }
     assert service.runner_id == "runner-mock"
 

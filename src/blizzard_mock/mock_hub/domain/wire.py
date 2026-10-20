@@ -325,6 +325,25 @@ class RunnerView(BaseModel):
     subscription_unrostered: bool = False
 
 
+class VersionWindowView(BaseModel):
+    """Mirrors ``blizzard.wire.runner.VersionWindowView`` — the oldest major.minor line the hub admits, and the
+    newest, which is its own."""
+
+    floor: str
+    ceiling: str
+
+
+class RunnerVersionRefusal(BaseModel):
+    """Mirrors ``blizzard.wire.runner.RunnerVersionRefusal`` — registration's typed 409. ``reason`` is one of
+    ``too-old``/``too-new``/``unversioned``; ``runner_version`` is ``None`` when the runner reported none."""
+
+    reason: str
+    runner_version: str | None = None
+    hub_version: str
+    floor: str
+    detail: str
+
+
 class RunnerRegistrationResponse(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerRegistrationResponse`` — the id the caller's token
     names, the name the registration recorded, whether it was the first since the add, and the
@@ -345,6 +364,10 @@ class RunnerRegistrationResponse(BaseModel):
     bindings: list[RunnerBindingView] | None = None
     subscription: str | None = None
     subscription_unrostered: bool = False
+    # The mock hub's own version and the window it admits under; the real model leaves both optional for a hub
+    # that predates the handshake.
+    hub_version: str | None = None
+    window: VersionWindowView | None = None
 
 
 class RunnerAddResponse(BaseModel):

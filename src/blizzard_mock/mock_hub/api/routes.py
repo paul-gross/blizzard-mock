@@ -58,6 +58,7 @@ from blizzard_mock.mock_hub.domain.service import (
     RunnerNeverConnected,
     RunnerRetired,
     RunnerTokenRefused,
+    RunnerVersionRefused,
     SystemArtifactNotFound,
     UnknownHost,
     UnknownProjects,
@@ -505,35 +506,40 @@ def register_runner(
         if body.subscriptions is not None
         else None
     )
-    return service.register(
-        runner_id,
-        name=body.name,
-        workspace_id=body.workspace_id,
-        url=body.url,
-        redirect_uris=tuple(body.redirect_uris),
-        env_capacity=body.env_capacity,
-        capabilities=tuple(
-            RunnerCapability(
-                harness_id=c.harness_id,
-                version=c.version,
-                tiers=tuple(c.tiers),
-                default=c.default,
-                available=c.available,
-            )
-            for c in body.capabilities
-        ),
-        subscriptions=subscriptions,
-        gates=tuple(body.gates),
-        projects=body.projects,
-        bindings=(
-            None
-            if body.bindings is None
-            else tuple(
-                RunnerBinding(project=b.project, workspace_id=b.workspace_id, agents=b.agents) for b in body.bindings
-            )
-        ),
-        subscription=body.subscription,
-    )
+    try:
+        return service.register(
+            runner_id,
+            name=body.name,
+            workspace_id=body.workspace_id,
+            url=body.url,
+            redirect_uris=tuple(body.redirect_uris),
+            env_capacity=body.env_capacity,
+            capabilities=tuple(
+                RunnerCapability(
+                    harness_id=c.harness_id,
+                    version=c.version,
+                    tiers=tuple(c.tiers),
+                    default=c.default,
+                    available=c.available,
+                )
+                for c in body.capabilities
+            ),
+            subscriptions=subscriptions,
+            gates=tuple(body.gates),
+            projects=body.projects,
+            bindings=(
+                None
+                if body.bindings is None
+                else tuple(
+                    RunnerBinding(project=b.project, workspace_id=b.workspace_id, agents=b.agents)
+                    for b in body.bindings
+                )
+            ),
+            subscription=body.subscription,
+            version=body.version,
+        )
+    except RunnerVersionRefused as exc:
+        return JSONResponse(status_code=409, content=exc.refusal.model_dump(mode="json"))
 
 
 @fleet_router.get("/runners/{runner_id}")
