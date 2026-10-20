@@ -66,7 +66,7 @@ rest.
 
 ### CI
 
-A PR gate (`.github/workflows/pr.yml`) and a push-to-master gate (`.github/workflows/push.yml`)
+A PR gate (`.github/workflows/pr.yml`, on pull requests into `master` and `release/**`) and a push-to-master gate (`.github/workflows/push.yml`)
 both run the reusable `gate.yml`: a `quality` job (`ruff format --check`, `mise run lint`,
 `mise run typecheck`), a `test` job (`mise run test -- -m "not needs_blizzard"`), and a
 `process-ref-lint` job (`mise run process-ref-lint`). CI deselects the `needs_blizzard`
