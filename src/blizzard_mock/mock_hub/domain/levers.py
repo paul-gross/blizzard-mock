@@ -49,6 +49,7 @@ class HubLever(StrEnum):
     #: ``GET /api/fleet/identity`` answers ``payload`` as its ``fleet_flags`` — the hub's ``fleet`` flags a runner
     #: applies on a matched answer. Global and sticky; arming again replaces the map.
     FLEET_FLAGS = "fleet_flags"
+    VERSION_REFUSED = "version_refused"
 
 
 CATALOG: dict[str, str] = {
@@ -72,4 +73,7 @@ CATALOG: dict[str, str] = {
         "every /api/fleet/host route 404s as a missing route — a hub from before hosts (sticky)"
     ),
     HubLever.FLEET_FLAGS.value: "GET /api/fleet/identity answers payload as its fleet_flags map (sticky, global)",
+    HubLever.VERSION_REFUSED.value: (
+        "POST /api/fleet/runners from payload.runner_id answers 409 RunnerVersionRefusal from the payload (sticky)"
+    ),
 }

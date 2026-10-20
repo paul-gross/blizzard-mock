@@ -325,6 +325,19 @@ class RunnerView(BaseModel):
     subscription_unrostered: bool = False
 
 
+class VersionWindowView(BaseModel):
+    floor: str
+    ceiling: str
+
+
+class RunnerVersionRefusal(BaseModel):
+    reason: str
+    runner_version: str | None = None
+    hub_version: str
+    floor: str
+    detail: str
+
+
 class RunnerRegistrationResponse(BaseModel):
     """Mirrors ``blizzard.wire.runner.RunnerRegistrationResponse`` — the id the caller's token
     names, the name the registration recorded, whether it was the first since the add, and the
@@ -345,6 +358,8 @@ class RunnerRegistrationResponse(BaseModel):
     bindings: list[RunnerBindingView] | None = None
     subscription: str | None = None
     subscription_unrostered: bool = False
+    hub_version: str | None = None
+    window: VersionWindowView | None = None
 
 
 class RunnerAddResponse(BaseModel):

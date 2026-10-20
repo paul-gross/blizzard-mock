@@ -383,6 +383,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
     "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
     "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset()),
+    "RunnerVersionRefusal": ("RunnerVersionRefusal", frozenset()),
     "RunnerBindingView": ("RunnerBindingView", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
     # Scopes are the deployment's global vocabulary in the mock, held in no project.
@@ -391,6 +392,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "SubscriptionUsageView": ("SubscriptionUsageView", frozenset()),
     "SystemArtifactView": ("SystemArtifactView", frozenset()),
     "TranscriptSegmentAck": ("TranscriptSegmentAck", frozenset()),
+    "VersionWindowView": ("VersionWindowView", frozenset()),
     "WorkItemAuthorView": ("WorkItemAuthorView", frozenset()),
     "WorkItemEntry": ("WorkItemEntry", frozenset()),
     "WorkItemsView": ("WorkItemsView", frozenset()),

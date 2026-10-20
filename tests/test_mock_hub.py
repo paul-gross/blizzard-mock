@@ -820,7 +820,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_twelve(client: TestClient) -> None:
+def test_lever_catalog_lists_all_thirteen(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
@@ -835,6 +835,7 @@ def test_lever_catalog_lists_all_twelve(client: TestClient) -> None:
         "dependency_unmet",
         "host_plane_absent",
         "fleet_flags",
+        "version_refused",
     }
 
 
@@ -4106,6 +4107,7 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
         }
     ]
     unbound = {"bindings": None, "subscription": None, "subscription_unrostered": False}
+    unbound |= {"hub_version": "0.2.0", "window": {"floor": "0.2", "ceiling": "0.2"}}
     assert first.json() == {
         "runner_id": added["runner_id"],
         "runner_name": "r-claude",
@@ -4182,6 +4184,41 @@ def test_lever_fleet_flags_sets_the_identity_answers_map_until_replaced_or_clear
     assert flags() == {"b": False}
     client.delete("/_levers/fleet_flags")
     assert flags() == {}
+
+
+def test_lever_version_refused_refuses_the_named_runner_alone_and_records_nothing(client: TestClient) -> None:
+    refused = _add(client, "r-old")
+    admitted = _add(client, "r-new")
+    plain = TestClient(client.app)
+    armed = client.post(
+        "/_levers/version_refused",
+        json={"payload": {"runner_id": refused["runner_id"], "reason": "too-old", "detail": "upgrade r-old"}},
+    )
+    assert armed.status_code == 200
+
+    refusal = plain.post(
+        "/api/fleet/runners", json={"workspace_id": "ws", "version": "0.1.4"}, headers=_bearer(refused["token"])
+    )
+    answer = plain.post(
+        "/api/fleet/runners", json={"workspace_id": "ws", "version": "0.2.1"}, headers=_bearer(admitted["token"])
+    )
+
+    assert refusal.status_code == 409
+    assert refusal.json() == {
+        "reason": "too-old",
+        "runner_version": "0.1.4",
+        "hub_version": "0.2.0",
+        "floor": "0.2",
+        "detail": "upgrade r-old",
+    }
+    unrecorded = plain.get(f"/api/fleet/runners/{refused['runner_id']}", headers=_bearer(refused["token"]))
+    assert unrecorded.status_code == 409, "a refused registration leaves the runner never connected"
+    assert answer.status_code == 201
+    assert answer.json()["hub_version"] == "0.2.0"
+    assert answer.json()["window"] == {"floor": "0.2", "ceiling": "0.2"}
+    client.delete("/_levers/version_refused")
+    healed = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(refused["token"]))
+    assert healed.status_code == 201
 
 
 def test_me_lists_every_tenant_the_implicit_operator_may_enter_ordered_by_id(client: TestClient) -> None:

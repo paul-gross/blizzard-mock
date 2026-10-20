@@ -21,6 +21,7 @@ from blizzard_mock.clock import Clock
 from blizzard_mock.ids import HOST_PREFIX, PROJECT_PREFIX, RUNNER_PREFIX, TENANT_PREFIX, mint
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain import matching
+from blizzard_mock.mock_hub.domain import version as own_version
 from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.models import (
     DEFAULT_PROJECT_NAME,
@@ -109,6 +110,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RunnerFactAck,
     RunnerIdentityView,
     RunnerRegistrationResponse,
+    RunnerVersionRefusal,
     RunnerView,
     ScopeView,
     ServedProjectView,
@@ -437,6 +439,12 @@ class ClaimIncompatible(Exception):
         self.runner_id = runner_id
         self.reason = reason
         self.detail = detail
+
+
+class RunnerVersionRefused(Exception):
+    def __init__(self, refusal: RunnerVersionRefusal) -> None:
+        super().__init__(refusal.detail)
+        self.refusal = refusal
 
 
 class UnknownProjects(Exception):
@@ -1761,14 +1769,16 @@ class MockHubService:
         projects: Sequence[str] | None = None,
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
+        version: str | None = None,
     ) -> RunnerRegistrationResponse:
-        """Register the runner ``runner_id`` names — always the caller's own, resolved from its
-        token. A blank or absent ``name`` keeps the held one. ``projects`` replaces the served
-        declaration — ``[]`` with none — and ``None`` keeps it; sent ``bindings`` replace it with their projects, in
-        binding order, and are stored as sent with ``subscription``. Registration doubles as the
-        heartbeat, so it never refuses over the declaration: an entry no project answers to is
-        stored unresolved, and resolved afresh at the next registration that declares it."""
+        """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
+        ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
+        keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
+        ``subscription``. Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no
+        project answers to is stored unresolved, and resolved afresh at the next registration that declares it.
+        ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
+        self._refuse_version(runner_id, version)
         declared = projects if bindings is None else [b.project for b in bindings]
         declaration = self._declared(tenant_id, declared) if declared is not None else None
         first = self._state.record_registration(
@@ -1798,6 +1808,32 @@ class MockHubService:
             bindings=binding_views,
             subscription=row.subscription,
             subscription_unrostered=unrostered,
+            hub_version=own_version.HUB_VERSION,
+            window=own_version.WINDOW,
+        )
+
+    def _refuse_version(self, runner_id: str, version: str | None) -> None:
+        lever = self._levers.find(HubLever.VERSION_REFUSED.value, None)
+        if lever is None or lever.payload.get("runner_id") != runner_id:
+            return
+        self._levers.consume(lever)
+        payload = lever.payload
+        hub_version = str(payload.get("hub_version", own_version.HUB_VERSION))
+        floor = str(payload.get("floor", own_version.WINDOW.floor))
+        raise RunnerVersionRefused(
+            RunnerVersionRefusal(
+                reason=str(payload.get("reason", "too-old")),
+                runner_version=version,
+                hub_version=hub_version,
+                floor=floor,
+                detail=str(
+                    payload.get(
+                        "detail",
+                        f"runner {version or 'reporting no version'} is outside hub {hub_version}'s window "
+                        f"(floor {floor}); upgrade the runner",
+                    )
+                ),
+            )
         )
 
     def runner_view(self, runner_id: str) -> RunnerView | None:

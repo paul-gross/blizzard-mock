@@ -205,6 +205,7 @@ class RunnerRegistrationBody(MirroredWireBody):
     bindings: list[RunnerBindingBody] | None = None
     # The host subscription slug every binding spends.
     subscription: str | None = None
+    version: str | None = None
 
 
 class RunnerFactBody(BaseModel):
@@ -334,6 +335,7 @@ class HostReportBody(MirroredWireBody):
     redirect_uris: list[str] = Field(default_factory=list)
     workspaces: list[HostWorkspaceBody] = Field(default_factory=list)
     subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(default_factory=list)
+    version: str | None = None
 
 
 class HostRunnerAddBody(MirroredWireBody):
