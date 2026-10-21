@@ -232,6 +232,7 @@ def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[Te
                 "project_id": FIRST_PROJECT_ID,
                 "slug": DEFAULT_PROJECT_SLUG,
                 "name": DEFAULT_PROJECT_NAME,
+                "claimable": False,
             }
         ],
         "hub_version": "0.2.0",
