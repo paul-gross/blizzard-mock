@@ -345,6 +345,8 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "pending",
                 # Fence-relevant on the real side — `Fenced.out` reads it — but the mock
                 # models the fence through `latest_epoch`, with no restart concept to fill it.
+                "requeues",
+                "resolutions",
                 "restarts",
                 "usage",
             }
