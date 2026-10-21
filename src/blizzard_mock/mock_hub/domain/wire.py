@@ -281,6 +281,7 @@ class ServedProjectView(BaseModel):
     project_id: str | None = None
     slug: str | None = None
     name: str | None = None
+    claimable: bool = False
 
 
 class RunnerBindingView(BaseModel):
