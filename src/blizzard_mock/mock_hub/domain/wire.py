@@ -275,8 +275,7 @@ class RunnerCapabilityView(BaseModel):
 class ServedProjectView(BaseModel):
     """One entry of the projects a runner serves — mirrors ``blizzard.wire.runner.ServedProjectView``: the
     ``entry`` as declared, a project id or slug, and the project it resolves to in the runner's tenant;
-    ``project_id``, ``slug`` and ``name`` are ``None`` for an entry no project answers to; ``claimable`` is only set on the real
-    hub's runners read, which the mock does not serve."""
+    ``project_id``, ``slug`` and ``name`` are ``None`` for an entry no project answers to."""
 
     entry: str
     project_id: str | None = None
