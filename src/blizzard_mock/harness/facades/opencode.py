@@ -102,11 +102,9 @@ def _text_event(session_id: str, message_id: str, text: str) -> dict[str, object
 
 def _step_finish_event(session_id: str, message_id: str, text: str, *, billed_zero: bool = False) -> dict[str, object]:
     """A completed model step: deterministic usage/cost synthesized off ``text``'s
-    length, the same illustrative approach ``_usage.py`` already gives Claude Code —
-    a test injecting a desired shape does so the same way every other mock does:
-    through the text the behavior script itself produced (``verdict``'s assessment,
-    an ``ask`` question), not a second knob. ``billed_zero`` reports ``cost: 0`` and
-    keeps the tokens, as a subscription-billed OpenCode does."""
+    length, the same illustrative approach ``_usage.py`` gives Claude Code — a test
+    shapes it through the text the behavior script produced, not a second knob.
+    ``billed_zero`` reports ``cost: 0`` and keeps the tokens, as a subscription does."""
     usage = synthesize_usage_tokens(text)
     return {
         "type": "step_finish",

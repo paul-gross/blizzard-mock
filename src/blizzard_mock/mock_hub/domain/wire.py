@@ -205,15 +205,14 @@ class ChunkDetail(BaseModel):
 
 class ChunkUsageTotalView(ChunkCostSpec):
     """A chunk's derived usage/cost total — mirrors ``blizzard.wire.chunk.ChunkUsageTotalView``;
-    every field is the seeded :class:`ChunkCostSpec`'s, zero when nothing was seeded."""
+    zero when nothing was seeded."""
 
 
 class ChunkStatusView(BaseModel):
     """One chunk's tick-relevant status — mirrors ``blizzard.wire.chunk.ChunkStatusView``,
     the slim batch projection ``GET /api/fleet/chunk-statuses`` returns. Carries only the
     fields the mock can derive from ``ChunkState``; ``pause``/``restart_epochs``/``decision``
-    are omitted entirely, same as :class:`ChunkDetail`'s mirror. ``cost`` is the chunk's
-    seeded total, the real hub's zero total when none was seeded."""
+    are omitted, as in :class:`ChunkDetail`. ``cost`` is the seeded total, else zero."""
 
     chunk_id: str
     status: str
