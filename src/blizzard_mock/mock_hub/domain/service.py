@@ -106,6 +106,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     RunnerAddResponse,
     RunnerBindingView,
     RunnerCapabilityView,
+    RunnerDecliningView,
     RunnerEnrollmentResponse,
     RunnerFactAck,
     RunnerIdentityView,
@@ -1784,14 +1785,15 @@ class MockHubService:
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
         agents: int | None = None,
+        declining: tuple[RunnerDecliningView, ...] = (),
         version: str | None = None,
     ) -> RunnerRegistrationResponse:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
         ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
         keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
-        ``subscription``; ``agents`` is stored as sent too. Registration doubles as the heartbeat, so it never refuses
-        over the declaration: an entry no project answers to is stored unresolved, and resolved afresh at the next
-        registration that declares it.
+        ``subscription``; ``agents`` is stored as sent too; ``declining`` replaces the earlier report whole. Registration doubles as the
+        heartbeat, so it never refuses over the declaration: an entry no project answers to is stored unresolved, and
+        resolved afresh at the next registration that declares it.
         ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
         self._refuse_version(runner_id, version)
@@ -1812,6 +1814,7 @@ class MockHubService:
             bindings=bindings,
             subscription=subscription,
             agents=agents,
+            declining=declining,
         )
         row = self._added(runner_id)
         binding_views, unrostered = self._binding_views(row)
@@ -1895,6 +1898,7 @@ class MockHubService:
             bindings=binding_views,
             subscription=row.subscription,
             subscription_unrostered=unrostered,
+            declining=list(row.declining),
         )
 
     def _parse_instant(self, value: Any) -> datetime:

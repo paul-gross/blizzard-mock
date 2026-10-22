@@ -43,6 +43,7 @@ class HttpxHubGateway:
         workspace_id: str,
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
+        declining: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         body: dict[str, Any] = {
             "name": name,
@@ -53,6 +54,8 @@ class HttpxHubGateway:
         # itself rather than defaulting it to `[]` here.
         if subscriptions is not None:
             body["subscriptions"] = subscriptions
+        if declining is not None:
+            body["declining"] = declining
         return self._post(f"{_API}/runners", body)
 
     def peek(self) -> tuple[int, dict[str, Any]]:

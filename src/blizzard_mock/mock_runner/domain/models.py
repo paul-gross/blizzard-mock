@@ -38,6 +38,9 @@ class RegisterBody(BaseModel):
     capabilities: list[dict[str, Any]] | None = None
     #: The runner's declared subscription roster, settable directly, mirroring ``capabilities``.
     subscriptions: list[dict[str, Any]] | None = None
+    #: The throttles the runner reports as saying no, settable directly; left out, the driver sends no report at all,
+    #: as a runner that predates it.
+    declining: list[dict[str, Any]] | None = None
 
 
 class PeekMatchedBody(BaseModel):

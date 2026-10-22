@@ -294,6 +294,15 @@ class RunnerBindingView(BaseModel):
     workspace_unreported: bool = False
 
 
+class RunnerDecliningView(BaseModel):
+    """One throttle a runner reported as saying no — mirrors ``blizzard.wire.runner.RunnerDecliningView``."""
+
+    lever: str
+    detail: str
+    subscription: str | None = None
+    until: str | None = None
+
+
 class RunnerView(BaseModel):
     runner_id: str
     runner_name: str | None = None
@@ -326,6 +335,8 @@ class RunnerView(BaseModel):
     bindings: list[RunnerBindingView] | None = None
     subscription: str | None = None
     subscription_unrostered: bool = False
+    # The throttles the runner last reported as saying no; empty when none, or when it sent none.
+    declining: list[RunnerDecliningView] = Field(default_factory=list)
 
 
 class VersionWindowView(BaseModel):
