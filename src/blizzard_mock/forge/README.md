@@ -152,7 +152,11 @@ clear one it armed.
 - **Every merge method rewrites.** A rebase always lands new commits, even when the head
   already descends from the base, and a squash is one commit whose only parent is the
   base tip.
-- **The default rate limit is DEFAULT_LIMIT_PLACEHOLDER.** MEASURED_PLACEHOLDER
+- **The default rate limit is 5000**, GitHub's own, held in `DEFAULT_RATE_LIMIT`. Hub
+  traffic carries one token, so the counted `/repos/` requests in a suite's forge logs
+  bound what that token spends in an hour; measured when the forge grew them, the full
+  crash sweep totalled 446 across its seven workers' forges, and the journey 47 up to
+  its takeover step — both far under 5000, so the limit stays GitHub's.
 - **Merges run in a throwaway linked worktree** with the forge's own committer
   identity, so the bare repo needs no configured identity.
 
