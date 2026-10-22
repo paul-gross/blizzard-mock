@@ -137,6 +137,7 @@ def peek_matched_queue(
         ),
         policy=body.policy,
         project=body.project,
+        projects=body.projects,
     )
 
 
