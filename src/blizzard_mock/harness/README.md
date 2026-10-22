@@ -234,6 +234,12 @@ panel can open. This is **claude_code/opencode-only**: `codex` has no reader tod
   Blizzard also reads `message.usage` **per turn** rather than summed, for the session
   context behind `rotate.max_context_tokens` (`ClaudeCodeTranscriptSource.context_tokens`);
   this writer mints one usage-bearing record per message, so that read is faithful here.
+- **Billed-zero OpenCode.** With `BLIZZARD_MOCK_OPENCODE_BILLED_ZERO=1` in its
+  environment (`facades/_opencode_transcript.BILLED_ZERO_ENV_VAR`; only the exact value
+  `1` turns it on), `mock-opencode` runs as a subscription-billed OpenCode: every
+  `step_finish` event it streams, and every `step-finish` part and assistant message
+  `info` its export document carries, reports `cost: 0` while keeping its synthesized
+  tokens. Off by default, the synthesized non-zero cost stands.
 - **The `message.id` gap.** This writer mints no `message.id`, and one record per
   message. The real harness splits a multi-content-block reply across several records
   that each repeat their message's one `usage`, which is why `sum_transcript_usage`

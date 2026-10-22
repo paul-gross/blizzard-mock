@@ -80,6 +80,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     ChunkDetail,
     ChunkEscalationView,
     ChunkStatusView,
+    ChunkUsageTotalView,
     EnvelopeChoice,
     ExternalSubscriptionUsageWindowView,
     FindingView,
@@ -520,6 +521,7 @@ class MockHubService:
             garden_proposals=spec.garden_proposals,
             analytics=spec.analytics,
             status=spec.status,
+            cost=spec.cost,
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -797,6 +799,9 @@ class MockHubService:
                     status=chunk.status.value,
                     route_runner_id=route_runner_id,
                     latest_epoch=chunk.latest_epoch or None,
+                    cost=ChunkUsageTotalView.model_validate(chunk.cost.model_dump())
+                    if chunk.cost is not None
+                    else ChunkUsageTotalView(),
                     **self._project_fields(chunk.project_id),
                 )
             )

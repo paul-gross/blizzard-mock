@@ -195,7 +195,14 @@ to either a sample or a miss.
   `garden_findings`, since a minted chunk carries no run context at all; omitted, the
   chunk answers no such proposal. `project_id` names the chunk's project by id — the
   first tenant's `default` when omitted, **404** for a project the hub does not hold — and
-  the seed answers `{chunk_id, graph_id, project_id}`. `POST /_seed/reset` clears all state, runners and their
+  the seed answers `{chunk_id, graph_id, project_id}`. `cost` seeds the chunk's derived
+  cost total — the real `ChunkUsageTotalView` fields (`input_tokens`, `output_tokens`,
+  `cache_read_tokens`, `cache_create_tokens`, `cost_usd`, `cost_partial`,
+  `estimated_cost_usd`, `billed_partial`), each defaulting to zero, `false`, or `null` —
+  served as-is on `ChunkStatusView.cost` from `GET /api/fleet/chunk-statuses`, the read a
+  runner's chunk cap compares. The mock sums no usage of its own, so a scenario wanting a
+  chunk cap to trip seeds the total, for example `"cost": {"cost_usd": 0, "estimated_cost_usd":
+  5.0}`; omitted, the chunk serves the real hub's zero total. `POST /_seed/reset` clears all state, runners and their
   tokens included — as after a reset of a real hub's data, every token a runner holds then
   answers `unknown`, and `blizzard runner init` re-adds only with `--allow-readd`. The tenant
   registry returns to the first tenant alone, under its first name, holding its pinned

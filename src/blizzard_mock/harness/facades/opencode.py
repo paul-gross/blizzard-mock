@@ -21,6 +21,7 @@ from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._opencode_transcript import (
     _MOCK_VERSION,
     OpenCodeTranscriptWriter,
+    billed_zero_mode,
     document_path,
     transcripts_root,
 )
@@ -99,12 +100,11 @@ def _text_event(session_id: str, message_id: str, text: str) -> dict[str, object
     }
 
 
-def _step_finish_event(session_id: str, message_id: str, text: str) -> dict[str, object]:
+def _step_finish_event(session_id: str, message_id: str, text: str, *, billed_zero: bool = False) -> dict[str, object]:
     """A completed model step: deterministic usage/cost synthesized off ``text``'s
-    length, the same illustrative approach ``_usage.py`` already gives Claude Code —
-    a test injecting a desired shape does so the same way every other mock does:
-    through the text the behavior script itself produced (``verdict``'s assessment,
-    an ``ask`` question), not a second knob."""
+    length, the same illustrative approach ``_usage.py`` gives Claude Code — a test
+    shapes it through the text the behavior script produced, not a second knob.
+    ``billed_zero`` reports ``cost: 0`` and keeps the tokens, as a subscription does."""
     usage = synthesize_usage_tokens(text)
     return {
         "type": "step_finish",
@@ -124,7 +124,7 @@ def _step_finish_event(session_id: str, message_id: str, text: str) -> dict[str,
                     "write": usage["cache_creation_input_tokens"],
                 },
             },
-            "cost": synthesize_cost_usd(usage),
+            "cost": 0 if billed_zero else synthesize_cost_usd(usage),
         },
     }
 
@@ -152,7 +152,8 @@ class OpenCodeRunWire:
     #: The marker ``helpers.py``'s misbehaviour-plane primitives duck-type against.
     carries_opencode_wire_events = True
 
-    def __init__(self) -> None:
+    def __init__(self, *, billed_zero: bool = False) -> None:
+        self._billed_zero = billed_zero
         self._streamed_message_id: str | None = None
         #: The misbehaviour plane — see ``helpers.py`` — spliced in by :meth:`render`.
         self.wire_events: list[str] = []
@@ -177,7 +178,7 @@ class OpenCodeRunWire:
             lines.append(json.dumps(_error_event(session_id, text or "the worker ended without a verdict")))
         else:
             lines.append(json.dumps(_text_event(session_id, message_id, text)))
-            lines.append(json.dumps(_step_finish_event(session_id, message_id, text)))
+            lines.append(json.dumps(_step_finish_event(session_id, message_id, text, billed_zero=self._billed_zero)))
         return "".join(line + "\n" for line in lines)
 
 
@@ -301,6 +302,7 @@ def _build_transcript_factory(
         root=root,
         cwd=cwd,
         on_task_completed=lambda part: wire.wire_events.append(json.dumps(_task_use_event(session_id, part))),
+        billed_zero=billed_zero_mode(env),
     )
 
 
@@ -341,8 +343,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(0)
 
     is_resume = args.session is not None
-    wire = OpenCodeRunWire()
     env: Mapping[str, str] = os.environ
+    wire = OpenCodeRunWire(billed_zero=billed_zero_mode(env))
     cwd = acquired_worktree(env, Path.cwd())
     code = _common.dispatch(
         wire=wire,
