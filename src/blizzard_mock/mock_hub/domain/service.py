@@ -618,7 +618,8 @@ class MockHubService:
         selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
         from its stored declaration, so another project's chunk is never its head and ``hold``
         cannot stall it on one. A project reached only through a binding the host's report withholds is not served
-        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names, ``projects`` the union of those it names, with
+        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names,
+        ``projects`` the union of those it names, with
         ``hold`` then stopping only the project of an unusable entry. Narrowing selects
         from the ready order without renumbering it: a position is the chunk's index in the whole ready order, as
         :meth:`peek` reports it. Like the real verb it answers any resolved principal, registered or not — the fleet
@@ -1782,13 +1783,15 @@ class MockHubService:
         projects: Sequence[str] | None = None,
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
+        agents: int | None = None,
         version: str | None = None,
     ) -> RunnerRegistrationResponse:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
         ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
         keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
-        ``subscription``. Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no
-        project answers to is stored unresolved, and resolved afresh at the next registration that declares it.
+        ``subscription``; ``agents`` is stored as sent too. Registration doubles as the heartbeat, so it never refuses
+        over the declaration: an entry no project answers to is stored unresolved, and resolved afresh at the next
+        registration that declares it.
         ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
         self._refuse_version(runner_id, version)
@@ -1808,6 +1811,7 @@ class MockHubService:
             projects=declaration,
             bindings=bindings,
             subscription=subscription,
+            agents=agents,
         )
         row = self._added(runner_id)
         binding_views, unrostered = self._binding_views(row)
@@ -1874,6 +1878,7 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
+            agents=row.agents,
             subscriptions=self._runner_subscriptions(row, reported),
             capabilities=[
                 RunnerCapabilityView(

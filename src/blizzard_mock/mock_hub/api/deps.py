@@ -213,6 +213,8 @@ class RunnerRegistrationBody(MirroredWireBody):
     bindings: list[RunnerBindingBody] | None = None
     # The host subscription slug every binding spends.
     subscription: str | None = None
+    # The agents the runner runs at once, shared by every binding; ``None`` from a runner that predates it.
+    agents: int | None = Field(default=None, gt=0)
     version: str | None = None
 
 

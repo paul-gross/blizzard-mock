@@ -308,6 +308,8 @@ class RunnerView(BaseModel):
     locally_paused_by: str | None = None
     locally_paused_reason: str | None = None
     env_capacity: int | None = None
+    # The agents the runner declared it runs at once; ``None`` from a runner that predates the shared count.
+    agents: int | None = None
     # Every reported per-slug sample, empty when no sample was reported.
     subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
     # The runner's reported capability snapshot — every harness/tier it can execute right now.

@@ -170,6 +170,8 @@ class RunnerRow:
         # registration, like the roster. Their flags against the host's report are derived on read, never stored.
         self.bindings: tuple[RunnerBinding, ...] | None = None
         self.subscription: str | None = None
+        # The agents the runner last declared it runs at once, ``None`` when it sent none.
+        self.agents: int | None = None
         self.paused = False
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
@@ -276,6 +278,7 @@ class IHubState(Protocol):
         projects: tuple[ServedEntry, ...] | None = None,
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
+        agents: int | None = None,
     ) -> bool:
         """Register/heartbeat an added runner; return ``True`` on its first registration.
 
