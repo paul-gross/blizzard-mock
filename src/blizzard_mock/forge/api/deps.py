@@ -71,3 +71,14 @@ class UpdateBranchBody(BaseModel):
 class UpdateRefBody(BaseModel):
     sha: str
     force: bool = False
+
+
+class CreateRefBody(BaseModel):
+    ref: str
+    sha: str
+
+
+class MergeBranchesBody(BaseModel):
+    base: str
+    head: str
+    commit_message: str | None = None

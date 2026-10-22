@@ -193,4 +193,6 @@ def lever_json(lever: Lever) -> dict[str, Any]:
         "number": lever.number,
         "remaining": lever.remaining,
         "message": lever.message,
+        "branch": lever.branch,
+        "pattern": lever.pattern,
     }

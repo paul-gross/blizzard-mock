@@ -15,7 +15,7 @@ from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.issues import router as issues_router
 from blizzard_mock.forge.api.labels import router as labels_router
 from blizzard_mock.forge.api.levers import router as levers_router
-from blizzard_mock.forge.api.middleware import LeverMiddleware
+from blizzard_mock.forge.api.middleware import LeverMiddleware, RateHeaderMiddleware
 from blizzard_mock.forge.api.pulls import router as pulls_router
 from blizzard_mock.forge.api.refs import router as refs_router
 from blizzard_mock.forge.api.repos import router as repos_router
@@ -24,9 +24,11 @@ from blizzard_mock.forge.config import ForgeConfig
 from blizzard_mock.forge.domain.clock import Clock, SystemClock
 from blizzard_mock.forge.domain.errors import ForgeError
 from blizzard_mock.forge.domain.service import ForgeService
+from blizzard_mock.forge.internal.check_store import InMemoryCheckRunStore
 from blizzard_mock.forge.internal.errors import GitErrorFactory
 from blizzard_mock.forge.internal.git_backend import GitBackend
 from blizzard_mock.forge.internal.lever_store import InMemoryLeverStore
+from blizzard_mock.forge.internal.rate_ledger import InMemoryRateLedger
 from blizzard_mock.forge.internal.state_store import InMemoryForgeState
 
 
@@ -38,14 +40,18 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     git = GitBackend(config.repos_dir, GitErrorFactory(log))
     state = InMemoryForgeState()
     levers = InMemoryLeverStore()
-    service = ForgeService(git, state, levers, the_clock)
+    checks = InMemoryCheckRunStore()
+    rate = InMemoryRateLedger(the_clock)
+    service = ForgeService(git, state, levers, the_clock, checks, rate)
 
     app = FastAPI(title="blizzard-mock forge", version="0.1.0")
     app.state.service = service
     app.state.levers = levers
     app.state.base_url = config.base_url
 
-    app.add_middleware(LeverMiddleware, levers=levers)
+    # Added first, so it sits inside LeverMiddleware: a lever refusal is never counted or hashed.
+    app.add_middleware(RateHeaderMiddleware, rate=rate)
+    app.add_middleware(LeverMiddleware, levers=levers, rate=rate)
 
     @app.exception_handler(ForgeError)
     async def _forge_error_handler(_request: Request, exc: ForgeError) -> JSONResponse:

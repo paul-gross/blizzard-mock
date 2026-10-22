@@ -7,8 +7,9 @@ close-without-merge disposition — all against real refs in the backing bare re
 from __future__ import annotations
 
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.forge.api import serialization as ser
@@ -22,7 +23,7 @@ from blizzard_mock.forge.api.deps import (
 )
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.models import State
-from blizzard_mock.forge.domain.service import ForgeService
+from blizzard_mock.forge.domain.service import ForgeService, PullPage
 
 router = APIRouter(tags=["pulls"])
 
@@ -31,11 +32,43 @@ router = APIRouter(tags=["pulls"])
 def list_pulls(
     owner: str,
     repo: str,
+    request: Request,
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
     state: str = "open",
-) -> list[dict[str, Any]]:
-    return [ser.pull_json(f"{owner}/{repo}", v, base_url) for v in service.list_pulls(owner, repo, state)]
+    base: str | None = None,
+    head: str | None = None,
+    sort: str | None = None,
+    direction: str | None = None,
+    page: int = 1,
+    per_page: int | None = None,
+) -> JSONResponse:
+    result = service.list_pulls(
+        owner, repo, state, base=base, head=head, sort=sort, direction=direction, page=page, per_page=per_page
+    )
+    link = _link_header(f"{base_url}{request.url.path}", dict(request.query_params), result)
+    return JSONResponse(
+        content=[ser.pull_json(f"{owner}/{repo}", v, base_url) for v in result.views],
+        headers={"Link": link} if link else None,
+    )
+
+
+def _link_header(url: str, query: dict[str, str], result: PullPage) -> str:
+    """GitHub's ``Link`` header for a paged listing: ``next``/``last`` while a later page
+    exists, ``prev``/``first`` past page 1. Empty when the answer is not paged or is the only page."""
+    if result.per_page is None:
+        return ""
+
+    def page_url(number: int) -> str:
+        return f"{url}?{urlencode({**query, 'page': number, 'per_page': result.per_page})}"
+
+    last = result.last_page
+    rels: list[tuple[str, int]] = []
+    if result.page > 1:
+        rels += [("prev", min(result.page - 1, last)), ("first", 1)]
+    if result.page < last:
+        rels += [("next", result.page + 1), ("last", last)]
+    return ", ".join(f'<{page_url(number)}>; rel="{rel}"' for rel, number in rels)
 
 
 @router.post("/repos/{owner}/{repo}/pulls", status_code=201)

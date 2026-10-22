@@ -7,6 +7,11 @@ boundary and applies the rules (``bzh:domain-takes-objects``). It holds the
 
 from __future__ import annotations
 
+import fnmatch
+import zlib
+from dataclasses import dataclass
+
+from blizzard_mock.forge.domain.checks import CHECK_STATUSES, CheckSpec, ICheckRunStore
 from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import (
     BranchNotFound,
@@ -15,10 +20,16 @@ from blizzard_mock.forge.domain.errors import (
     IssueNotFound,
     LabelAlreadyExists,
     LabelNotFound,
+    MergeConflict,
+    MergeMethodNotAllowed,
     MergeRejected,
     NotFastForward,
     NotMergeable,
+    ProtectedBranch,
     PullNotFound,
+    RefAlreadyExists,
+    RefMissing,
+    RuleViolation,
     ValidationError,
 )
 from blizzard_mock.forge.domain.git import GitCommit, GitCompare, IWriteGitBackend
@@ -41,7 +52,11 @@ from blizzard_mock.forge.domain.models import (
     Repo,
     State,
 )
+from blizzard_mock.forge.domain.rate import IRateLedger
 from blizzard_mock.forge.domain.state import IWriteForgeState
+
+#: The most pulls one listing page may hold, as on GitHub.
+MAX_PER_PAGE = 100
 
 
 class MergeResult:
@@ -72,6 +87,22 @@ class PullView:
         self.mergeable_state = mergeable_state
 
 
+@dataclass
+class PullPage:
+    """One page of a pull listing, with what a ``Link`` header is built from."""
+
+    views: list[PullView]
+    page: int
+    per_page: int | None  # None: the request named no ``per_page``, so nothing is paged
+    total: int
+
+    @property
+    def last_page(self) -> int:
+        if self.per_page is None:
+            return 1
+        return max(-(-self.total // self.per_page), 1)
+
+
 class ForgeService:
     """The composition-root-wired service every forge route delegates to."""
 
@@ -81,11 +112,15 @@ class ForgeService:
         state: IWriteForgeState,
         levers: ILeverStore,
         clock: Clock,
+        checks: ICheckRunStore,
+        rate: IRateLedger,
     ) -> None:
         self._git = git
         self._state = state
         self._levers = levers
         self._clock = clock
+        self._checks = checks
+        self._rate = rate
 
     # -- repositories ------------------------------------------------------
 
@@ -198,9 +233,48 @@ class ForgeService:
 
     # -- pull requests -----------------------------------------------------
 
-    def list_pulls(self, owner: str, name: str, state: str | None) -> list[PullView]:
+    def list_pulls(
+        self,
+        owner: str,
+        name: str,
+        state: str | None,
+        *,
+        base: str | None = None,
+        head: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
+        page: int = 1,
+        per_page: int | None = None,
+    ) -> PullPage:
+        """List pulls GitHub-style. With no ``per_page`` every match is page 1 and later
+        pages are empty; a named ``per_page`` (capped at 100) pages the answer. Git views
+        are resolved only for the page answered."""
         repo = self.get_repo(owner, name)
-        return [self._view(repo, p) for p in self._state.list_pulls(repo.full_name, state)]
+        if sort not in (None, "created", "updated"):
+            raise ValidationError(f"invalid sort: {sort}")
+        if direction not in (None, "asc", "desc"):
+            raise ValidationError(f"invalid direction: {direction}")
+        pulls = self._state.list_pulls(repo.full_name, state)
+        if base is not None:
+            pulls = [p for p in pulls if p.base == base]
+        if head is not None:
+            head_owner, sep, head_branch = head.rpartition(":")
+            wrong_owner = bool(sep) and head_owner != repo.owner
+            pulls = [] if wrong_owner else [p for p in pulls if p.head == head_branch]
+        descending = direction == "desc" if direction else sort in (None, "created")
+        pulls = sorted(
+            pulls,
+            key=lambda p: (p.updated_at if sort == "updated" else p.created_at, p.number),
+            reverse=descending,
+        )
+        total = len(pulls)
+        page = max(page, 1)
+        if per_page is None:
+            chosen = pulls if page == 1 else []
+        else:
+            per_page = min(max(per_page, 1), MAX_PER_PAGE)
+            chosen = pulls[(page - 1) * per_page : page * per_page]
+        return PullPage([self._view(repo, p) for p in chosen], page, per_page, total)
 
     def get_pull(self, owner: str, name: str, number: int) -> PullView:
         repo = self.get_repo(owner, name)
@@ -247,6 +321,8 @@ class ForgeService:
         pull = self._require_pull(repo, number)
         if pull.merged or pull.state is State.CLOSED:
             raise NotMergeable(f"pull request #{number} is not mergeable")
+        if method is MergeMethod.MERGE and self._levers.find(LeverKind.MERGE_COMMITS_DISALLOWED, repo.full_name, None):
+            raise MergeMethodNotAllowed("Merge commits are not allowed on this repository")
         if self._levers.find(LeverKind.MERGE_REJECTED, repo.full_name, number) is not None:
             lever = self._levers.find(LeverKind.MERGE_REJECTED, repo.full_name, number)
             reason = (lever.message if lever else None) or "merge was rejected by branch policy"
@@ -256,13 +332,39 @@ class ForgeService:
         head_sha = self._git.resolve_ref(repo, pull.head)
         if sha is not None and sha != head_sha:
             raise HeadMismatch("Head branch was modified. Review and try the merge again.")
-        commit_message = message or f"Merge pull request #{number} from {pull.head}"
-        if method is MergeMethod.REBASE:
-            new_sha = self._git.rebase(repo, pull.base, pull.head, commit_message)
-        else:
-            new_sha = self._git.merge(repo, pull.base, pull.head, commit_message)
+        new_sha = self._land(repo, pull, method, message)
         self._record_merge(repo, pull, new_sha, merged_by=user, head_sha=head_sha)
         return MergeResult(new_sha, "Pull Request successfully merged")
+
+    def _land(self, repo: Repo, pull: PullRequest, method: MergeMethod, message: str | None) -> str:
+        """Land ``pull``'s head on its base by ``method``; every method really rewrites."""
+        if method is MergeMethod.SQUASH:
+            return self._git.squash(repo, pull.base, pull.head, message or f"{pull.title} (#{pull.number})")
+        commit_message = message or f"Merge pull request #{pull.number} from {pull.head}"
+        if method is MergeMethod.REBASE:
+            return self._git.rebase(repo, pull.base, pull.head, commit_message)
+        return self._git.merge(repo, pull.base, pull.head, commit_message)
+
+    def merge_branches(self, owner: str, name: str, *, base: str, head: str, message: str | None) -> GitCommit | None:
+        """Merge ``head`` into ``base`` outside any pull (``POST .../merges``). ``None`` is
+        GitHub's 204: the base already holds the head."""
+        repo = self.get_repo(owner, name)
+        if not base or not head:
+            raise ValidationError("both base and head are required")
+        if not self._git.branch_exists(repo, base):
+            raise CompareRefNotFound("Base does not exist")
+        try:
+            head_sha = self._git.resolve_ref(repo, head)
+        except BranchNotFound as exc:
+            raise CompareRefNotFound("Head does not exist") from exc
+        self._refuse_by_ruleset(repo, base)
+        if self._git.is_ancestor(repo, head_sha, base):
+            return None
+        try:
+            sha = self._git.merge(repo, base, head_sha, message or f"Merge branch '{head}' into {base}")
+        except NotMergeable as exc:
+            raise MergeConflict("Merge conflict") from exc
+        return self._git.get_commit(repo, sha)
 
     def is_merged(self, owner: str, name: str, number: int) -> bool:
         repo = self.get_repo(owner, name)
@@ -290,6 +392,13 @@ class ForgeService:
         """Support ``PATCH .../pulls/{n}`` closing a PR without merge (D-065)."""
         repo = self.get_repo(owner, name)
         pull = self._require_pull(repo, number)
+        if state is State.CLOSED and pull.state is not State.CLOSED:
+            self._freeze(repo, pull)
+        elif state is State.OPEN and not pull.merged:
+            if not self._git.branch_exists(repo, pull.head):
+                raise ValidationError(f"head ref does not exist: {pull.head}")
+            pull.closed_head_sha = None
+            pull.closed_base_sha = None
         pull.state = state
         pull.updated_at = self._clock.now()
         self._state.put_pull(repo.full_name, pull)
@@ -305,21 +414,34 @@ class ForgeService:
             return None
         if kind not in STATE_LEVERS:  # pragma: no cover - exhaustive guard
             raise ValidationError(f"unknown lever: {kind}")
+        _require_scope(kind, params)
         lever = Lever(
             kind=kind,
             repo=params.repo,
             number=params.number,
             remaining=params.remaining,
             message=params.message,
+            branch=params.branch,
+            pattern=params.pattern,
         )
         self._levers.arm(lever)
         return lever
 
-    def clear_lever(self, kind: LeverKind, repo: str | None, number: int | None) -> None:
-        self._levers.clear(kind, repo, number)
+    def clear_lever(
+        self,
+        kind: LeverKind,
+        repo: str | None,
+        number: int | None,
+        branch: str | None = None,
+        pattern: str | None = None,
+    ) -> None:
+        self._levers.clear(kind, repo, number, branch, pattern)
 
     def clear_all_levers(self) -> None:
+        """Clear every lever, and with them the armed check runs and the rate windows."""
         self._levers.clear_all()
+        self._checks.clear_all()
+        self._rate.clear()
 
     def list_levers(self) -> list[Lever]:
         return self._levers.active()
@@ -329,6 +451,37 @@ class ForgeService:
             self._external_merge(params)
         elif kind is LeverKind.COMMENT_MIDFLIGHT:
             self._comment_midflight(params)
+        elif kind is LeverKind.REF_CHECKS:
+            self._ref_checks(params)
+        elif kind is LeverKind.RATE_BUDGET:
+            self._rate.set_budget(params.token, remaining=params.remaining, reset=params.reset)
+
+    def _ref_checks(self, params: LeverParams) -> None:
+        """Arm named check runs against the revision ``ref`` resolves to now: a run of an
+        existing name replaces it, a new name adds a run beside the others, and an empty
+        list arms "no runs"."""
+        if params.repo is None or params.ref is None or params.checks is None:
+            raise ValidationError("ref_checks requires repo, ref, and checks")
+        for spec in params.checks:
+            if spec.status not in CHECK_STATUSES:
+                raise ValidationError(f"invalid check status: {spec.status}")
+        owner, name = _split_full_name(params.repo)
+        repo = self.get_repo(owner, name)
+        sha = self._git.resolve_ref(repo, params.ref)
+        if not params.checks:
+            self._checks.replace_all(repo.full_name, sha, [])
+        for spec in params.checks:
+            self._checks.put(repo.full_name, sha, self._named_check_run(sha, spec))
+
+    def _named_check_run(self, sha: str, spec: CheckSpec) -> CheckRun:
+        status, conclusion = CHECK_STATUSES[spec.status]
+        return CheckRun(
+            id=zlib.crc32(f"{sha}/{spec.name}".encode()),
+            name=spec.name,
+            status=status,
+            conclusion=conclusion,
+            head_sha=sha,
+        )
 
     def _external_merge(self, params: LeverParams) -> None:
         """Land the PR's head on its base directly, bypassing the PR flow (D-065)."""
@@ -340,8 +493,11 @@ class ForgeService:
         if pull.merged:
             return
         head_sha = self._git.resolve_ref(repo, pull.head)
+        method = params.method or MergeMethod.MERGE
         message = f"Merge pull request #{pull.number} from {pull.head} (external)"
-        new_sha = self._git.merge(repo, pull.base, pull.head, message)
+        if method is MergeMethod.SQUASH:
+            message = f"{pull.title} (#{pull.number}) (external)"
+        new_sha = self._land(repo, pull, method, message)
         self._record_merge(repo, pull, new_sha, merged_by="external", head_sha=head_sha)
 
     def _comment_midflight(self, params: LeverParams) -> None:
@@ -364,20 +520,27 @@ class ForgeService:
         pull.merged_at = now
         pull.merged_by = merged_by
         pull.merge_commit_sha = sha
-        pull.head_sha_at_merge = head_sha
+        pull.closed_head_sha = head_sha
+        pull.closed_base_sha = sha
         pull.state = State.CLOSED
         pull.updated_at = now
         self._state.put_pull(repo.full_name, pull)
 
     def _view(self, repo: Repo, pull: PullRequest) -> PullView:
-        # A merged PR's head sha is frozen at merge time, not tracked live — real GitHub
-        # never updates a merged PR's own `head.sha` after a later, unrelated push.
+        # A closed PR's head sha is frozen when it closes, not tracked live — real GitHub
+        # never updates a merged or closed PR's own `head.sha` after a later, unrelated
+        # push, and the head branch may be gone altogether.
         head_sha = (
-            pull.head_sha_at_merge
-            if pull.merged and pull.head_sha_at_merge is not None
-            else (self._git.resolve_ref(repo, pull.head))
+            pull.closed_head_sha
+            if pull.state is State.CLOSED and pull.closed_head_sha is not None
+            else self._git.resolve_ref(repo, pull.head)
         )
-        base_sha = self._git.resolve_ref(repo, pull.base)
+        try:
+            base_sha = self._git.resolve_ref(repo, pull.base)
+        except BranchNotFound:
+            if pull.closed_base_sha is None:
+                raise
+            base_sha = pull.closed_base_sha
         mergeable, mstate = self._mergeability(repo, pull)
         return PullView(pull, head_sha, base_sha, mergeable, mstate)
 
@@ -403,19 +566,23 @@ class ForgeService:
         return False, MergeableState.DIRTY
 
     def list_check_runs(self, owner: str, name: str, ref: str) -> list[CheckRun]:
-        """Live check runs against ``ref``, derived from the active lever set, not
-        stored. ``checks_failed``/``base_checks_failed`` win over
-        ``checks_pending``; absent a lever, the ref reads green. Correlated by
-        resolved commit sha, not branch name (pinned by tests/test_pin_mock.py).
+        """Check runs against ``ref``. Runs armed against its revision by ``ref_checks``
+        are answered as they are; otherwise they are derived live from the active lever
+        set. ``checks_failed``/``base_checks_failed`` win over ``checks_pending``; absent a
+        lever, the ref reads green. Correlated by resolved commit sha, not branch name
+        (pinned by tests/test_pin_mock.py).
         """
         repo = self.get_repo(owner, name)
         sha = self._git.resolve_ref(repo, ref)
+        armed = self._checks.runs(repo.full_name, sha)
+        if armed is not None:
+            return armed
         pull = self._find_pull_by_head_sha(repo, sha)
         pr_number = pull.number if pull is not None else None
         if pull is not None and self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pr_number) is not None:
             return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
         base_lever = self._levers.find(LeverKind.BASE_CHECKS_FAILED, repo.full_name, None)
-        if ref == repo.default_branch and base_lever is not None:
+        if base_lever is not None and sha == self._git.resolve_ref(repo, repo.default_branch):
             return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
         if pull is not None and self._levers.find(LeverKind.CHECKS_PENDING, repo.full_name, pr_number) is not None:
             return [self._synthetic_check_run(sha, status="in_progress", conclusion=None)]
@@ -455,16 +622,73 @@ class ForgeService:
     def update_ref(self, owner: str, name: str, ref: str, *, sha: str, force: bool) -> str:
         """Update a ref's target sha (GitHub's ``PATCH .../git/refs/{ref}``).
 
-        Unless ``force``, this is a compare-and-swap: rejected (``NotFastForward``)
-        unless the current sha is an ancestor of ``sha``.
+        A protected branch refuses any update. Unless ``force``, the update is also
+        rejected (``NotFastForward``) unless the current sha is an ancestor of ``sha``.
         """
         repo = self.get_repo(owner, name)
+        if any(lever.branch == ref for lever in self._matching(LeverKind.BRANCH_PROTECTED, repo)):
+            raise ProtectedBranch(f"Protected branch update failed for refs/heads/{ref}.")
         current_sha = self._git.resolve_ref(repo, ref)
         target_sha = self._git.resolve_ref(repo, sha)
         if not force and not self._git.is_ancestor(repo, current_sha, target_sha):
             raise NotFastForward(f"Update is not a fast forward: refs/heads/{ref}")
         self._git.update_ref(repo, ref, target_sha)
         return target_sha
+
+    def create_ref(self, owner: str, name: str, ref: str, *, sha: str) -> str:
+        """Create a branch (GitHub's ``POST .../git/refs``); ``ref`` is ``refs/heads/<branch>``."""
+        repo = self.get_repo(owner, name)
+        branch = ref.removeprefix("refs/heads/")
+        if branch == ref or not branch:
+            raise ValidationError("Reference name is invalid")
+        self._refuse_by_ruleset(repo, branch)
+        if self._git.branch_exists(repo, branch):
+            raise RefAlreadyExists("Reference already exists")
+        try:
+            target_sha = self._git.resolve_ref(repo, sha)
+        except BranchNotFound as exc:
+            raise ValidationError("Object does not exist") from exc
+        self._git.create_ref(repo, branch, target_sha)
+        return target_sha
+
+    def delete_ref(self, owner: str, name: str, branch: str) -> None:
+        """Delete a branch (GitHub's ``DELETE .../git/refs/heads/{b}``). A pull the
+        branch heads or is based on closes with it, as on GitHub."""
+        repo = self.get_repo(owner, name)
+        if not self._git.branch_exists(repo, branch):
+            raise RefMissing("Reference does not exist")
+        for pull in self._state.list_pulls(repo.full_name, "open"):
+            if branch in (pull.head, pull.base):
+                self._freeze(repo, pull)
+                pull.state = State.CLOSED
+                pull.updated_at = self._clock.now()
+                self._state.put_pull(repo.full_name, pull)
+        self._git.delete_ref(repo, branch)
+
+    def _freeze(self, repo: Repo, pull: PullRequest) -> None:
+        """Pin the shas a pull closes with, so it still lists once its branches move or go."""
+        pull.closed_head_sha = self._git.resolve_ref(repo, pull.head)
+        pull.closed_base_sha = self._git.resolve_ref(repo, pull.base)
+
+    def _matching(self, kind: LeverKind, repo: Repo) -> list[Lever]:
+        return [lever for lever in self._levers.active() if lever.kind is kind and lever.matches(repo.full_name, None)]
+
+    def _refuse_by_ruleset(self, repo: Repo, branch: str) -> None:
+        for lever in self._matching(LeverKind.RULESET, repo):
+            if lever.pattern is not None and fnmatch.fnmatchcase(branch, lever.pattern):
+                raise RuleViolation(
+                    f"Repository rule violations found\n\nBranch {branch} is covered by the rule {lever.pattern}."
+                )
+
+
+def _require_scope(kind: LeverKind, params: LeverParams) -> None:
+    """The levers whose scope is a branch or a pattern name it, and the repo it is in."""
+    if kind is LeverKind.BRANCH_PROTECTED and (params.repo is None or params.branch is None):
+        raise ValidationError("branch_protected requires repo and branch")
+    if kind is LeverKind.RULESET and (params.repo is None or params.pattern is None):
+        raise ValidationError("ruleset requires repo and pattern")
+    if kind is LeverKind.MERGE_COMMITS_DISALLOWED and params.repo is None:
+        raise ValidationError("merge_commits_disallowed requires repo")
 
 
 def _split_full_name(full_name: str) -> tuple[str, str]:

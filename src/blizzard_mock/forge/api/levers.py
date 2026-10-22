@@ -1,7 +1,7 @@
 """Lever routes — the forge's first-class edge-state control surface.
 
 Namespaced under ``/_levers``. State levers arm and persist; action levers
-(``externally_merged``, ``comment_midflight``) fire on POST. Exempt from the
+(``externally_merged``, ``comment_midflight``, ``ref_checks``, ``rate_budget``) fire on POST. Exempt from the
 request-bending levers so a test can always clear a lever it armed.
 """
 
@@ -31,6 +31,12 @@ _CATALOG: dict[str, str] = {
     LeverKind.CHECKS_PENDING.value: "state (per PR): mergeable_state=blocked, required checks/reviews not green yet",
     LeverKind.CHECKS_FAILED.value: "state (per PR): failed check run on the PR head; mergeable_state=blocked",
     LeverKind.BASE_CHECKS_FAILED.value: "state (per repo): one completed/failure check run on the default branch",
+    LeverKind.REF_CHECKS.value: "action: arm named check runs (pending/failed/success) against a ref, or none",
+    LeverKind.BRANCH_PROTECTED.value: "state (per repo+branch): PATCH git/refs on the branch → 422 protected",
+    LeverKind.RULESET.value: "state (per repo+pattern): POST git/refs and POST /merges on a matching branch → 422",
+    LeverKind.MERGE_COMMITS_DISALLOWED.value: "state (per repo): merge method `merge` → 405",
+    LeverKind.RATE_BUDGET.value: "action: set a token's (or every token's) rate remaining and reset",
+    LeverKind.SECONDARY_RATE_LIMITED.value: "state (global/repo): requests → 403 secondary rate limit, remaining kept",
 }
 
 
@@ -76,7 +82,9 @@ def clear_lever(
     service: Annotated[ForgeService, Depends(get_service)],
     repo: str | None = None,
     number: int | None = None,
+    branch: str | None = None,
+    pattern: str | None = None,
 ) -> dict[str, Any]:
     parsed = _parse_kind(kind)
-    service.clear_lever(parsed, repo, number)
+    service.clear_lever(parsed, repo, number, branch, pattern)
     return {"cleared": parsed.value, "repo": repo, "number": number}

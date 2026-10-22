@@ -94,10 +94,25 @@ class IWriteGitBackend(IReadGitBackend, Protocol):
     def rebase(self, repo: Repo, base: str, head: str, message: str) -> str:
         """Replay ``head``'s commits onto ``base`` as new commits and advance
         ``base`` to the new tip, leaving ``head`` untouched — GitHub's
-        rebase-merge. Raises ``NotMergeable`` on real conflict."""
+        rebase-merge. Always rewrites: even a head already descending from ``base`` lands
+        as new commits. Raises ``NotMergeable`` on real conflict."""
+        ...
+
+    def squash(self, repo: Repo, base: str, head: str, message: str) -> str:
+        """Land ``head``'s changes on ``base`` as one new commit whose only parent is
+        ``base``'s tip, advance ``base`` to it, and return its sha — GitHub's
+        squash-merge. Raises ``NotMergeable`` on real conflict."""
+        ...
+
+    def create_ref(self, repo: Repo, branch: str, sha: str) -> None:
+        """Create ``refs/heads/<branch>`` at ``sha``; the caller has checked it is absent."""
+        ...
+
+    def delete_ref(self, repo: Repo, branch: str) -> None:
+        """Delete ``refs/heads/<branch>``; the caller has checked it exists."""
         ...
 
     def update_ref(self, repo: Repo, ref: str, sha: str) -> None:
         """Set ``refs/heads/<ref>`` to point at ``sha`` unconditionally — the
-        raw ref write behind the domain's fast-forward compare-and-swap."""
+        raw ref write behind the domain's fast-forward check."""
         ...
