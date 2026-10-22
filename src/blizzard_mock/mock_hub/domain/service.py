@@ -604,7 +604,13 @@ class MockHubService:
         return BlockedView(prerequisite_chunk_id=str(lever.payload.get("prerequisite_chunk_id", "unknown")))
 
     def peek_matched(
-        self, runner_id: str, *, capabilities: Sequence[RunnerCapability], policy: str, project: str | None = None
+        self,
+        runner_id: str,
+        *,
+        capabilities: Sequence[RunnerCapability],
+        policy: str,
+        project: str | None = None,
+        projects: Sequence[str] | None = None,
     ) -> QueuePeekResponse:
         """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
         flat ``ChunkState`` graph (``mock_hub.domain.matching``): at most one entry, never
@@ -612,15 +618,18 @@ class MockHubService:
         selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
         from its stored declaration, so another project's chunk is never its head and ``hold``
         cannot stall it on one. A project reached only through a binding the host's report withholds is not served
-        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names. Narrowing selects
+        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names,
+        ``projects`` the union of those it names, with
+        ``hold`` then stopping only the project of an unusable entry. Narrowing selects
         from the ready order without renumbering it: a position is the chunk's index in the whole ready order, as
         :meth:`peek` reports it. Like the real verb it answers any resolved principal, registered or not — the fleet
         router has already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
-        served = self._offered_project_ids(self._added(runner_id), project)
+        served = self._offered_project_ids(self._added(runner_id), project, projects)
+        stopped: set[str | None] = set()
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         for position, chunk in enumerate(ready):
-            if chunk.project_id not in served:
+            if chunk.project_id not in served or chunk.project_id in stopped:
                 continue
             unusable = self._blocked_marking(chunk.chunk_id) is not None or matching.capability_ineligible(
                 chunk, chunk.current_node_id or chunk.entry, capabilities
@@ -639,7 +648,9 @@ class MockHubService:
                     ]
                 )
             if match_policy is matching.QueueMatchPolicy.HOLD:
-                return QueuePeekResponse(entries=[])
+                if projects is None:
+                    return QueuePeekResponse(entries=[])
+                stopped.add(chunk.project_id)
         return QueuePeekResponse(entries=[])
 
     # -- claim -------------------------------------------------------------
@@ -1478,16 +1489,19 @@ class MockHubService:
         )
         return views, host is not None and self._subscription_unrostered(host, row.subscription)
 
-    def _offered_project_ids(self, row: RunnerRow, project: str | None) -> set[str]:
+    def _offered_project_ids(
+        self, row: RunnerRow, project: str | None, projects: Sequence[str] | None = None
+    ) -> set[str]:
         """The projects the matched peek may offer ``row`` work from: its served ones, less those reached only
         through withheld bindings when it declared bindings, narrowed to the entry ``project`` names — by the entry as
-        declared or the id it resolved to."""
+        declared or the id it resolved to; ``projects`` keeps the union of those it names."""
         entries = row.projects
         if row.bindings is not None:
             reachable = {b.project for b in row.bindings if not self._withheld(row, b)}
             entries = tuple(e for e in entries if e.entry in reachable)
-        if project is not None:
-            named = {e.project_id for e in row.projects if project in (e.entry, e.project_id)}
+        if project is not None or projects is not None:
+            wanted = {project} if project is not None else set(projects or ())
+            named = {e.project_id for e in row.projects if wanted & {e.entry, e.project_id}}
             return {e.project_id for e in entries if e.project_id is not None and e.project_id in named}
         return {e.project_id for e in entries if e.project_id is not None}
 
@@ -1769,13 +1783,15 @@ class MockHubService:
         projects: Sequence[str] | None = None,
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
+        agents: int | None = None,
         version: str | None = None,
     ) -> RunnerRegistrationResponse:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
         ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
         keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
-        ``subscription``. Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no
-        project answers to is stored unresolved, and resolved afresh at the next registration that declares it.
+        ``subscription``; ``agents`` is stored as sent too. Registration doubles as the heartbeat, so it never refuses
+        over the declaration: an entry no project answers to is stored unresolved, and resolved afresh at the next
+        registration that declares it.
         ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
         self._refuse_version(runner_id, version)
@@ -1795,6 +1811,7 @@ class MockHubService:
             projects=declaration,
             bindings=bindings,
             subscription=subscription,
+            agents=agents,
         )
         row = self._added(runner_id)
         binding_views, unrostered = self._binding_views(row)
@@ -1861,6 +1878,7 @@ class MockHubService:
             locally_paused_by=reported.locally_paused_by,
             locally_paused_reason=reported.locally_paused_reason,
             env_capacity=row.env_capacity,
+            agents=row.agents,
             subscriptions=self._runner_subscriptions(row, reported),
             capabilities=[
                 RunnerCapabilityView(

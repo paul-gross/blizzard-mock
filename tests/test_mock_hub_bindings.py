@@ -154,3 +154,78 @@ def test_a_registration_without_bindings_clears_the_ones_held(client: FleetClien
 
     assert answer["bindings"] is None
     assert world.peek() == [world.web]
+
+
+def test_projects_narrows_to_the_union_it_names_and_is_refused_beside_project(client: FleetClient) -> None:
+    world = _World(client)
+    world.register(bindings=_bindings(("web", "ws-a"), (DEFAULT_PROJECT_SLUG, "ws-a")))
+
+    assert world.peek(projects=["web"]) == [world.web]
+    assert world.peek(projects=["web", DEFAULT_PROJECT_SLUG]) == [world.web]
+    assert world.peek(projects=[]) == []
+    both = client.post(
+        "/api/fleet/queue/peek",
+        json={"capabilities": _CAPABILITIES, "project": "web", "projects": ["web"]},
+        headers=_bearer(world.token),
+    )
+    assert both.status_code == 422, both.text
+
+
+def test_a_per_project_hold_offers_the_next_project_past_an_unusable_head(client: FleetClient) -> None:
+    web_id = _seed_project(client, "web")
+    spec = {
+        "entry": "build",
+        "project_id": web_id,
+        "nodes": {
+            "build": {
+                "executor": "runner",
+                "prompt": "b",
+                "judgement_prompt": "j",
+                "session_harnesses": ["special_harness"],
+                "choices": [{"name": "pass", "description": "p", "to": "done"}],
+            }
+        },
+    }
+    assert client.post("/_seed/chunk", json=spec).status_code == 201
+    later_web = _seed_chunk(client, web_id)
+    default = _seed_chunk(client)
+    token = client.post("/api/runners", json={"name": "r"}).json()["token"]
+    registered = client.post(
+        "/api/fleet/runners",
+        json={"workspace_id": "ws-a", "capabilities": _CAPABILITIES, "projects": ["web", DEFAULT_PROJECT_SLUG]},
+        headers=_bearer(token),
+    )
+    assert registered.status_code == 201, registered.text
+
+    def peek(**body: Any) -> list[str]:
+        resp = client.post(
+            "/api/fleet/queue/peek",
+            json={"capabilities": _CAPABILITIES, "policy": "hold", **body},
+            headers=_bearer(token),
+        )
+        return [e["chunk_id"] for e in resp.json()["entries"]]
+
+    assert peek() == []
+    assert peek(projects=["web", DEFAULT_PROJECT_SLUG]) == [default]
+    assert peek(projects=["web"]) == []
+    assert later_web not in peek(projects=["web", DEFAULT_PROJECT_SLUG])
+
+
+def test_the_declared_agents_are_stored_and_read_back_and_a_bare_registration_clears_them(client: FleetClient) -> None:
+    world = _World(client)
+
+    world.register(bindings=_bindings(("web", "ws-a")), agents=3)
+    own = client.get(f"/api/fleet/runners/{world.runner_id}", headers=_bearer(world.token)).json()
+    assert own["agents"] == 3
+
+    world.register(bindings=_bindings(("web", "ws-a")))
+    own = client.get(f"/api/fleet/runners/{world.runner_id}", headers=_bearer(world.token)).json()
+    assert own["agents"] is None
+
+
+def test_a_non_positive_agents_is_refused(client: FleetClient) -> None:
+    world = _World(client)
+
+    resp = client.post("/api/fleet/runners", json={"workspace_id": "ws-a", "agents": 0}, headers=_bearer(world.token))
+
+    assert resp.status_code == 422, resp.text

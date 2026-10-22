@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.service import (
@@ -149,6 +149,14 @@ class QueuePeekBody(MirroredWireBody):
     policy: str = "pass-over"
     # Narrows the peek to one project of the runner's declaration, by entry or resolved id.
     project: str | None = None
+    # Narrows the peek to these projects and scopes ``hold`` per project; refused together with ``project``.
+    projects: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _one_narrowing(self) -> QueuePeekBody:
+        if self.project is not None and self.projects is not None:
+            raise ValueError("send either project or projects, not both")
+        return self
 
 
 class RouteClaimBody(BaseModel):
@@ -205,6 +213,8 @@ class RunnerRegistrationBody(MirroredWireBody):
     bindings: list[RunnerBindingBody] | None = None
     # The host subscription slug every binding spends.
     subscription: str | None = None
+    # The agents the runner runs at once, shared by every binding; ``None`` from a runner that predates it.
+    agents: int | None = Field(default=None, gt=0)
     version: str | None = None
 
 

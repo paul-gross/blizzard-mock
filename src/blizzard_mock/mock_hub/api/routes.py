@@ -137,6 +137,7 @@ def peek_matched_queue(
         ),
         policy=body.policy,
         project=body.project,
+        projects=body.projects,
     )
 
 
@@ -536,6 +537,7 @@ def register_runner(
                 )
             ),
             subscription=body.subscription,
+            agents=body.agents,
             version=body.version,
         )
     except RunnerVersionRefused as exc:

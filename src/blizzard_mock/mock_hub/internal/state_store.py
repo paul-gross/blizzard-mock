@@ -97,6 +97,7 @@ class InMemoryHubState:
         projects: tuple[ServedEntry, ...] | None = None,
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
+        agents: int | None = None,
     ) -> bool:
         row = self._runners.get(runner_id)
         if row is None:
@@ -116,6 +117,7 @@ class InMemoryHubState:
         row.gates = gates
         row.bindings = bindings
         row.subscription = subscription
+        row.agents = agents
         if projects is not None:
             row.projects = projects
         return first
