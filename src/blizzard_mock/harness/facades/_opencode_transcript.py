@@ -33,8 +33,7 @@ PROJECT_DIR_NAME = "mock-opencode"
 #: The pinned OpenCode version these export documents claim.
 _MOCK_VERSION = "1.18.25"
 
-#: Set to ``1`` to run mock-opencode as a subscription-billed OpenCode: every
-#: ``step-finish`` part and assistant message reports ``cost: 0`` while keeping its tokens.
+#: ``1`` runs mock-opencode subscription-billed: every reported cost is 0, tokens kept.
 BILLED_ZERO_ENV_VAR = "BLIZZARD_MOCK_OPENCODE_BILLED_ZERO"
 
 
