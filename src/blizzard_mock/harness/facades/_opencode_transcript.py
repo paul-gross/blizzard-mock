@@ -33,6 +33,16 @@ PROJECT_DIR_NAME = "mock-opencode"
 #: The pinned OpenCode version these export documents claim.
 _MOCK_VERSION = "1.18.25"
 
+#: Set to ``1`` to run mock-opencode as a subscription-billed OpenCode: every
+#: ``step-finish`` part and assistant message reports ``cost: 0`` while keeping its tokens.
+BILLED_ZERO_ENV_VAR = "BLIZZARD_MOCK_OPENCODE_BILLED_ZERO"
+
+
+def billed_zero_mode(env: Mapping[str, str]) -> bool:
+    """Whether ``env`` turns on the billed-zero mode — only the exact value ``1`` does."""
+    return env.get(BILLED_ZERO_ENV_VAR) == "1"
+
+
 #: The reserved ``task`` input key holding the child session's own tool calls; never recorded as input.
 CHILD_TOOL_CALLS_KEY = "child_tool_calls"
 
@@ -79,8 +89,10 @@ class OpenCodeTranscriptWriter:
         root: Path,
         cwd: Path,
         on_task_completed: Callable[[Mapping[str, Any]], None] | None = None,
+        billed_zero: bool = False,
     ) -> None:
         self._session_id = session_id
+        self._billed_zero = billed_zero
         # Told each ``task`` part as it completes, so a facade can stream it as a ``tool_use`` event.
         self._on_task_completed = on_task_completed
         self._cwd = cwd
@@ -115,6 +127,7 @@ class OpenCodeTranscriptWriter:
         message = self._assistant_message()
         message["parts"].append(self._new_part(message, {"type": "text", "text": text, "time": _span()}))
         usage = synthesize_usage_tokens(text)
+        cost = 0 if self._billed_zero else synthesize_cost_usd(usage)
         message["parts"].append(
             self._new_part(
                 message,
@@ -122,12 +135,12 @@ class OpenCodeTranscriptWriter:
                     "type": "step-finish",
                     "reason": _STEP_REASON,
                     "tokens": _tokens_field(usage),
-                    "cost": synthesize_cost_usd(usage),
+                    "cost": cost,
                 },
             )
         )
         message["info"]["tokens"] = _tokens_field(usage)
-        message["info"]["cost"] = synthesize_cost_usd(usage)
+        message["info"]["cost"] = cost
         self._open_assistant = None  # the turn is closed; the next tool call opens a new one
         self._write()
 

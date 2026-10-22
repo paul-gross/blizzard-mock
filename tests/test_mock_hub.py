@@ -182,6 +182,34 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
     assert statuses[1]["route_runner_id"] is None
 
 
+def test_chunk_statuses_serve_the_zero_cost_total_when_none_was_seeded(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    (status,) = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    assert status["cost"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_create_tokens": 0,
+        "cost_usd": 0.0,
+        "cost_partial": False,
+        "estimated_cost_usd": None,
+        "billed_partial": False,
+    }
+
+
+def test_chunk_statuses_serve_the_seeded_cost_total(client: TestClient) -> None:
+    cost = {"cost_usd": 0.0, "estimated_cost_usd": 7.5, "billed_partial": True, "output_tokens": 900}
+    resp = client.post("/_seed/chunk", json={**_SPEC, "cost": cost})
+    assert resp.status_code == 201
+    chunk_id = resp.json()["chunk_id"]
+    (status,) = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    assert status["cost"]["estimated_cost_usd"] == 7.5
+    assert status["cost"]["cost_usd"] == 0.0
+    assert status["cost"]["billed_partial"] is True
+    assert status["cost"]["output_tokens"] == 900
+    assert status["cost"]["cost_partial"] is False
+
+
 def test_chunk_statuses_conflicting_fact_reports_a_foreign_holder(client: TestClient) -> None:
     """The runner tick now reads routes only through this endpoint, so the
     ``conflicting_fact`` lever must drive its detach/abandon path here too, exactly as it

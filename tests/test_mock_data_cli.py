@@ -573,6 +573,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("cache_read_tokens", Integer, nullable=False),
         Column("cache_create_tokens", Integer, nullable=False),
         Column("cost_usd", Float, nullable=True),
+        Column("estimated_cost_usd", Float, nullable=True),
         Column("recorded_at", DateTime, nullable=False),
     )
     Table(
@@ -2532,8 +2533,7 @@ def test_create_usage_runner_store_refuses_runner_id(tmp_path: Path) -> None:
     assert "has no column on the runner store's usage_facts" in result.output
 
 
-def test_create_usage_runner_store_refuses_estimated_cost(tmp_path: Path) -> None:
-    url, _meta = _full_runner_store(tmp_path)
+def _create_runner_usage(url: str, *cost_flags: str) -> None:
     result = _runner().invoke(
         cli,
         [
@@ -2557,13 +2557,26 @@ def test_create_usage_runner_store_refuses_estimated_cost(tmp_path: Path) -> Non
             "claude-x",
             "--input-tokens",
             "1",
-            "--no-cost",
-            "--estimated-cost-usd",
-            "0.07",
+            *cost_flags,
         ],
     )
-    assert result.exit_code != 0
-    assert "--estimated-cost-usd has no column on the runner store's usage_facts" in result.output
+    assert result.exit_code == 0, result.output
+
+
+def test_create_usage_runner_store_lands_an_estimated_cost(tmp_path: Path) -> None:
+    url, meta = _full_runner_store(tmp_path)
+    _create_runner_usage(url, "--cost-usd", "0", "--estimated-cost-usd", "0.07")
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "usage_facts"))).all()
+    assert [(r.cost_usd, r.estimated_cost_usd) for r in rows] == [(0.0, 0.07)]
+
+
+def test_create_usage_runner_store_lands_a_null_estimate_when_omitted(tmp_path: Path) -> None:
+    url, meta = _full_runner_store(tmp_path)
+    _create_runner_usage(url, "--no-cost")
+    with create_engine(url).begin() as conn:
+        rows = conn.execute(select(_table(meta, "usage_facts"))).all()
+    assert [(r.cost_usd, r.estimated_cost_usd) for r in rows] == [(None, None)]
 
 
 def test_create_usage_refuses_runner_only_flags_against_the_hub_store(tmp_path: Path) -> None:

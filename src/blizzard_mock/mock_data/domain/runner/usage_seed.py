@@ -2,7 +2,7 @@
 
 Keyed by ``lease_id`` + ``generation`` rather than ``runner_id`` — the runner schema's
 own column set, distinct from the hub's (``domain/hub/usage_seed.py``). ``cost_usd``
-is genuinely nullable; ``compose_usage`` never substitutes ``0.0``.
+and ``estimated_cost_usd`` are genuinely nullable; ``compose_usage`` never substitutes ``0.0``.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ def compose_usage(
     cache_read_tokens: int = 0,
     cache_create_tokens: int = 0,
     cost_usd: float | None,
+    estimated_cost_usd: float | None = None,
     recorded_at: datetime,
 ) -> FactRow:
     """One ``usage_facts`` row. Raises :class:`UsageCompositionError` for an unknown ``kind``."""
@@ -59,6 +60,7 @@ def compose_usage(
             "cache_read_tokens": cache_read_tokens,
             "cache_create_tokens": cache_create_tokens,
             "cost_usd": cost_usd,
+            "estimated_cost_usd": estimated_cost_usd,
             "recorded_at": recorded_at,
         },
     )

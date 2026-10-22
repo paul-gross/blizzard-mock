@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from blizzard_mock.mock_hub.domain.models import (
     ApplyOutcome,
+    ChunkCostSpec,
     ChunkDeleteRefusal,
     Executor,
     GardenProposalClosureKind,
@@ -202,16 +203,23 @@ class ChunkDetail(BaseModel):
     project_name: str | None = None
 
 
+class ChunkUsageTotalView(ChunkCostSpec):
+    """A chunk's derived usage/cost total — mirrors ``blizzard.wire.chunk.ChunkUsageTotalView``;
+    every field is the seeded :class:`ChunkCostSpec`'s, zero when nothing was seeded."""
+
+
 class ChunkStatusView(BaseModel):
     """One chunk's tick-relevant status — mirrors ``blizzard.wire.chunk.ChunkStatusView``,
     the slim batch projection ``GET /api/fleet/chunk-statuses`` returns. Carries only the
-    fields the mock can derive from ``ChunkState``; ``pause``/``restart_epochs``/``cost``/
-    ``decision`` are omitted entirely, same as :class:`ChunkDetail`'s mirror."""
+    fields the mock can derive from ``ChunkState``; ``pause``/``restart_epochs``/``decision``
+    are omitted entirely, same as :class:`ChunkDetail`'s mirror. ``cost`` is the chunk's
+    seeded total, the real hub's zero total when none was seeded."""
 
     chunk_id: str
     status: str
     route_runner_id: str | None = None
     latest_epoch: int | None = None
+    cost: ChunkUsageTotalView = Field(default_factory=ChunkUsageTotalView)
     # The project the chunk belongs to — its id, current slug and display name.
     project_id: str | None = None
     project_slug: str | None = None

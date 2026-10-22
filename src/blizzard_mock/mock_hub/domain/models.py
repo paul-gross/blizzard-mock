@@ -399,6 +399,21 @@ class AnalyticsSpec(BaseModel):
     spend_graphs: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
 
 
+class ChunkCostSpec(BaseModel):
+    """A chunk's seeded derived cost total — the ``ChunkUsageTotalView`` shape the real hub
+    sums from usage rows, served as-is on ``ChunkStatusView.cost``. The mock records no
+    usage of its own, so a test wanting a chunk cap to trip seeds the total directly."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_create_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_partial: bool = False
+    estimated_cost_usd: float | None = None
+    billed_partial: bool = False
+
+
 #: The project every tenant starts with — the one the real hub creates beside a new tenant, and the one a
 #: migrated hub's existing work lands in. The first tenant's is pinned so a scenario can name it unread.
 FIRST_PROJECT_ID = "proj_00000000000000000000000000"
@@ -439,6 +454,8 @@ class ChunkSpec(BaseModel):
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
     #: The status seeded with no live route: ``ready``, or one a runner may not claim; never ``running``.
     status: ChunkStatus = ChunkStatus.READY
+    #: The chunk's derived cost total; ``None`` serves the real hub's zero total.
+    cost: ChunkCostSpec | None = None
 
     @field_validator("status")
     @classmethod
@@ -471,6 +488,7 @@ class ChunkState(BaseModel):
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
     garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
+    cost: ChunkCostSpec | None = None
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY

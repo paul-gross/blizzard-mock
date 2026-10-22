@@ -159,9 +159,10 @@ before.
   carrying no estimate either as a lower bound (`cost_partial`; one paired with
   `--estimated-cost-usd` reads `~$X.XX`, not `+`) — and `--node`/`--epoch`/`--runner-id` default
   from the chunk's own newest transition/lease when omitted. `--estimated-cost-usd`
-  is hub-only and nullable the same way (omitted lands `NULL`, never `0.0`) — the
+  is nullable the same way on either store (omitted lands `NULL`, never `0.0`) — the
   hub reads a non-`NULL` estimate as the `~`-marked share of the chunk's one cost
-  figure. `--store runner` lands
+  figure, and on `--store runner` it lands the runner store's own
+  `usage_facts.estimated_cost_usd`. `--store runner` lands
   one runner-store `usage_facts` row (`domain/runner/usage_seed.py`), keyed by
   `--lease-id`/`--generation` rather than `--runner-id` — the runner schema's own
   column set — so it requires `--node`/`--epoch`/`--lease-id` explicitly (no
