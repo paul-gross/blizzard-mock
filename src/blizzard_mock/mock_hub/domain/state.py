@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Protocol
 
 from blizzard_mock.mock_hub.domain.models import ChunkState, QuestionState
-from blizzard_mock.mock_hub.domain.wire import SubscriptionUsageView
+from blizzard_mock.mock_hub.domain.wire import RunnerDecliningView, SubscriptionUsageView
 
 
 @dataclass(frozen=True)
@@ -172,6 +172,9 @@ class RunnerRow:
         self.subscription: str | None = None
         # The agents the runner last declared it runs at once, ``None`` when it sent none.
         self.agents: int | None = None
+        # The throttles the runner last reported as saying no — replaced whole on every registration, empty when it
+        # sent none.
+        self.declining: tuple[RunnerDecliningView, ...] = ()
         self.paused = False
         self.retired_at: datetime | None = None
         self.retired_by: str | None = None
@@ -279,12 +282,13 @@ class IHubState(Protocol):
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
         agents: int | None = None,
+        declining: tuple[RunnerDecliningView, ...] = (),
     ) -> bool:
         """Register/heartbeat an added runner; return ``True`` on its first registration.
 
         Never inserts — an id no ``add`` wrote raises ``LookupError``. ``name`` replaces the held
         name and ``projects`` the held declaration unless ``None``; everything else, ``bindings`` and
-        ``subscription`` included, is overwritten on every call."""
+        ``subscription`` and ``declining`` included, is overwritten on every call."""
         ...
 
     def runner_for_token(self, token: str) -> RunnerRow | None:

@@ -90,19 +90,24 @@ class MockRunnerService:
     # -- drive verbs -------------------------------------------------------
 
     def register(
-        self, *, capabilities: list[dict[str, Any]] | None = None, subscriptions: list[dict[str, Any]] | None = None
+        self,
+        *,
+        capabilities: list[dict[str, Any]] | None = None,
+        subscriptions: list[dict[str, Any]] | None = None,
+        declining: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Register with the hub. ``capabilities`` is the raw
         ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
         settable directly, with no real harness adapter behind it. ``subscriptions``
         is forwarded only when supplied, driving the hub's rosterless fallback when it
-        is left out."""
+        is left out; ``declining`` likewise, the throttle reasons a runner reports saying no."""
         self._apply_delay(None)
         status, body = self._gw.register(
             name=self._name,
             workspace_id=self._workspace_id,
             capabilities=DEFAULT_CAPABILITIES if capabilities is None else capabilities,
             subscriptions=subscriptions,
+            declining=declining,
         )
         registered_id = body.get("runner_id")
         if status in (200, 201) and isinstance(registered_id, str):

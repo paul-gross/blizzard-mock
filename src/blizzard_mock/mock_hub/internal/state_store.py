@@ -22,6 +22,7 @@ from blizzard_mock.mock_hub.domain.state import (
     ServedEntry,
     TenantRow,
 )
+from blizzard_mock.mock_hub.domain.wire import RunnerDecliningView
 
 
 class InMemoryHubState:
@@ -98,6 +99,7 @@ class InMemoryHubState:
         bindings: tuple[RunnerBinding, ...] | None = None,
         subscription: str | None = None,
         agents: int | None = None,
+        declining: tuple[RunnerDecliningView, ...] = (),
     ) -> bool:
         row = self._runners.get(runner_id)
         if row is None:
@@ -118,6 +120,7 @@ class InMemoryHubState:
         row.bindings = bindings
         row.subscription = subscription
         row.agents = agents
+        row.declining = declining
         if projects is not None:
             row.projects = projects
         return first

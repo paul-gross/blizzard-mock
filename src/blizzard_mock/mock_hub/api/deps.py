@@ -7,6 +7,7 @@ field-for-field including required-ness."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
@@ -188,6 +189,15 @@ class RunnerBindingBody(MirroredWireBody):
     agents: int
 
 
+class RunnerDecliningBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.runner.RunnerDeclining`` field-for-field — one throttle saying no."""
+
+    lever: str
+    detail: str
+    subscription: str | None = None
+    until: datetime | None = None
+
+
 class RunnerRegistrationBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.runner.RunnerRegistrationRequest`` field-for-field. It carries
     no identity — the bearer token names the runner — only the ``name`` it declares, which a
@@ -216,6 +226,8 @@ class RunnerRegistrationBody(MirroredWireBody):
     # The agents the runner runs at once, shared by every binding; ``None`` from a runner that predates it.
     agents: int | None = Field(default=None, gt=0)
     version: str | None = None
+    # The throttles saying no — ``None`` from a runner that predates the report, ``[]`` when none is.
+    declining: list[RunnerDecliningBody] | None = None
 
 
 class RunnerFactBody(BaseModel):

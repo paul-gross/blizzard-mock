@@ -50,6 +50,7 @@ _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "fact_kinds
 _OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode" / "shapes.py"
 _ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
 _EVENT_LOG_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "event_log.py"
+_HUB_EVENTS_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "domain" / "observability" / "hub_events.py"
 _HUB_SCHEMA_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "store" / "schema.py"
 _CLAIM_DENIALS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "claim_denials.py"
 
@@ -380,6 +381,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RouteView": ("RouteView", frozenset()),
     "RunnerAddResponse": ("RunnerAddResponse", frozenset()),
     "RunnerCapabilityView": ("RunnerCapability", frozenset()),
+    "RunnerDecliningView": ("RunnerDecliningView", frozenset()),
     "RunnerEnrollmentResponse": ("RunnerEnrollmentResponse", frozenset()),
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
     "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
@@ -417,6 +419,7 @@ _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerAddBody": ("RunnerAddRequest", frozenset()),
     "RunnerBindingBody": ("RunnerBinding", frozenset()),
     "RunnerCapabilityBody": ("RunnerCapability", frozenset()),
+    "RunnerDecliningBody": ("RunnerDeclining", frozenset()),
     "RunnerRegistrationBody": ("RunnerRegistrationRequest", frozenset()),
     "RunnerRetireBody": ("RunnerRetireRequest", frozenset()),
     "RunnerSubscriptionDeclarationBody": ("RunnerSubscriptionDeclaration", frozenset()),
@@ -522,7 +525,9 @@ def test_hub_event_kinds_match_the_real_vocabulary() -> None:
     ``HubEventKind``, and lets a runner report only the kinds both logs carry — a hub kind
     the mock never learned would land in a tenant's log."""
     real = _exec_source("_event_log_wire_parity", _EVENT_LOG_SOURCE)
-    hub_kinds = set(get_args(real.HubEventKind))
+    block = re.search(r"^HubEventKind = Literal\[\n(.*?)^\]", _sibling(_HUB_EVENTS_SOURCE), re.M | re.S)
+    assert block is not None, f"no HubEventKind declaration in {_HUB_EVENTS_SOURCE}"
+    hub_kinds = set(re.findall(r'"([a-z-]+)"', block.group(1)))
     assert set(HUB_EVENT_KINDS) == hub_kinds
     assert set(EXPORT_EVENT_KINDS) == hub_kinds & set(get_args(real.EventLogKind))
 

@@ -23,10 +23,11 @@ class IHubGateway(Protocol):
         workspace_id: str,
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
+        declining: list[dict[str, Any]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         """Register the runner the bearer token names, under ``name``. ``subscriptions`` is
         forwarded only when supplied — ``None`` omits the key entirely, driving the hub's
-        rosterless fallback."""
+        rosterless fallback; ``declining`` likewise, driving a runner that predates the report."""
         ...
 
     def peek(self) -> tuple[int, dict[str, Any]]: ...

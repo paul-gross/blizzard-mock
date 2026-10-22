@@ -70,6 +70,7 @@ from blizzard_mock.mock_hub.domain.state import (
     DeclaredSubscription,
     RunnerBinding,
     RunnerCapability,
+    RunnerDecliningView,
 )
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
@@ -538,6 +539,15 @@ def register_runner(
             ),
             subscription=body.subscription,
             agents=body.agents,
+            declining=tuple(
+                RunnerDecliningView(
+                    lever=d.lever,
+                    detail=d.detail,
+                    subscription=d.subscription,
+                    until=None if d.until is None else d.until.isoformat(),
+                )
+                for d in body.declining or ()
+            ),
             version=body.version,
         )
     except RunnerVersionRefused as exc:

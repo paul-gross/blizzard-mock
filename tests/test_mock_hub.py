@@ -292,6 +292,27 @@ def test_registration_stores_gates_and_the_runner_view_echoes_them(client: TestC
     assert client.get("/api/fleet/runners/r-gates").json()["gates"] == []
 
 
+def test_registration_stores_declining_and_the_runner_view_serves_it_superseded_whole(client: TestClient) -> None:
+    """The throttles a runner reports saying no round-trip into its view with their instants, each registration
+    replacing the last whole, and an absent or empty report reading as none."""
+    floor = {"lever": "floor", "detail": "exhausted", "subscription": "anthropic", "until": "2026-10-22T14:00:00Z"}
+    pace = {"lever": "pace", "detail": "7d 86% spent"}
+    body = {"runner_id": "r-declining", "workspace_id": "ws"}
+    assert client.post("/api/fleet/runners", json={**body, "declining": [floor, pace]}).status_code == 201
+
+    view = client.get("/api/fleet/runners/r-declining").json()["declining"]
+    assert [(d["lever"], d["subscription"], d["until"]) for d in view] == [
+        ("floor", "anthropic", "2026-10-22T14:00:00+00:00"),
+        ("pace", None, None),
+    ]
+
+    assert client.post("/api/fleet/runners", json={**body, "declining": [pace]}).status_code == 201
+    assert [d["lever"] for d in client.get("/api/fleet/runners/r-declining").json()["declining"]] == ["pace"]
+
+    assert client.post("/api/fleet/runners", json=body).status_code == 201
+    assert client.get("/api/fleet/runners/r-declining").json()["declining"] == []
+
+
 def test_runner_view_carries_the_registered_capability_snapshot(client: TestClient) -> None:
     """``RunnerView`` mirrors the real hub's ``capabilities`` field, so the
     board can read it back the same way it reads liveness or the pause brakes."""
@@ -4104,6 +4125,7 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
             "project_id": FIRST_PROJECT_ID,
             "slug": DEFAULT_PROJECT_SLUG,
             "name": DEFAULT_PROJECT_NAME,
+            "color": None,
             "claimable": False,
         }
     ]

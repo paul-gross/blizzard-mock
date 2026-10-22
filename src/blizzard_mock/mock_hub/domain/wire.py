@@ -275,12 +275,13 @@ class RunnerCapabilityView(BaseModel):
 class ServedProjectView(BaseModel):
     """One entry of the projects a runner serves — mirrors ``blizzard.wire.runner.ServedProjectView``: the
     ``entry`` as declared, a project id or slug, and the project it resolves to in the runner's tenant;
-    ``project_id``, ``slug`` and ``name`` are ``None`` for an entry no project answers to."""
+    ``project_id``, ``slug``, ``name`` and ``color`` are ``None`` for an entry no project answers to."""
 
     entry: str
     project_id: str | None = None
     slug: str | None = None
     name: str | None = None
+    color: str | None = None
     claimable: bool = False
 
 
@@ -292,6 +293,15 @@ class RunnerBindingView(BaseModel):
     workspace_id: str
     agents: int
     workspace_unreported: bool = False
+
+
+class RunnerDecliningView(BaseModel):
+    """One throttle a runner reported as saying no — mirrors ``blizzard.wire.runner.RunnerDecliningView``."""
+
+    lever: str
+    detail: str
+    subscription: str | None = None
+    until: str | None = None
 
 
 class RunnerView(BaseModel):
@@ -326,6 +336,8 @@ class RunnerView(BaseModel):
     bindings: list[RunnerBindingView] | None = None
     subscription: str | None = None
     subscription_unrostered: bool = False
+    # The throttles the runner last reported as saying no; empty when none, or when it sent none.
+    declining: list[RunnerDecliningView] = Field(default_factory=list)
 
 
 class VersionWindowView(BaseModel):

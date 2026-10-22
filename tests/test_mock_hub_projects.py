@@ -21,6 +21,7 @@ _DEFAULT_SERVED = {
     "project_id": FIRST_PROJECT_ID,
     "slug": DEFAULT_PROJECT_SLUG,
     "name": DEFAULT_PROJECT_NAME,
+    "color": None,
     "claimable": False,
 }
 
@@ -152,7 +153,7 @@ def test_a_runner_added_naming_projects_serves_exactly_those(client: FleetClient
     resp = _register_added(client, added)
 
     assert resp.json()["projects"] == [
-        {"entry": "web", "project_id": web, "slug": "web", "name": "Web", "claimable": False},
+        {"entry": "web", "project_id": web, "slug": "web", "name": "Web", "color": None, "claimable": False},
         _DEFAULT_SERVED,
     ]
 
@@ -187,7 +188,7 @@ def test_registration_declaring_a_list_replaces_the_declaration(client: FleetCli
     resp = _register(client, projects=[web])
 
     assert resp.json()["projects"] == [
-        {"entry": web, "project_id": web, "slug": "web", "name": "Web", "claimable": False}
+        {"entry": web, "project_id": web, "slug": "web", "name": "Web", "color": None, "claimable": False}
     ]
     assert client.get("/api/fleet/runners/r1").json()["projects"] == resp.json()["projects"]
 
@@ -195,14 +196,14 @@ def test_registration_declaring_a_list_replaces_the_declaration(client: FleetCli
 def test_an_unresolved_entry_is_kept_serving_nothing_until_a_project_answers_to_it(client: FleetClient) -> None:
     unresolved = _register(client, projects=["later"])
     assert unresolved.json()["projects"] == [
-        {"entry": "later", "project_id": None, "slug": None, "name": None, "claimable": False}
+        {"entry": "later", "project_id": None, "slug": None, "name": None, "color": None, "claimable": False}
     ]
 
     later = _seed_project(client, "later")
     resolved = _register(client, projects=["later"])
 
     assert resolved.json()["projects"] == [
-        {"entry": "later", "project_id": later, "slug": "later", "name": "Later", "claimable": False}
+        {"entry": "later", "project_id": later, "slug": "later", "name": "Later", "color": None, "claimable": False}
     ]
 
 
@@ -212,7 +213,14 @@ def test_a_project_of_another_tenant_resolves_to_nothing(client: FleetClient) ->
 
     (served,) = _register(client, projects=[foreign]).json()["projects"]
 
-    assert served == {"entry": foreign, "project_id": None, "slug": None, "name": None, "claimable": False}
+    assert served == {
+        "entry": foreign,
+        "project_id": None,
+        "slug": None,
+        "name": None,
+        "color": None,
+        "claimable": False,
+    }
 
 
 # --- the matched peek ----------------------------------------------------------
