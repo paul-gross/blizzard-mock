@@ -1791,9 +1791,9 @@ class MockHubService:
         """Register the runner ``runner_id`` names — always the caller's own, resolved from its token. A blank or absent
         ``name`` keeps the held one. ``projects`` replaces the served declaration — ``[]`` with none — and ``None``
         keeps it; sent ``bindings`` replace it with their projects, in binding order, and are stored as sent with
-        ``subscription``; ``agents`` is stored as sent too; ``declining`` replaces the earlier report whole. Registration doubles as the
-        heartbeat, so it never refuses over the declaration: an entry no project answers to is stored unresolved, and
-        resolved afresh at the next registration that declares it.
+        ``subscription``; ``agents`` is stored as sent too; ``declining`` replaces the earlier report whole.
+        Registration doubles as the heartbeat, so it never refuses over the declaration: an entry no project answers
+        to is stored unresolved, and resolved afresh at the next registration that declares it.
         ``version`` is never judged; only the ``version_refused`` lever refuses."""
         tenant_id = self._added(runner_id).tenant_id
         self._refuse_version(runner_id, version)

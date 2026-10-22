@@ -4125,6 +4125,7 @@ def test_registration_takes_the_runner_from_its_token_and_records_its_name(clien
             "project_id": FIRST_PROJECT_ID,
             "slug": DEFAULT_PROJECT_SLUG,
             "name": DEFAULT_PROJECT_NAME,
+            "color": None,
             "claimable": False,
         }
     ]
