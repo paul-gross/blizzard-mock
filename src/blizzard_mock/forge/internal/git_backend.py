@@ -229,7 +229,7 @@ class GitBackend:
             work.git.custom_environment(**_MERGE_IDENTITY),
         ):
             try:
-                work.git.rebase(base)
+                work.git.rebase("--force-rebase", base)
             except GitCommandError as exc:
                 self._raise_op_error(
                     exc, work, repo, base, head, op="rebase", conflict_markers=("CONFLICT", "could not apply")
@@ -237,6 +237,30 @@ class GitBackend:
             new_sha = work.git.rev_parse("HEAD")
         git.git.update_ref(f"refs/heads/{base}", new_sha)
         return new_sha
+
+    def squash(self, repo: RepoModel, base: str, head: str, message: str) -> str:
+        head_sha = self.resolve_ref(repo, head)
+        # Attached to `base`, so the squash commit advances that branch ref directly.
+        with (
+            self._throwaway_worktree(repo, checkout_ref=base, detach=False) as work,
+            work.git.custom_environment(**_MERGE_IDENTITY),
+        ):
+            try:
+                work.git.merge("--squash", head_sha)
+                work.git.commit("--allow-empty", "-m", message)
+            except GitCommandError as exc:
+                self._raise_op_error(
+                    exc, work, repo, base, head, op="merge", conflict_markers=("CONFLICT", "Automatic merge failed")
+                )
+            return work.git.rev_parse("HEAD")
+
+    def create_ref(self, repo: RepoModel, branch: str, sha: str) -> None:
+        git = self._open(repo.owner, repo.name)
+        git.git.update_ref(f"refs/heads/{branch}", sha, "")
+
+    def delete_ref(self, repo: RepoModel, branch: str) -> None:
+        git = self._open(repo.owner, repo.name)
+        git.git.update_ref("-d", f"refs/heads/{branch}")
 
     def update_ref(self, repo: RepoModel, ref: str, sha: str) -> None:
         git = self._open(repo.owner, repo.name)

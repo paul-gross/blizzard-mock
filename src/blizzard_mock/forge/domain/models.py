@@ -121,7 +121,10 @@ class PullRequest(BaseModel):
     merged_at: datetime | None = None
     merged_by: str | None = None
     merge_commit_sha: str | None = None
-    head_sha_at_merge: str | None = None
-    """The head branch's tip at the moment of merge — frozen rather than tracking the
-    branch ref afterward, matching real GitHub: a merged PR's own ``head.sha`` never
-    changes even if its branch name is later re-pushed for unrelated work."""
+    closed_head_sha: str | None = None
+    """The head branch's tip at the moment the pull closed or merged — frozen rather than
+    tracking the branch ref afterward, matching real GitHub: a closed PR's own ``head.sha``
+    never changes even if its branch name is later re-pushed or deleted."""
+    closed_base_sha: str | None = None
+    """The base branch's tip when the pull closed or merged — the fallback ``base.sha`` once
+    the base branch is gone."""

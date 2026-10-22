@@ -19,8 +19,16 @@ class InMemoryLeverStore:
     def arm(self, lever: Lever) -> None:
         self._levers[lever.kind, lever.scope_key()] = lever
 
-    def clear(self, kind: LeverKind, repo: str | None, number: int | None) -> None:
-        self._levers.pop((kind, Lever(kind=kind, repo=repo, number=number).scope_key()), None)
+    def clear(
+        self,
+        kind: LeverKind,
+        repo: str | None,
+        number: int | None,
+        branch: str | None = None,
+        pattern: str | None = None,
+    ) -> None:
+        scope = Lever(kind=kind, repo=repo, number=number, branch=branch, pattern=pattern).scope_key()
+        self._levers.pop((kind, scope), None)
 
     def clear_all(self) -> None:
         self._levers.clear()

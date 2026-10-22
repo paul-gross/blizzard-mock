@@ -100,3 +100,45 @@ class LabelNotFound(ForgeError):
     """No such label is set on the issue (GitHub 404, issue-label ``DELETE``)."""
 
     status = 404
+
+
+class MergeConflict(ForgeError):
+    """A branch merge (``POST /merges``) hit a real conflict (GitHub 409,
+    ``Merge conflict``)."""
+
+    status = 409
+
+
+class ProtectedBranch(ForgeError):
+    """A ref update was refused by branch protection — the ``branch_protected``
+    lever (GitHub 422, ``Protected branch update failed``)."""
+
+    status = 422
+
+
+class RuleViolation(ForgeError):
+    """A ref create or branch merge was refused by a repository ruleset — the
+    ``ruleset`` lever (GitHub 422, ``Repository rule violations found``)."""
+
+    status = 422
+
+
+class MergeMethodNotAllowed(ForgeError):
+    """The repository does not allow this merge method — the
+    ``merge_commits_disallowed`` lever (GitHub 405)."""
+
+    status = 405
+
+
+class RefAlreadyExists(ForgeError):
+    """``POST git/refs`` named a ref that already exists (GitHub 422,
+    ``Reference already exists``)."""
+
+    status = 422
+
+
+class RefMissing(ForgeError):
+    """``DELETE git/refs`` named a ref that does not exist (GitHub 422,
+    ``Reference does not exist``)."""
+
+    status = 422

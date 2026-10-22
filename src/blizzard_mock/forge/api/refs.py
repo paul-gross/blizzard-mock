@@ -1,17 +1,19 @@
 """Git-data routes — commits and refs, resolved against the bare repo.
 
-Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), and supports an atomic
-compare-and-swap ref update. ``.../check-runs`` derives runs live from the lever set.
+Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), creates, fast-forwards, and
+deletes branches, and merges one branch into another (``POST /merges``). ``.../check-runs`` answers the
+runs armed against a revision, or derives them live from the lever set.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
+from fastapi.responses import JSONResponse
 
 from blizzard_mock.forge.api import serialization as ser
-from blizzard_mock.forge.api.deps import UpdateRefBody, get_base_url, get_service
+from blizzard_mock.forge.api.deps import CreateRefBody, MergeBranchesBody, UpdateRefBody, get_base_url, get_service
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.service import ForgeService
 
@@ -92,3 +94,40 @@ def update_ref(
     short = ref.removeprefix("heads/")
     sha = service.update_ref(owner, repo, short, sha=body.sha, force=body.force)
     return ser.ref_json(f"{owner}/{repo}", f"refs/{ref}", sha, base_url)
+
+
+@router.post("/repos/{owner}/{repo}/git/refs", status_code=201)
+def create_ref(
+    owner: str,
+    repo: str,
+    body: CreateRefBody,
+    service: Annotated[ForgeService, Depends(get_service)],
+    base_url: Annotated[str, Depends(get_base_url)],
+) -> JSONResponse:
+    sha = service.create_ref(owner, repo, body.ref, sha=body.sha)
+    return JSONResponse(status_code=201, content=ser.ref_json(f"{owner}/{repo}", body.ref, sha, base_url))
+
+
+@router.delete("/repos/{owner}/{repo}/git/refs/heads/{branch:path}", status_code=204)
+def delete_ref(
+    owner: str,
+    repo: str,
+    branch: str,
+    service: Annotated[ForgeService, Depends(get_service)],
+) -> Response:
+    service.delete_ref(owner, repo, branch)
+    return Response(status_code=204)
+
+
+@router.post("/repos/{owner}/{repo}/merges", status_code=201)
+def merge_branches(
+    owner: str,
+    repo: str,
+    body: MergeBranchesBody,
+    service: Annotated[ForgeService, Depends(get_service)],
+    base_url: Annotated[str, Depends(get_base_url)],
+) -> Response:
+    commit = service.merge_branches(owner, repo, base=body.base, head=body.head, message=body.commit_message)
+    if commit is None:
+        return Response(status_code=204)
+    return JSONResponse(status_code=201, content=ser.commit_json(f"{owner}/{repo}", commit, base_url))
