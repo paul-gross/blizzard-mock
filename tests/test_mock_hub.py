@@ -945,7 +945,7 @@ async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> N
     import asyncio
     import time
 
-    from httpx import ASGITransport, AsyncClient
+    from httpx2 import ASGITransport, AsyncClient
 
     app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))
     token = runner_token("r1")
