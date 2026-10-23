@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -3185,7 +3185,7 @@ def test_garden_proposals_page_follows_next_cursor_to_the_unpaged_docket(client:
     whole = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": state}).json()
 
     collected: list[dict] = []
-    params: dict[str, object] = {"state": state, "limit": 2}
+    params: dict[str, str | int] = {"state": state, "limit": 2}
     while True:
         page = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals/page", params=params)
         assert page.status_code == 200, page.text
