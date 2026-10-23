@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 #: Every mock-runner->hub call mounts under the fleet partition,
 #: mirroring the real hub's own router split.

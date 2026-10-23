@@ -12,9 +12,9 @@ dependencies = [
     # HTTP facade) is a FastAPI app served by uvicorn.
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
-    # httpx backs FastAPI's TestClient and the in-process clients the
+    # httpx2 backs FastAPI's TestClient and the in-process clients the
     # component/service tiers use to drive the forge.
-    "httpx>=0.27.0",
+    "httpx2>=2.16.0",
     # Form-encoded request bodies — the stub IdP's OAuth2 token endpoints
     # (``POST /oidc/token``, ``POST /login/oauth/access_token``, issue #92) receive
     # ``application/x-www-form-urlencoded`` bodies, which FastAPI's ``Form()`` requires

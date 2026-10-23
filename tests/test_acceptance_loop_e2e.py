@@ -46,7 +46,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from blizzard_mock.fixture_workspace.cli import _resolve_winter_source
