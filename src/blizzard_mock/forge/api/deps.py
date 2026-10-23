@@ -82,3 +82,9 @@ class MergeBranchesBody(BaseModel):
     base: str
     head: str
     commit_message: str | None = None
+
+
+class CreateRepoBody(BaseModel):
+    owner: str
+    name: str
+    seed: str = "toy-api"

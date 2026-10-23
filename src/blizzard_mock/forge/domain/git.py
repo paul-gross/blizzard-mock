@@ -6,6 +6,7 @@ Mergeability uses real refs; merges update the base branch
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -86,6 +87,15 @@ class IReadGitBackend(Protocol):
 
 
 class IWriteGitBackend(IReadGitBackend, Protocol):
+    def create(self, owner: str, name: str, files: Mapping[str, str]) -> Repo:
+        """Create the bare repo ``owner/name`` with one commit of ``files`` on
+        ``main`` and serve it from the next request. Raises ``RepoAlreadyExists``."""
+        ...
+
+    def origin(self, repo: Repo) -> str:
+        """The path of the bare repo backing ``repo`` — its clone origin."""
+        ...
+
     def merge(self, repo: Repo, base: str, head: str, message: str) -> str:
         """Really merge ``head`` into ``base`` in the bare repo and return the
         new commit sha on ``base``. Raises ``NotMergeable`` on real conflict."""

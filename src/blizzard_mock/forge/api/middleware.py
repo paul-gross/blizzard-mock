@@ -24,7 +24,7 @@ from starlette.responses import JSONResponse, Response
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
-_EXEMPT_PREFIXES = ("/_levers", "/healthz", "/docs", "/openapi.json", "/redoc")
+_EXEMPT_PREFIXES = ("/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
 
 _SECONDARY_LIMIT_MESSAGE = "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
 

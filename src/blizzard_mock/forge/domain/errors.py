@@ -24,6 +24,12 @@ class RepoNotFound(ForgeError):
     status = 404
 
 
+class RepoAlreadyExists(ForgeError):
+    """A bare repo already backs the requested ``owner/name`` (``POST /_repos``, 409)."""
+
+    status = 409
+
+
 class IssueNotFound(ForgeError):
     """No issue with the requested number in the repo (GitHub 404)."""
 

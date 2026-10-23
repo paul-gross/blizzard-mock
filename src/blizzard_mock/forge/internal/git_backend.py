@@ -10,13 +10,13 @@ from __future__ import annotations
 import contextlib
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
-from blizzard_mock.forge.domain.errors import BranchNotFound, RepoNotFound
+from blizzard_mock.forge.domain.errors import BranchNotFound, RepoAlreadyExists, RepoNotFound
 from blizzard_mock.forge.domain.git import GitAuthor, GitCommit, GitCompare, GitCompareCommit, GitCompareFile
 from blizzard_mock.forge.domain.models import Repo as RepoModel
 from blizzard_mock.forge.internal.errors import GitErrorFactory
@@ -201,7 +201,34 @@ class GitBackend:
             return False
         return True
 
+    def origin(self, repo: RepoModel) -> str:
+        return str(Path(self._open(repo.owner, repo.name).git_dir))
+
     # -- writes ------------------------------------------------------------
+
+    def create(self, owner: str, name: str, files: Mapping[str, str]) -> RepoModel:
+        if any(path.exists() for path in self._candidates(owner, name)):
+            raise RepoAlreadyExists("repository exists")
+        bare_path = self._root / owner / f"{name}.git"
+        bare_path.parent.mkdir(parents=True, exist_ok=True)
+        # An unborn branch has no ref for a linked worktree to check out, so the seed
+        # commit is made in a throwaway repo and pushed into the bare one.
+        bare = Repo.init(bare_path, bare=True, initial_branch="main")
+        tmp = Path(tempfile.mkdtemp(prefix="forge-seed-"))
+        try:
+            work = Repo.init(tmp, initial_branch="main")
+            for relative, content in files.items():
+                target = tmp / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+            with work.git.custom_environment(**_MERGE_IDENTITY):
+                work.git.add("-A")
+                work.git.commit("-m", "chore: seed repository")
+                work.git.push(str(bare_path), "main:refs/heads/main")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self._cache[f"{owner}/{name}"] = bare
+        return RepoModel(owner=owner, name=name, default_branch="main")
 
     def merge(self, repo: RepoModel, base: str, head: str, message: str) -> str:
         head_sha = self.resolve_ref(repo, head)
