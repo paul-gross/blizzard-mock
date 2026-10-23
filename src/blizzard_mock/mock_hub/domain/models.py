@@ -212,6 +212,14 @@ class EscalationState(BaseModel):
     detail: str | None = None
 
 
+class ReleaseRecord(BaseModel):
+    """One accepted release — the ``route_released`` row the real hub writes, collapsed to who let go and why."""
+
+    runner_id: str
+    epoch: int
+    reason: str
+
+
 class QuestionState(BaseModel):
     """A pending or answered ask/answer rendezvous question (``question.asked``) —
     mirrors ``blizzard.wire.question.QuestionView``. Held in ``IHubState``, not on the
@@ -510,6 +518,8 @@ class ChunkState(BaseModel):
     #: Retries exhausted (``escalation.recorded``) — surfaced
     #: read-only via ``ChunkDetail.escalation``.
     escalation: EscalationState | None = None
+    #: Every release the holding runner made of this chunk, oldest first.
+    releases: list[ReleaseRecord] = Field(default_factory=list)
 
     def node(self, node_id: str) -> NodeSpec | None:
         return self.nodes.get(node_id)
@@ -534,6 +544,30 @@ class ChunkState(BaseModel):
         """Refuse to re-key a route left on an ended chunk (:class:`RekeyDeniedTerminal`)."""
         if self.ended:
             raise RekeyDeniedTerminal(chunk_id=self.chunk_id, status=self.status)
+
+    def refuse_release(self, *, runner_id: str, epoch: int) -> None:
+        """Refuse a release in the real hub's order: a caller not holding the route
+        (:class:`ReleaseNotHolder`), a chunk not ``running``, then an epoch the chunk has moved
+        past (both :class:`ReleaseRefused`)."""
+        if not self.claimed or self.route_runner_id != runner_id:
+            raise ReleaseNotHolder(chunk_id=self.chunk_id, runner_id=runner_id)
+        if self.status is not ChunkStatus.RUNNING:
+            raise ReleaseRefused(chunk_id=self.chunk_id, reason="not-running", detail=f"chunk is {self.status.value}")
+        if epoch < self.latest_epoch:
+            raise ReleaseRefused(
+                chunk_id=self.chunk_id, reason="stale", detail=f"stale epoch {epoch} < {self.latest_epoch}"
+            )
+
+    def release(self, *, runner_id: str, epoch: int, reason: str) -> int:
+        """Give the route back, leaving the node where it is, and record the write; returns its id."""
+        self.refuse_release(runner_id=runner_id, epoch=epoch)
+        self.claimed = False
+        self.route_runner_id = None
+        self.route_workspace_id = None
+        self.route_environment_ids = []
+        self.status = ChunkStatus.READY
+        self.releases.append(ReleaseRecord(runner_id=runner_id, epoch=epoch, reason=reason))
+        return len(self.releases)
 
     def refuse_envelope(self) -> None:
         """Refuse the envelope of an ended chunk (:class:`NoCurrentNode`)."""
@@ -613,3 +647,21 @@ class NoCurrentNode(Exception):
     def __init__(self, chunk_id: str) -> None:
         super().__init__("chunk has no current runner node (terminal)")
         self.chunk_id = chunk_id
+
+
+class ReleaseNotHolder(Exception):
+    """The caller does not hold the chunk's route — the real hub answers a release ``403``."""
+
+    def __init__(self, *, chunk_id: str, runner_id: str) -> None:
+        super().__init__(f"runner {runner_id} does not hold chunk {chunk_id}'s route")
+        self.chunk_id = chunk_id
+
+
+class ReleaseRefused(Exception):
+    """The chunk's state refuses a release — the real hub's ``409`` ``ReleaseRefusal``."""
+
+    def __init__(self, *, chunk_id: str, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.chunk_id = chunk_id
+        self.reason = reason
+        self.detail = detail

@@ -379,6 +379,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RotatePolicyView": ("RotatePolicyView", frozenset()),
     "RouteClaimResponse": ("RouteClaimResponse", frozenset()),
     "RouteTokenRekeyResponse": ("RouteTokenRekeyResponse", frozenset()),
+    "ReleaseResponse": ("ReleaseResponse", frozenset()),
     "RouteView": ("RouteView", frozenset()),
     "RunnerAddResponse": ("RunnerAddResponse", frozenset()),
     "RunnerCapabilityView": ("RunnerCapability", frozenset()),

@@ -100,6 +100,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     QuestionView,
     QueuePeekEntry,
     QueuePeekResponse,
+    ReleaseResponse,
     RotatePolicyView,
     RouteClaimResponse,
     RouteTokenRekeyResponse,
@@ -710,6 +711,15 @@ class MockHubService:
             chunk_id=chunk_id,
             route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}-rekey{chunk.route_token_rekey_count}",
         )
+
+    def release(self, chunk_id: str, *, runner_id: str, epoch: int, reason: str) -> ReleaseResponse:
+        """The holding runner gives the chunk's route back — mirrors the real hub's
+        ``POST /api/fleet/chunks/{id}/release``. The chunk returns ``ready`` at its current node;
+        the write is recorded on the chunk's ``releases``."""
+        chunk = self._require(chunk_id)
+        released_id = chunk.release(runner_id=runner_id, epoch=epoch, reason=reason)
+        self._state.put_chunk(chunk)
+        return ReleaseResponse(chunk_id=chunk_id, released_id=released_id)
 
     # -- reads -------------------------------------------------------------
 

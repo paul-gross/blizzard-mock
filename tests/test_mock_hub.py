@@ -244,6 +244,57 @@ def test_rekey_route_token_returns_a_different_deterministic_token_than_the_clai
     assert rekey_again["route_token"] != body["route_token"]
 
 
+def _release(client: TestClient, chunk_id: str, *, epoch: int = 1, runner_id: str = "r1") -> httpx.Response:
+    return client.post(
+        f"/api/fleet/chunks/{chunk_id}/release",
+        json={"epoch": epoch, "reason": "throttled", "route_token": "t", "runner_id": runner_id},
+    )
+
+
+def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    node_before = client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"]
+
+    released = _release(client, chunk_id)
+
+    assert released.status_code == 200, released.text
+    assert released.json() == {"chunk_id": chunk_id, "released_id": 1}
+    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert (detail["status"], detail["route"], detail["current_node_id"]) == ("ready", None, node_before)
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    chunk = service._state.get_chunk(chunk_id)  # the recorded write has no wire read
+    assert chunk is not None
+    assert [(r.runner_id, r.epoch, r.reason) for r in chunk.releases] == [("r1", 1, "throttled")]
+
+
+def test_a_release_at_a_stale_epoch_answers_409_stale(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id, epoch=2)
+
+    refused = _release(client, chunk_id, epoch=1)
+
+    assert refused.status_code == 409
+    assert refused.json()["reason"] == "stale"
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
+
+
+def test_a_release_by_a_runner_not_holding_the_route_answers_403(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    register_runner(service, "r2")
+
+    assert _release(client, chunk_id, runner_id="r2").status_code == 403
+
+
+def test_a_release_of_an_unknown_chunk_answers_404(client: TestClient) -> None:
+    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    register_runner(service, "r1")
+
+    assert _release(client, "ch_nope").status_code == 404
+
+
 def test_rekey_route_token_404s_on_an_unclaimed_chunk(client: TestClient) -> None:
     chunk_id = _seed(client)
     assert client.post(f"/api/fleet/chunks/{chunk_id}/route-token").status_code == 404
