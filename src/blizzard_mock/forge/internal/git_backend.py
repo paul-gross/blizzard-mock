@@ -211,11 +211,16 @@ class GitBackend:
             raise RepoAlreadyExists("repository exists")
         bare_path = self._root / owner / f"{name}.git"
         bare_path.parent.mkdir(parents=True, exist_ok=True)
-        # An unborn branch has no ref for a linked worktree to check out, so the seed
-        # commit is made in a throwaway repo and pushed into the bare one.
-        bare = Repo.init(bare_path, bare=True, initial_branch="main")
+        # Atomic claim of the path, so two creates of one name cannot both proceed.
+        try:
+            bare_path.mkdir()
+        except FileExistsError as exc:
+            raise RepoAlreadyExists("repository exists") from exc
         tmp = Path(tempfile.mkdtemp(prefix="forge-seed-"))
         try:
+            bare = Repo.init(bare_path, bare=True, initial_branch="main")
+            # An unborn branch has no ref for a linked worktree to check out, so the seed
+            # commit is made in a throwaway repo and pushed into the bare one.
             work = Repo.init(tmp, initial_branch="main")
             for relative, content in files.items():
                 target = tmp / relative
@@ -225,6 +230,10 @@ class GitBackend:
                 work.git.add("-A")
                 work.git.commit("-m", "chore: seed repository")
                 work.git.push(str(bare_path), "main:refs/heads/main")
+        except BaseException:
+            # A half-made repo would answer 409 to every retry and serve a repo with no main.
+            shutil.rmtree(bare_path, ignore_errors=True)
+            raise
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         self._cache[f"{owner}/{name}"] = bare

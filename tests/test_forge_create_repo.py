@@ -70,3 +70,17 @@ def test_created_repo_starts_empty(client: TestClient) -> None:
         resp = client.get(f"/repos/blizzard/empty/{path}")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+def test_failed_create_leaves_no_repository(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_args: object, **_kwargs: object) -> int:
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(Path, "write_text", boom)
+        with pytest.raises(OSError):
+            client.post("/_repos", json={"owner": "blizzard", "name": "half"})
+    assert not (tmp_path / "repos" / "blizzard" / "half.git").exists()
+    assert client.post("/_repos", json={"owner": "blizzard", "name": "half"}).status_code == 201
