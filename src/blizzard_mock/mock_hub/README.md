@@ -109,6 +109,7 @@ refusal carries `reason: "capability"`.
 | `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry of a project the caller serves, capability- and policy-filtered for the caller |
 | `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or an incompatible runner (`{chunk_id, incompatible_runner_id, detail, reason}`, `reason` `project` or `capability`) |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **404** with no live route, **409** when the route sits on an ended chunk |
+| `POST /api/fleet/chunks/{id}/release` | The holding runner gives the route back: the chunk returns `ready` at its current node and the write is recorded on the chunk; **403** when the caller does not hold the route, **409** (`stale` or `not-running`) when the chunk refuses it, **404** for an unknown chunk |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090); **409** once the chunk has ended (`done` or `stopped`) |
 | `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |

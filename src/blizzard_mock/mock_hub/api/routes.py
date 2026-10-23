@@ -19,6 +19,7 @@ from blizzard_mock.mock_hub.api.deps import (
     HostReportBody,
     HostRunnerAddBody,
     QueuePeekBody,
+    ReleaseBody,
     RouteClaimBody,
     RunnerAddBody,
     RunnerFactBatchBody,
@@ -40,6 +41,8 @@ from blizzard_mock.mock_hub.domain.models import (
     ClaimDeniedTerminal,
     NoCurrentNode,
     RekeyDeniedTerminal,
+    ReleaseNotHolder,
+    ReleaseRefused,
     RoutineProposalState,
 )
 from blizzard_mock.mock_hub.domain.service import (
@@ -232,6 +235,22 @@ def rekey_route_token(chunk_id: str, service: Annotated[MockHubService, Depends(
         return JSONResponse(status_code=404, content={"detail": str(exc)})
     except RekeyDeniedTerminal as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/release")
+def release_chunk(
+    chunk_id: str, body: ReleaseBody, runner_id: Principal, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    try:
+        return service.release(chunk_id, runner_id=runner_id, epoch=body.epoch, reason=body.reason)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except ReleaseNotHolder as exc:
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+    except ReleaseRefused as exc:
+        return JSONResponse(
+            status_code=409, content={"chunk_id": exc.chunk_id, "reason": exc.reason, "detail": exc.detail}
+        )
 
 
 @fleet_router.get("/chunks/{chunk_id}")

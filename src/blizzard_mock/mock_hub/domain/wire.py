@@ -106,6 +106,11 @@ class RouteTokenRekeyResponse(BaseModel):
     route_token: str
 
 
+class ReleaseResponse(BaseModel):
+    chunk_id: str
+    released_id: int
+
+
 class RouteClaimConflict(BaseModel):
     chunk_id: str
     held_by_runner_id: str

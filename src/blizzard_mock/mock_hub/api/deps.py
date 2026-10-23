@@ -174,6 +174,12 @@ class CompletionBody(BaseModel):
     artifacts: list[dict[str, object]] = Field(default_factory=list)
 
 
+class ReleaseBody(BaseModel):
+    epoch: int
+    route_token: str | None = None
+    reason: str
+
+
 class DecisionBody(BaseModel):
     from_node_id: str
     epoch: int
