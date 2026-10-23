@@ -116,7 +116,11 @@ before.
   migration gives every runner that declared nothing.
 - `create graph --store hub [--name NAME] [--seed N]` — **implemented**. Mints a
   synthetic workflow graph (`domain/hub/graph_seed.py`): a `build` (`executor: runner`)
-  node into a `deliver` (`executor: hub`) node into the reserved terminal. A
+  node into a `deliver` (`executor: hub`) node into the reserved terminal.
+  `deliver` takes `action: land` (row and `definition_yaml`) when the store's
+  `graph_nodes` carries `action`, and the empty-`run:` shape when it does not; either
+  way it routes all four of its choices — `landed` to the reserved terminal, and
+  `conflict`, `failure` and `inherited-failure` back to `build`. A
   freshly provisioned hub mints no graph of its own until first ingest, which is
   exactly why `create chunk` needs one of these. Prints the minted graph id.
 - `create chunk --store hub --status <status> [--graph NAME] [--node NAME] [--work-ref SRC#REF]... [--runner-id R] [--epoch N] [--chunk-id ID] [--seed N]`
@@ -124,7 +128,9 @@ before.
   `blizzard.hub.domain.chunk.model.ChunkFacts.status` reads to arrive at one of the nine
   derived statuses (`domain/hub/chunk_seed.py`, `bzh:facts-not-status` — never a status
   column). Auto-mints a graph (`create graph`'s own logic) when the store holds
-  none, or reuses one by `--graph NAME`. `--status done` travels the graph's own
+  none — its `deliver` taking `land` when the schema carries `graph_nodes.action`,
+  and routing `landed`, `conflict`, `failure` and `inherited-failure` — or reuses one
+  by `--graph NAME`. `--status done` travels the graph's own
   edges — `build --approved--> deliver --landed--> the reserved terminal` —
   landing two transitions under one shared epoch, so the chunk carries two
   selectable node-steps rather than one; `--node` overrides which node the

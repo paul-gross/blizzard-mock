@@ -59,6 +59,7 @@ from blizzard_mock.mock_data.domain.hub.garden_proposal_seed import (
     DEFAULT_CLOSED_BY as GARDEN_PROPOSAL_DEFAULT_CLOSED_BY,
 )
 from blizzard_mock.mock_data.domain.hub.graph_seed import (
+    ACTION_COLUMN,
     DEFAULT_GRAPH_NAME,
     GraphCompositionError,
     GraphContext,
@@ -295,6 +296,11 @@ def _connect_fleet_store(
     return SeedService(ReflectedStore(engine, tenant=tenant, runner=runner))
 
 
+def _has_action_column(service: SeedService) -> bool:
+    """Whether the store's ``graph_nodes`` names a hub node's action — the seeded graph's shape follows it."""
+    return service.has_column("graph_nodes", ACTION_COLUMN)
+
+
 def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: random.Random) -> GraphContext:
     """Reuse the newest matching graph or mint one for an empty store."""
     existing = service.query("graphs", {"name": name} if name else None)
@@ -302,7 +308,7 @@ def _resolve_graph(service: SeedService, name: str | None, clock: Clock, rng: ra
         graph_row = max(existing, key=lambda row: str(require_column(row, "created_at", table="graphs")))
         node_rows = service.query("graph_nodes", {"graph_id": require_column(graph_row, "graph_id", table="graphs")})
         return hydrate_graph_context(graph_row, node_rows)
-    minted = compose_graph(name or DEFAULT_GRAPH_NAME, clock, rng)
+    minted = compose_graph(name or DEFAULT_GRAPH_NAME, clock, rng, has_action_column=_has_action_column(service))
     service.seed(minted.rows)
     return minted.context
 
@@ -632,7 +638,7 @@ def create_graph(store: str, url: str | None, runtime_dir: str | None, name: str
     """
     _require_store("graph", store)
     service = _dir_seed_service(store, url, runtime_dir)
-    minted = compose_graph(name, _seeded_clock(seed), seeded_rng(seed))
+    minted = compose_graph(name, _seeded_clock(seed), seeded_rng(seed), has_action_column=_has_action_column(service))
     try:
         service.seed(minted.rows)
     except _COMPOSITION_ERRORS as exc:
@@ -1656,7 +1662,9 @@ def scenario_board(url: str | None, runtime_dir: str | None, chunks: int, stress
     clock = _seeded_clock(seed)
     rng = seeded_rng(seed)
     try:
-        scenario_seed = compose_board_scenario(chunks=chunks, clock=clock, rng=rng, stress=stress)
+        scenario_seed = compose_board_scenario(
+            chunks=chunks, clock=clock, rng=rng, stress=stress, has_action_column=_has_action_column(service)
+        )
         service.seed(scenario_seed.rows)
     except _COMPOSITION_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1768,6 +1776,7 @@ def scenario_fleet(
             stress=stress,
             runner_id=pinned_runner_id,
             register_runner=register_runner,
+            has_action_column=_has_action_column(hub_service),
         )
         census = board.census
         assert census is not None  # compose_board_scenario always returns one

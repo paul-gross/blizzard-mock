@@ -254,18 +254,20 @@ def compose_board_scenario(
     runner_id: str | None = None,
     runner_name: str = SEED_RUNNER_NAME,
     register_runner: bool = True,
+    has_action_column: bool = False,
 ) -> BoardScenario:
     """Compose one whole scenario board: a graph, ``chunks`` chunks spread across the
     nine statuses, a cost and artifact spread, a ceiling-paused runner, a runner per
     chunk beside a same-name twin and a never-connected runner, a mixed event log, and
     the ``stress=True`` extremes. ``runner_id`` pins every chunk to one runner, registered
-    under ``runner_name`` unless ``register_runner=False``. See ``mock_data/README.md``."""
+    under ``runner_name`` unless ``register_runner=False``. ``has_action_column`` is
+    :func:`compose_graph`'s, read by the caller from the target schema. See ``mock_data/README.md``."""
     if chunks < 1:
         raise ScenarioCompositionError(f"--chunks must be at least 1, got {chunks}")
 
     pinned = runner_id is not None
     rows: list[FactRow] = []
-    minted_graph = compose_graph(graph_name or DEFAULT_GRAPH_NAME, clock, rng)
+    minted_graph = compose_graph(graph_name or DEFAULT_GRAPH_NAME, clock, rng, has_action_column=has_action_column)
     rows.extend(minted_graph.rows)
     graph = minted_graph.context
     now = clock.now()

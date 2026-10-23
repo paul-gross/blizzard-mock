@@ -369,6 +369,12 @@ class ISeedStore(Protocol):
         only the store's tenant's rows."""
         ...
 
+    def has_column(self, table: str, column: str) -> bool:
+        """Whether the live schema's ``table`` carries ``column`` — the read a composer
+        needs before composing rows whose shape follows the schema's version (e.g. the
+        seeded graph naming a hub node's ``action`` only where ``graph_nodes`` has one)."""
+        ...
+
 
 class SeedService:
     """Orchestrates ``concept -> list[FactRow]`` composition against a store."""
@@ -388,3 +394,7 @@ class SeedService:
         """Read a table's rows through the store, for a concept composer's
         existence lookup (see :meth:`ISeedStore.query`)."""
         return self._store.query(table, where)
+
+    def has_column(self, table: str, column: str) -> bool:
+        """Whether the store's ``table`` carries ``column`` (see :meth:`ISeedStore.has_column`)."""
+        return self._store.has_column(table, column)
