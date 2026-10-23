@@ -8,7 +8,9 @@ boundary and applies the rules (``bzh:domain-takes-objects``). It holds the
 from __future__ import annotations
 
 import fnmatch
+import re
 import zlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from blizzard_mock.forge.domain.checks import CHECK_STATUSES, CheckSpec, ICheckRunStore
@@ -54,6 +56,10 @@ from blizzard_mock.forge.domain.models import (
 )
 from blizzard_mock.forge.domain.rate import IRateLedger
 from blizzard_mock.forge.domain.state import IWriteForgeState
+
+#: GitHub's account and repository name rules, which ``create_repository`` holds a new name to.
+_OWNER_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
+_REPO_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 #: The most pulls one listing page may hold, as on GitHub.
 MAX_PER_PAGE = 100
@@ -127,6 +133,18 @@ class ForgeService:
     def get_repo(self, owner: str, name: str) -> Repo:
         """Resolve a backing repo (raises ``RepoNotFound``)."""
         return self._git.get_repo(owner, name)
+
+    def create_repository(self, owner: str, name: str, files: Mapping[str, str]) -> Repo:
+        """Create a bare repo seeded with ``files`` on ``main``. Issues, pulls, and
+        labels start empty — the state store keys them by the new repo's full name."""
+        if not _OWNER_NAME.fullmatch(owner):
+            raise ValidationError(f"invalid owner: {owner}")
+        if not _REPO_NAME.fullmatch(name) or name in (".", "..") or name.endswith(".git"):
+            raise ValidationError(f"invalid repository name: {name}")
+        return self._git.create(owner, name, files)
+
+    def repository_origin(self, repo: Repo) -> str:
+        return self._git.origin(repo)
 
     # -- issues ------------------------------------------------------------
 

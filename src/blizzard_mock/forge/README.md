@@ -104,6 +104,14 @@ this same forge: `GET /{owner}/{repo}/pull/{number}` and
 commit; an unknown reference returns 404. The page displays the repository,
 PR disposition or commit message, and the landed SHA when a PR has merged.
 
+## Test control: repositories on demand (`/_repos`)
+
+`POST /_repos` with `{"owner", "name", "seed"}` (`seed` defaults to `toy-api`, any `TOY_REPOS` name)
+creates the bare repo `<repos-dir>/<owner>/<name>.git` with one seed commit on `main`, and serves it
+from the next request with empty issues, pulls, and labels. Answers `201 {full_name, origin,
+default_branch}`, `409` when it exists, `422` for an invalid owner or name or an unknown seed. Test
+control, not GitHub surface; exempt from the request-scoped levers like `/_levers`.
+
 ## Lever surface (`/_levers`)
 
 `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm / fire),
