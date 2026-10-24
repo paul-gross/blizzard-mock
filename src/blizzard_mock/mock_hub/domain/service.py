@@ -2175,6 +2175,7 @@ class MockHubService:
             answered_at=question.answered_at,
             delivered=question.delivered,
             delivered_at=question.delivered_at,
+            superseded=False,
             **(self._project_fields(chunk.project_id) if chunk is not None else {}),
         )
 
