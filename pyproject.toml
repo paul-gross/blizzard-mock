@@ -2,6 +2,8 @@
 name = "blizzard-mock"
 version = "0.1.0"
 description = "The blizzard mock fleet: mock GitHub forge, fixture-workspace scaffold, mock coding-harness engine + facades, and the mock-data CLI."
+license = "FSL-1.1-ALv2"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 # Every dependency the four components will need is declared up-front so
 # parallel component builders rarely have to touch this file (see

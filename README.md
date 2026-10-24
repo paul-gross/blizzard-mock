@@ -90,3 +90,8 @@ uv run pytest -m e2e
 ```
 
 It skips unless `$BLIZZARD_MOCK_WINTER_SOURCE` names a local winter workspace.
+
+## License
+
+Source-available under the Functional Source License 1.1 (FSL-1.1-ALv2). Each release converts to
+Apache License 2.0 two years after it ships. See [LICENSE](./LICENSE).
