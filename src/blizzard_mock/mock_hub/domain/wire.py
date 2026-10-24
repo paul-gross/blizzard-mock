@@ -160,6 +160,8 @@ class QuestionView(BaseModel):
     # The return leg: the ``answer.delivered`` fact landed.
     delivered: bool = False
     delivered_at: str | None = None
+    # A restart answered the question for the system. The mock hub has no restart, so it stays False.
+    superseded: bool = False
     # The asking chunk's project — its id, current slug and display name.
     project_id: str | None = None
     project_slug: str | None = None
