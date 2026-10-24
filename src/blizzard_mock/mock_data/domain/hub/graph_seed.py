@@ -87,16 +87,10 @@ class MintedGraph:
 
 
 def compose_graph(name: str, clock: Clock, rng: Random, *, has_action_column: bool) -> MintedGraph:
-    """Mint one synthetic graph named ``name`` — ``build`` (runner) -> ``deliver``
-    (hub) -> the reserved terminal. A pure function of its inputs
-    (``bzh:domain-takes-objects``): every id and timestamp is drawn from the
-    injected ``clock``/``rng``, never a hidden clock or ``os.urandom`` — the same
-    ``--seed`` reproduces the same ids byte-for-byte.
+    """Mint one synthetic graph — ``build`` (runner) -> ``deliver`` (hub) -> the terminal.
 
-    ``has_action_column`` says whether the target schema's ``graph_nodes`` carries
-    ``action``: set, ``deliver`` names ``action: land`` in its row and its YAML (with a
-    null ``action_args``, as a node with no ``with:``); unset, it keeps the empty-``run:``
-    shape, the only one a schema without the column can hold."""
+    Pure (``bzh:domain-takes-objects``). ``has_action_column`` selects ``action: land`` over
+    the empty-``run:`` shape for ``deliver``."""
     graph_id = ids.mint(ids.GRAPH_PREFIX, clock, rng)
     build_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     deliver_id = ids.mint(ids.NODE_PREFIX, clock, rng)
