@@ -1135,8 +1135,8 @@ def test_create_graph_mints_a_build_and_a_deliver_node(tmp_path: Path) -> None:
     assert [r.graph_id for r in graph_rows] == [graph_id]
     assert graph_rows[0].name == "test-graph"
     assert sorted(r.executor for r in node_rows) == ["hub", "runner"]
-    assert len(choice_rows) == 3
-    assert len(edge_rows) == 3
+    assert len(choice_rows) == 5
+    assert len(edge_rows) == 5
 
 
 # --- create chunk (implemented) ----------------------------------------------

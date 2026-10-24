@@ -328,6 +328,10 @@ class ReflectedStore:
         with self._engine.connect() as conn:
             return [dict(row) for row in conn.execute(stmt).mappings().all()]
 
+    def has_column(self, table: str, column: str) -> bool:
+        reflected = _snapshot(self._reflect()).get(table)
+        return reflected is not None and column in reflected.columns
+
 
 # Typecheck-time Protocol/adapter conformance sentinel (bzh:dependency-inversion) — pyright
 # rejects the return if ReflectedStore drifts from ISeedStore.

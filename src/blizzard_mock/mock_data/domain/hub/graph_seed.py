@@ -26,8 +26,21 @@ DELIVER_NODE_NAME = "deliver"
 
 _APPROVED_CHOICE_NAME = "approved"
 _LANDED_CHOICE_NAME = "landed"
-_FAILURE_CHOICE_NAME = "failure"  # the reserved choice every hub node authors
 _RESERVED_TERMINAL = "done"  # mirrors the hub's reserved terminal, independently
+
+#: The action the ``deliver`` node names where the schema's ``graph_nodes`` carries
+#: ``action``, and the column the caller checks for.
+LAND_ACTION = "land"
+ACTION_COLUMN = "action"
+
+#: ``deliver``'s choices that route back to ``build`` — ``failure`` is the reserved
+#: choice every hub node authors; ``conflict`` and ``inherited-failure`` are the rest of
+#: what ``land`` can answer, so no answer of it is ever unroutable.
+_BACK_TO_BUILD_CHOICES: tuple[tuple[str, str], ...] = (
+    ("conflict", "Delivery conflicted, back to build."),
+    ("failure", "Delivery failed, back to build."),
+    ("inherited-failure", "An inherited delivery failed, back to build."),
+)
 
 
 class GraphCompositionError(Exception):
@@ -73,20 +86,23 @@ class MintedGraph:
     rows: list[FactRow]
 
 
-def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
-    """Mint one synthetic graph named ``name`` — ``build`` (runner) -> ``deliver``
-    (hub) -> the reserved terminal. A pure function of its inputs
-    (``bzh:domain-takes-objects``): every id and timestamp is drawn from the
-    injected ``clock``/``rng``, never a hidden clock or ``os.urandom`` — the same
-    ``--seed`` reproduces the same ids byte-for-byte."""
+def compose_graph(name: str, clock: Clock, rng: Random, *, has_action_column: bool) -> MintedGraph:
+    """Mint one synthetic graph — ``build`` (runner) -> ``deliver`` (hub) -> the terminal.
+
+    Pure (``bzh:domain-takes-objects``). ``has_action_column`` selects ``action: land`` over
+    the empty-``run:`` shape for ``deliver``."""
     graph_id = ids.mint(ids.GRAPH_PREFIX, clock, rng)
     build_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     deliver_id = ids.mint(ids.NODE_PREFIX, clock, rng)
     approved_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
     landed_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
-    failure_choice_id = ids.mint(ids.CHOICE_PREFIX, clock, rng)
+    back_choice_ids = [ids.mint(ids.CHOICE_PREFIX, clock, rng) for _ in _BACK_TO_BUILD_CHOICES]
     now = clock.now()
 
+    back_yaml = "".join(
+        f"        {choice}:\n          description: {description}\n          to: {BUILD_NODE_NAME}\n"
+        for choice, description in _BACK_TO_BUILD_CHOICES
+    )
     definition_yaml = (
         f"# minted by blizzard-mock-data create graph — audit-only text, see graph_seed.py\n"
         f"name: {name}\n"
@@ -100,16 +116,24 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
         "          description: Work approved, proceed to delivery.\n"
         f"          to: {DELIVER_NODE_NAME}\n"
         f"  {DELIVER_NODE_NAME}:\n"
-        "    executor: hub\n"
-        "    judgement:\n"
+        "    executor: hub\n" + (f"    action: {LAND_ACTION}\n" if has_action_column else "") + "    judgement:\n"
         "      choices:\n"
         f"        {_LANDED_CHOICE_NAME}:\n"
         "          description: Delivered.\n"
-        f"          to: {_RESERVED_TERMINAL}\n"
-        f"        {_FAILURE_CHOICE_NAME}:\n"
-        "          description: Delivery failed, back to build.\n"
-        f"          to: {BUILD_NODE_NAME}\n"
+        f"          to: {_RESERVED_TERMINAL}\n" + back_yaml
     )
+
+    deliver_values: dict[str, object] = {
+        "node_id": deliver_id,
+        "graph_id": graph_id,
+        "name": DELIVER_NODE_NAME,
+        "executor": "hub",
+        "session": "resume",
+        "judged_by": "worker",
+    }
+    if has_action_column:
+        deliver_values[ACTION_COLUMN] = LAND_ACTION
+        deliver_values["action_args"] = None
 
     rows = [
         FactRow(
@@ -133,17 +157,7 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
                 "judged_by": "worker",
             },
         ),
-        FactRow(
-            table="graph_nodes",
-            values={
-                "node_id": deliver_id,
-                "graph_id": graph_id,
-                "name": DELIVER_NODE_NAME,
-                "executor": "hub",
-                "session": "resume",
-                "judged_by": "worker",
-            },
-        ),
+        FactRow(table="graph_nodes", values=deliver_values),
         FactRow(
             table="graph_choices",
             values={
@@ -162,14 +176,12 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
                 "description": "Delivered.",
             },
         ),
-        FactRow(
-            table="graph_choices",
-            values={
-                "choice_id": failure_choice_id,
-                "node_id": deliver_id,
-                "name": _FAILURE_CHOICE_NAME,
-                "description": "Delivery failed, back to build.",
-            },
+        *(
+            FactRow(
+                table="graph_choices",
+                values={"choice_id": choice_id, "node_id": deliver_id, "name": choice, "description": description},
+            )
+            for choice_id, (choice, description) in zip(back_choice_ids, _BACK_TO_BUILD_CHOICES, strict=True)
         ),
         FactRow(
             table="graph_edges",
@@ -189,14 +201,17 @@ def compose_graph(name: str, clock: Clock, rng: Random) -> MintedGraph:
                 "to_node_name": _RESERVED_TERMINAL,
             },
         ),
-        FactRow(
-            table="graph_edges",
-            values={
-                "edge_id": f"{deliver_id}:{failure_choice_id}",
-                "from_node_id": deliver_id,
-                "choice_id": failure_choice_id,
-                "to_node_name": BUILD_NODE_NAME,
-            },
+        *(
+            FactRow(
+                table="graph_edges",
+                values={
+                    "edge_id": f"{deliver_id}:{choice_id}",
+                    "from_node_id": deliver_id,
+                    "choice_id": choice_id,
+                    "to_node_name": BUILD_NODE_NAME,
+                },
+            )
+            for choice_id in back_choice_ids
         ),
     ]
     context = GraphContext(

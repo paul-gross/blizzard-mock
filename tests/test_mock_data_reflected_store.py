@@ -10,6 +10,7 @@ order the caller supplied them in.
 from __future__ import annotations
 
 import json
+import random
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,7 +30,9 @@ from sqlalchemy import (
     text,
 )
 
+from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_data.domain.facts import FactRow
+from blizzard_mock.mock_data.domain.hub.graph_seed import DELIVER_NODE_NAME, compose_graph
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 from blizzard_mock.mock_data.domain.seeding import (
     HUB_GLOBAL_TABLES,
@@ -890,3 +893,81 @@ def test_default_reset_still_empties_every_table(tmp_path: Path) -> None:
     for table in ("tenants", "projects", "work_item_sequence", "users", "runner_registrations"):
         assert _rows(url, table, "*") == []
     assert _rows(url, "alembic_version", "version_num") == [("some_revision",)]
+
+
+def _graph_store(tmp_path: Path, *, with_action: bool) -> ReflectedStore:
+    """A sqlite store carrying the hub's four graph tables, its ``graph_nodes`` with or
+    without the ``action``/``action_args`` columns."""
+    url = f"sqlite:///{tmp_path / 'graph-hub.db'}"
+    meta = MetaData()
+    Table(
+        "graphs",
+        meta,
+        Column("graph_id", String, primary_key=True),
+        Column("name", String, nullable=False),
+        Column("entry_node_id", String, nullable=False),
+        Column("definition_yaml", String, nullable=False),
+        Column("created_at", DateTime, nullable=False),
+    )
+    action_columns = [Column("action", String, nullable=True), Column("action_args", String, nullable=True)]
+    Table(
+        "graph_nodes",
+        meta,
+        Column("node_id", String, primary_key=True),
+        Column("graph_id", String, ForeignKey("graphs.graph_id"), nullable=False),
+        Column("name", String, nullable=False),
+        Column("executor", String, nullable=False),
+        Column("session", String, nullable=False),
+        Column("judged_by", String, nullable=False),
+        *(action_columns if with_action else []),
+    )
+    Table(
+        "graph_choices",
+        meta,
+        Column("choice_id", String, primary_key=True),
+        Column("node_id", String, ForeignKey("graph_nodes.node_id"), nullable=False),
+        Column("name", String, nullable=False),
+        Column("description", String, nullable=False),
+    )
+    Table(
+        "graph_edges",
+        meta,
+        Column("edge_id", String, primary_key=True),
+        Column("from_node_id", String, ForeignKey("graph_nodes.node_id"), nullable=False),
+        Column("choice_id", String, ForeignKey("graph_choices.choice_id"), nullable=False),
+        Column("to_node_name", String, nullable=False),
+    )
+    meta.create_all(create_engine(url))
+    return ReflectedStore(create_seed_engine(url))
+
+
+@pytest.mark.parametrize("with_action", [True, False])
+def test_has_column_answers_from_the_reflected_schema(tmp_path: Path, with_action: bool) -> None:
+    store = _graph_store(tmp_path, with_action=with_action)
+    assert store.has_column("graph_nodes", "action") is with_action
+    assert store.has_column("graph_nodes", "executor") is True
+    assert store.has_column("no_such_table", "action") is False
+
+
+@pytest.mark.parametrize("with_action", [True, False])
+def test_seeded_graph_passes_the_drift_guard_with_and_without_the_action_column(
+    tmp_path: Path, with_action: bool
+) -> None:
+    store = _graph_store(tmp_path, with_action=with_action)
+    minted = compose_graph(
+        "g",
+        FixedClock(datetime(2026, 1, 1, tzinfo=UTC)),
+        random.Random(1),
+        has_action_column=store.has_column("graph_nodes", "action"),
+    )
+    store.write(minted.rows)
+    (deliver,) = store.query("graph_nodes", {"name": DELIVER_NODE_NAME})
+    assert deliver.get("action") == ("land" if with_action else None)
+    assert len(store.query("graph_edges")) == 5
+
+
+def test_an_action_row_against_a_schema_without_the_column_is_drift(tmp_path: Path) -> None:
+    store = _graph_store(tmp_path, with_action=False)
+    minted = compose_graph("g", FixedClock(datetime(2026, 1, 1, tzinfo=UTC)), random.Random(1), has_action_column=True)
+    with pytest.raises(SchemaDriftError, match="action"):
+        store.write(minted.rows)
