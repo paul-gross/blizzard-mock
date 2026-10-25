@@ -576,6 +576,8 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "merge_commits_disallowed",
         "rate_budget",
         "secondary_rate_limited",
+        "mergeable_state",
+        "checks_startup_failure",
     }
 
 
@@ -693,6 +695,77 @@ def test_stale_branch_lever_reads_behind_and_update_branch_self_heals(client: Te
 
     # the moved head merges cleanly by its new sha
     assert client.put(f"/repos/{REPO}/pulls/{number}/merge", json={"sha": healed["head"]["sha"]}).status_code == 200
+
+
+@pytest.mark.parametrize("state", ["unstable", "has_hooks", "draft"])
+def test_mergeable_state_lever_forces_the_named_state(client: TestClient, state: str) -> None:
+    number = _open_pull(client, "feature")["number"]
+    armed = client.post("/_levers/mergeable_state", json={"repo": REPO, "number": number, "state": state})
+    assert armed.status_code == 200
+    assert armed.json()["armed"]["state"] == state
+
+    view = client.get(f"/repos/{REPO}/pulls/{number}").json()
+    assert view["mergeable_state"] == state
+    assert view["mergeable"] is True
+
+    client.delete(f"/_levers/mergeable_state?repo={REPO}&number={number}")
+    assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "clean"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"state": "clean"}, {}, {"state": "unstable", "number": None}],
+)
+def test_mergeable_state_lever_refuses_an_unforceable_state_or_missing_scope(
+    client: TestClient, body: dict[str, Any]
+) -> None:
+    number = _open_pull(client, "feature")["number"]
+    resp = client.post("/_levers/mergeable_state", json={"repo": REPO, "number": number, **body})
+    assert resp.status_code == 422
+
+
+def test_checks_startup_failure_lever_reads_startup_failure_check_run(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/checks_startup_failure", json={"repo": REPO, "number": number})
+
+    body = client.get(f"/repos/{REPO}/commits/feature/check-runs").json()
+    assert body["total_count"] == 1
+    run = body["check_runs"][0]
+    assert run["status"] == "completed"
+    assert run["conclusion"] == "startup_failure"
+    assert client.get(f"/repos/{REPO}/pulls/{number}").json()["mergeable_state"] == "blocked"
+
+    # scoped to its PR — another PR's head still reads green.
+    _open_pull(client, "feature2")
+    other = client.get(f"/repos/{REPO}/commits/feature2/check-runs").json()["check_runs"][0]
+    assert other["conclusion"] == "success"
+
+
+def test_conflicting_update_branch_is_422_naming_the_conflict(client: TestClient) -> None:
+    pull = _open_pull(client, "clash")
+    resp = client.put(f"/repos/{REPO}/pulls/{pull['number']}/update-branch", json={})
+    assert resp.status_code == 422
+    assert "merge conflict" in resp.json()["message"]
+    # the head is untouched by the refused update.
+    assert client.get(f"/repos/{REPO}/pulls/{pull['number']}").json()["head"]["sha"] == pull["head"]["sha"]
+
+
+def test_update_branch_under_merge_conflict_lever_is_422(client: TestClient) -> None:
+    number = _open_pull(client, "feature")["number"]
+    client.post("/_levers/merge_conflict", json={"repo": REPO, "number": number})
+    resp = client.put(f"/repos/{REPO}/pulls/{number}/update-branch", json={})
+    assert resp.status_code == 422
+    assert "merge conflict" in resp.json()["message"]
+
+
+def test_update_branch_on_a_merged_or_closed_pull_stays_405(client: TestClient) -> None:
+    merged = _open_pull(client, "feature")["number"]
+    assert client.put(f"/repos/{REPO}/pulls/{merged}/merge", json={}).status_code == 200
+    assert client.put(f"/repos/{REPO}/pulls/{merged}/update-branch", json={}).status_code == 405
+
+    closed = _open_pull(client, "clash")["number"]
+    client.patch(f"/repos/{REPO}/pulls/{closed}", json={"state": "closed"})
+    assert client.put(f"/repos/{REPO}/pulls/{closed}/update-branch", json={}).status_code == 405
 
 
 def test_update_branch_stale_expected_head_is_409(client: TestClient) -> None:

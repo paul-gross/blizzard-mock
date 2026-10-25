@@ -32,6 +32,7 @@ from blizzard_mock.forge.domain.errors import (
     RefAlreadyExists,
     RefMissing,
     RuleViolation,
+    UpdateConflict,
     ValidationError,
 )
 from blizzard_mock.forge.domain.git import GitCommit, GitCompare, IWriteGitBackend
@@ -44,6 +45,7 @@ from blizzard_mock.forge.domain.levers import (
     LeverParams,
 )
 from blizzard_mock.forge.domain.models import (
+    FORCEABLE_MERGEABLE_STATES,
     CheckRun,
     Comment,
     Issue,
@@ -400,7 +402,13 @@ class ForgeService:
         head_sha = self._git.resolve_ref(repo, pull.head)
         if expected_head_sha is not None and expected_head_sha != head_sha:
             raise HeadMismatch("Head branch was modified. Review and try the merge again.")
-        self._git.merge(repo, pull.head, pull.base, f"Merge branch '{pull.base}' into {pull.head}")
+        conflict = UpdateConflict(f"merge conflict between base ({pull.base}) and head ({pull.head})")
+        if self._levers.find(LeverKind.MERGE_CONFLICT, repo.full_name, number) is not None:
+            raise conflict
+        try:
+            self._git.merge(repo, pull.head, pull.base, f"Merge branch '{pull.base}' into {pull.head}")
+        except NotMergeable as exc:
+            raise conflict from exc
         lever = self._levers.find(LeverKind.STALE_BRANCH, repo.full_name, number)
         if lever is not None:
             self._levers.clear(lever.kind, lever.repo, lever.number)
@@ -441,6 +449,7 @@ class ForgeService:
             message=params.message,
             branch=params.branch,
             pattern=params.pattern,
+            state=params.state,
         )
         self._levers.arm(lever)
         return lever
@@ -569,6 +578,9 @@ class ForgeService:
             return None, MergeableState.UNKNOWN
         if self._levers.find(LeverKind.MERGE_CONFLICT, repo.full_name, pull.number) is not None:
             return False, MergeableState.DIRTY
+        forced = self._levers.find(LeverKind.MERGEABLE_STATE, repo.full_name, pull.number)
+        if forced is not None and forced.state is not None:
+            return True, forced.state
         if self._levers.find(LeverKind.STALE_BRANCH, repo.full_name, pull.number) is not None:
             # Behind, not conflicted: mergeable once the branch is updated.
             return True, MergeableState.BEHIND
@@ -578,6 +590,8 @@ class ForgeService:
         if self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pull.number) is not None:
             # A red check run — an armed PR must be a coherent world, never a
             # green PR with a red check.
+            return True, MergeableState.BLOCKED
+        if self._levers.find(LeverKind.CHECKS_STARTUP_FAILURE, repo.full_name, pull.number) is not None:
             return True, MergeableState.BLOCKED
         if self._git.is_mergeable(repo, pull.base, pull.head):
             return True, MergeableState.CLEAN
@@ -599,6 +613,8 @@ class ForgeService:
         pr_number = pull.number if pull is not None else None
         if pull is not None and self._levers.find(LeverKind.CHECKS_FAILED, repo.full_name, pr_number) is not None:
             return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
+        if pull is not None and self._levers.find(LeverKind.CHECKS_STARTUP_FAILURE, repo.full_name, pr_number):
+            return [self._synthetic_check_run(sha, status="completed", conclusion="startup_failure")]
         base_lever = self._levers.find(LeverKind.BASE_CHECKS_FAILED, repo.full_name, None)
         if base_lever is not None and sha == self._git.resolve_ref(repo, repo.default_branch):
             return [self._synthetic_check_run(sha, status="completed", conclusion="failure")]
@@ -707,6 +723,10 @@ def _require_scope(kind: LeverKind, params: LeverParams) -> None:
         raise ValidationError("ruleset requires repo and pattern")
     if kind is LeverKind.MERGE_COMMITS_DISALLOWED and params.repo is None:
         raise ValidationError("merge_commits_disallowed requires repo")
+    if kind is LeverKind.MERGEABLE_STATE and (
+        params.repo is None or params.number is None or params.state not in FORCEABLE_MERGEABLE_STATES
+    ):
+        raise ValidationError("mergeable_state requires repo, number, and a state of unstable, has_hooks, or draft")
 
 
 def _split_full_name(full_name: str) -> tuple[str, str]:
