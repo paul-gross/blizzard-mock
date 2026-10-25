@@ -32,6 +32,18 @@ class MergeableState(StrEnum):
     #: Content-mergeable but held by branch protection — required checks/reviews
     #: not yet green (the "CI isn't green yet" wait state).
     BLOCKED = "blocked"
+    #: Mergeable, but a non-required status or check is failing.
+    UNSTABLE = "unstable"
+    #: Mergeable, with a pre-receive hook still to pass.
+    HAS_HOOKS = "has_hooks"
+    #: The pull request is a draft and cannot merge until marked ready.
+    DRAFT = "draft"
+
+
+#: The states the ``mergeable_state`` lever may force onto a pull request.
+FORCEABLE_MERGEABLE_STATES: frozenset[MergeableState] = frozenset(
+    {MergeableState.UNSTABLE, MergeableState.HAS_HOOKS, MergeableState.DRAFT}
+)
 
 
 class MergeMethod(StrEnum):

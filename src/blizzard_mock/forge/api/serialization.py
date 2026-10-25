@@ -195,4 +195,5 @@ def lever_json(lever: Lever) -> dict[str, Any]:
         "message": lever.message,
         "branch": lever.branch,
         "pattern": lever.pattern,
+        "state": lever.state.value if lever.state is not None else None,
     }

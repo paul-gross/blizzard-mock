@@ -75,6 +75,13 @@ class NotMergeable(ForgeError):
     status = 405
 
 
+class UpdateConflict(ForgeError):
+    """``update-branch`` could not merge the base into the head without a conflict
+    (GitHub 422, a message naming the merge conflict)."""
+
+    status = 422
+
+
 class MergeRejected(ForgeError):
     """The merge was refused by policy — the ``merge_rejected`` lever, standing
     in for branch protection / required checks (GitHub 405)."""

@@ -37,6 +37,8 @@ _CATALOG: dict[str, str] = {
     LeverKind.MERGE_COMMITS_DISALLOWED.value: "state (per repo): merge method `merge` → 405",
     LeverKind.RATE_BUDGET.value: "action: set a token's (or every token's) rate remaining and reset",
     LeverKind.SECONDARY_RATE_LIMITED.value: "state (global/repo): requests → 403 secondary rate limit, remaining kept",
+    LeverKind.MERGEABLE_STATE.value: "state (per PR): mergeable_state forced to `state` (unstable/has_hooks/draft)",
+    LeverKind.CHECKS_STARTUP_FAILURE.value: "state (per PR): startup_failure check run on the PR head; blocked",
 }
 
 

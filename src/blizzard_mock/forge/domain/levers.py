@@ -13,7 +13,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from blizzard_mock.forge.domain.checks import CheckSpec
-from blizzard_mock.forge.domain.models import MergeMethod
+from blizzard_mock.forge.domain.models import MergeableState, MergeMethod
 
 
 class LeverKind(StrEnum):
@@ -53,6 +53,11 @@ class LeverKind(StrEnum):
     RATE_BUDGET = "rate_budget"
     #: Global/repo: requests → 403 secondary rate limit, the bucket's remaining untouched.
     SECONDARY_RATE_LIMITED = "secondary_rate_limited"
+    #: Per PR: forces ``mergeable_state`` to ``unstable``, ``has_hooks``, or ``draft``.
+    MERGEABLE_STATE = "mergeable_state"
+    #: Per PR: the head carries one completed check run concluded ``startup_failure``;
+    #: also forces ``mergeable_state: blocked``.
+    CHECKS_STARTUP_FAILURE = "checks_startup_failure"
 
 
 #: Levers that persist as request-bending state until explicitly cleared.
@@ -71,6 +76,8 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.RULESET,
         LeverKind.MERGE_COMMITS_DISALLOWED,
         LeverKind.SECONDARY_RATE_LIMITED,
+        LeverKind.MERGEABLE_STATE,
+        LeverKind.CHECKS_STARTUP_FAILURE,
     }
 )
 
@@ -101,6 +108,8 @@ class Lever(BaseModel):
     branch: str | None = None
     #: ``ruleset``: the glob over branch names the rule covers. Part of the scope.
     pattern: str | None = None
+    #: ``mergeable_state``: the state forced onto the pull request.
+    state: MergeableState | None = None
 
     def scope_key(self) -> str:
         return _scope_key(self.repo, self.number, self.branch, self.pattern)
@@ -131,6 +140,8 @@ class LeverParams(BaseModel):
     #: ``branch_protected`` / ``ruleset``: the covered branch and glob pattern.
     branch: str | None = None
     pattern: str | None = None
+    #: ``mergeable_state``: ``unstable``, ``has_hooks``, or ``draft``.
+    state: MergeableState | None = None
     #: ``rate_budget``: the credential addressed (every one when absent), the remaining
     #: to set, and the reset as epoch seconds — the same unit as ``X-RateLimit-Reset``.
     token: str | None = None
