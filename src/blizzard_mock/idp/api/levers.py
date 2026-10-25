@@ -1,15 +1,15 @@
 """The stub IdP's levered control surface — namespaced ``/_levers``, outside
 the OIDC/GitHub-shaped surface.
 
-``PUT /profile`` sets the next authorize dance's identity; ``PUT
-/refuse_callback`` arms the refused-callback lever; ``POST /reset`` restores defaults.
+``PUT /profile`` sets the unhinted identity; ``POST /identities`` registers a
+hinted identity; ``PUT /refuse_callback`` arms refusal; ``POST /reset`` clears state.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from blizzard_mock.idp.api.deps import get_state
@@ -32,6 +32,19 @@ def set_profile(profile: Profile, state_repo: Annotated[IdpState, Depends(get_st
 @router.get("/profile")
 def get_profile(state_repo: Annotated[IdpState, Depends(get_state)]) -> dict[str, Any]:
     return {"profile": state_repo.profile.model_dump()}
+
+
+@router.post("/identities")
+def register_identity(profile: Profile, state_repo: Annotated[IdpState, Depends(get_state)]) -> dict[str, Any]:
+    if profile.email is None:
+        raise HTTPException(status_code=422, detail="an identity needs a primary email")
+    state_repo.register_identity(profile)
+    return {"identity": profile.model_dump()}
+
+
+@router.get("/identities")
+def get_identities(state_repo: Annotated[IdpState, Depends(get_state)]) -> dict[str, Any]:
+    return {"identities": [profile.model_dump() for profile in state_repo.identities()]}
 
 
 @router.put("/refuse_callback")

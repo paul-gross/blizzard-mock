@@ -13,18 +13,21 @@ real HTTP counterpart — no tokens, no network beyond this one local process. I
   `GET /user/emails`.
 
 Unlike a real provider it shows **no login UI**: `authorize` redirects back
-immediately with a code for whichever `Profile` the `/_levers/profile` control
-currently holds. A test flips the profile between two authorize calls to script two
-distinct identities (or a handle rename on the same `subject`) with no browser
-involved.
+immediately. With `login_hint`, either authorize endpoint chooses the identity
+registered under that primary email (case-insensitively); an unknown hint
+returns `error=access_denied`. Without a hint, the code binds the current
+`/_levers/profile` profile as before. A test can still flip that profile between
+authorize calls to script a handle rename without a browser.
 
 **Levered**, mirroring the forge/mock-hub's own control surface:
 
 | Lever | Effect |
 |-------|--------|
 | `PUT /_levers/profile` | The identity (`subject`, `handle`, `email`, `email_verified`, `secondary_emails`) the *next* completed dance resolves to — also how a test drives an unverified email or a handle rename. `secondary_emails` lists the account's other addresses, each `{"email", "verified"}`; `GET /user/emails` answers the primary first and then each of them with its own `verified` flag, while the OIDC `id_token` carries the primary alone, as a real one carries one address. An address listed twice (case-insensitively, the primary included) is refused with 422. The optional `role` field rides along for a consuming hub to read and apply at first-login time; it is additive only — it never surfaces in the signed `id_token` or the GitHub-shaped `/user` response, which stay provider-shaped |
+| `POST /_levers/identities` | Register a `Profile` under its primary `email`, case-insensitively; registering the same email replaces it, and a missing primary email returns 422. Answers `{"identity": <profile>}` |
+| `GET /_levers/identities` | List registered profiles in registration order as `{"identities": [<profile>, …]}` |
 | `PUT /_levers/refuse_callback` | Armed, `authorize` redirects back with `error=access_denied` instead of a code |
-| `POST /_levers/reset` | Back to the default profile, lever cleared, codes/tokens forgotten |
+| `POST /_levers/reset` | Back to the default profile, lever cleared, registered identities and codes/tokens forgotten |
 
 ## Tenants and projects
 
@@ -52,8 +55,10 @@ endpoint families together.
 
 ## State
 
-In-memory only, one process-wide `Profile` + a fresh RS256 keypair minted at startup —
-no persistence. `blizzard-mock-idp` is restarted between scenario runs, never mid-run.
+In-memory only, one process-wide default `Profile`, an email-keyed identity map,
+and a fresh RS256 keypair minted at startup — no persistence. Codes and tokens
+retain the profile chosen at authorization. `blizzard-mock-idp` is restarted
+between scenario runs, never mid-run.
 
 ## Standing instance — a running hub, a real browser, outside a test's lifetime
 

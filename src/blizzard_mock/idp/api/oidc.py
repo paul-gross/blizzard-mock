@@ -40,10 +40,14 @@ def authorize(
     client_id: str = "",
     scope: str = "",
     response_type: str = "code",
+    login_hint: str | None = None,
 ) -> RedirectResponse:
     if state_repo.refuse_callback:
         return RedirectResponse(f"{redirect_uri}?{urlencode({'error': 'access_denied', 'state': state})}")
-    code = state_repo.mint_code()
+    profile = state_repo.profile if login_hint is None else state_repo.identity_for_hint(login_hint)
+    if profile is None:
+        return RedirectResponse(f"{redirect_uri}?{urlencode({'error': 'access_denied', 'state': state})}")
+    code = state_repo.mint_code(profile)
     return RedirectResponse(f"{redirect_uri}?{urlencode({'code': code, 'state': state})}")
 
 
