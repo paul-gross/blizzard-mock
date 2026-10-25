@@ -642,6 +642,12 @@ def test_a_check_run_rerequest_is_acknowledged(client: TestClient) -> None:
     assert resp.json() == {}
 
 
+def test_an_actions_job_rerun_is_acknowledged(client: TestClient) -> None:
+    resp = client.post(f"/repos/{REPO}/actions/jobs/1/rerun")
+    assert resp.status_code == 201
+    assert resp.json() == {}
+
+
 def test_checks_pending_lever_reads_in_progress_check_run(client: TestClient) -> None:
     number = _open_pull(client, "feature")["number"]
     client.post("/_levers/checks_pending", json={"repo": REPO, "number": number})

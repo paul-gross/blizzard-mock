@@ -2,7 +2,8 @@
 
 Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), creates, fast-forwards, and
 deletes branches, and merges one branch into another (``POST /merges``). ``.../check-runs`` answers the
-runs armed against a revision, or derives them live from the lever set.
+runs armed against a revision, or derives them live from the lever set; a check-run re-request and an
+Actions job re-run are both acknowledged without resetting anything.
 """
 
 from __future__ import annotations
@@ -50,6 +51,12 @@ def list_check_runs(
 @router.post("/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest", status_code=201)
 def rerequest_check_run(owner: str, repo: str, check_run_id: int) -> dict[str, Any]:
     # Derived check runs have nothing to reset; acknowledge with GitHub's empty 201.
+    return {}
+
+
+@router.post("/repos/{owner}/{repo}/actions/jobs/{job_id}/rerun", status_code=201)
+def rerun_job(owner: str, repo: str, job_id: int) -> dict[str, Any]:
+    # A check run's id doubles as its Actions job id; derived runs have nothing to reset.
     return {}
 
 
