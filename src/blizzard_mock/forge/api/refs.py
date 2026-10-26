@@ -1,9 +1,7 @@
-"""Git-data routes — commits and refs, resolved against the bare repo.
-
-Resolves refs, compares two refs GitHub-style (``compare/{base}...{head}``), creates, fast-forwards, and
-deletes branches, and merges one branch into another (``POST /merges``). ``.../check-runs`` answers the
-runs armed against a revision, or derives them live from the lever set; a check-run re-request and an
-Actions job re-run are both acknowledged without resetting anything.
+"""Git-data routes against the bare repo: commits, refs, GitHub-style comparisons,
+branch creation, fast-forward, deletion, and ``POST /merges``. ``.../check-runs``
+answers revision-armed or lever-derived runs; check-run and Actions job re-requests
+are acknowledged without resetting anything.
 """
 
 from __future__ import annotations
