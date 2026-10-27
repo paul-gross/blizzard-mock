@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import Enum
+from fnmatch import fnmatchcase
 
 from blizzard_mock.mock_hub.domain.models import TERMINAL, ChunkState, Executor, NodeSpec
 from blizzard_mock.mock_hub.domain.state import RunnerCapability
@@ -67,6 +68,15 @@ def _effective_model(node: NodeSpec, chunk: ChunkState) -> list[str]:
     return list(node.session_model) if node.session_model else list(chunk.default_model)
 
 
+def _supported(entry: str, capability: RunnerCapability) -> bool:
+    """Whether the native name ``entry`` matches a pattern the capability reported — an import-free copy of
+    ``blizzard.foundation.model_support.model_supported``: case-sensitive, ``*`` crosses ``/``, and a
+    ``blizzard:`` tier never matches."""
+    return not entry.startswith("blizzard:") and any(
+        fnmatchcase(entry, pattern) for pattern in capability.supported_models
+    )
+
+
 def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[RunnerCapability]) -> bool:
     """Whether some reported capability could serve ``node_id``'s effective session —
     the mock's own mirror of ``EligibilityCheck._lineage_satisfied``. A capability health
@@ -85,7 +95,7 @@ def _lineage_satisfied(chunk: ChunkState, node_id: str, capabilities: Sequence[R
         capability = next((c for c in available if c.harness_id == harness_id), None)
         if capability is None:
             continue
-        if strict and not any(tier in capability.tiers for tier in model):
+        if strict and not any(entry in capability.tiers or _supported(entry, capability) for entry in model):
             continue
         return True
     return False

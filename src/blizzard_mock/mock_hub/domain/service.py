@@ -1903,6 +1903,7 @@ class MockHubService:
                     harness_id=c.harness_id,
                     version=c.version,
                     tiers=list(c.tiers),
+                    supported_models=list(c.supported_models),
                     default=c.default,
                     available=c.available,
                 )

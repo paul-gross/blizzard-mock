@@ -19,12 +19,13 @@ from blizzard_mock.mock_hub.domain.wire import RunnerDecliningView, Subscription
 class RunnerCapability:
     """One harness binding a registered runner reported it can execute —
     the mock's own domain-core mirror of the wire shape, kept import-free of it. ``version``
-    is ``None`` when absent; ``default`` marks the runner's own default binding. ``default``/
-    ``available`` are keyword-only so two adjacent bools can't swap silently unkeyworded."""
+    is ``None`` when absent; ``default`` marks the runner's own default binding. ``supported_models``/
+    ``default``/``available`` are keyword-only so adjacent same-typed fields can't swap silently unkeyworded."""
 
     harness_id: str
     version: str | None = None
     tiers: tuple[str, ...] = ()
+    supported_models: tuple[str, ...] = field(default=(), kw_only=True)
     default: bool = field(default=False, kw_only=True)
     available: bool = field(default=True, kw_only=True)
 

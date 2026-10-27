@@ -97,7 +97,7 @@ class MockRunnerService:
         declining: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Register with the hub. ``capabilities`` is the raw
-        ``{harness_id, version?, tiers?, default?}`` snapshot a test wants the hub to see —
+        ``{harness_id, version?, tiers?, supported_models?, default?}`` snapshot a test wants the hub to see —
         settable directly, with no real harness adapter behind it. ``subscriptions``
         is forwarded only when supplied, driving the hub's rosterless fallback when it
         is left out; ``declining`` likewise, the throttle reasons a runner reports saying no."""
