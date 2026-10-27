@@ -282,6 +282,7 @@ class RunnerCapabilityView(BaseModel):
     harness_id: str
     version: str | None = None
     tiers: list[str] = Field(default_factory=list)
+    supported_models: list[str] = Field(default_factory=list)
     default: bool = False
     available: bool = True
 

@@ -413,6 +413,7 @@ def test_runner_view_carries_the_registered_capability_snapshot(client: TestClie
             "harness_id": "claude_code",
             "version": "1.2.3",
             "tiers": ["blizzard:frontier"],
+            "supported_models": [],
             "default": True,
             "available": True,
         }
@@ -4568,3 +4569,26 @@ def test_a_hub_reset_returns_the_registry_to_the_first_tenant_under_its_first_na
     assert added.status_code == 201
     identity = plain.get("/api/fleet/identity", headers=_bearer(added.json()["token"])).json()
     assert (identity["tenant_id"], identity["tenant_name"]) == (FIRST_TENANT_ID, FIRST_TENANT_NAME)
+
+
+@pytest.mark.parametrize(
+    ("model", "capabilities", "ineligible"),
+    [
+        (["opus", "openai/gpt-5"], [("h1", ("claude-*",)), ("h2", ("openai/*",))], False),
+        (["opus", "openai/gpt-5"], [("h1", ("opus",)), ("h2", ())], False),
+        (["gemini/pro"], [("h1", ("claude-*",)), ("h2", ("openai/*",))], True),
+        (["opus"], [("h1", ()), ("h2", ())], True),
+        (["blizzard:frontier"], [("h1", ("*",)), ("h2", ("*",))], True),
+    ],
+    ids=["pattern-match", "exact-match", "no-pattern-match", "no-patterns-reported", "wildcard-never-meets-a-tier"],
+)
+def test_a_supported_models_pattern_satisfies_a_strict_native_entry(
+    model: list[str], capabilities: list[tuple[str, tuple[str, ...]]], ineligible: bool
+) -> None:
+    from blizzard_mock.mock_hub.domain.matching import capability_ineligible
+    from blizzard_mock.mock_hub.domain.state import RunnerCapability
+
+    chunk = _chunk_state(default_harnesses=["h1", "h2"], default_model=model)
+    reported = [RunnerCapability(harness_id=h, supported_models=patterns) for h, patterns in capabilities]
+
+    assert capability_ineligible(chunk, "build", reported) is ineligible
