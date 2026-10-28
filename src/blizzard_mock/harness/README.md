@@ -450,8 +450,8 @@ every acquired repo as a child and is **not itself a git repo**, so `git
 apply`/`git commit` fail there. A fleet-tier script targeting one repo must
 repoint the ambient context first — `ctx = current_context(); ctx.cwd =
 pathlib.Path(ctx.cwd) / "<repo-name>"` — before calling either helper (see
-the `blizzard` repo's `tests/service/test_runner_service.py`,
-`_TRANSCRIPT_BUILD_SCRIPT`, for the pattern and the why in full).
+the `blizzard` repo's `tests/service/runner/runner.spec.ts`,
+`TRANSCRIPT_BUILD`, for the pattern and the why in full).
 
 | Helper | Effect |
 |--------|--------|
