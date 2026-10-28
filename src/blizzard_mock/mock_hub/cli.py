@@ -9,10 +9,10 @@ test that runs the real runner out of process points ``BZ_HUB_URL`` at this addr
 from __future__ import annotations
 
 import click
-import uvicorn
 
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.config import MockHubConfig
+from blizzard_mock.serve import serve
 
 
 @click.command()
@@ -28,7 +28,7 @@ def main(host: str | None, port: int | None, no_host_plane: bool | None) -> None
     """Serve the mock hub — a stateful stand-in for the hub API a runner consumes."""
     config = MockHubConfig.from_env(host=host, port=port, host_plane_absent=no_host_plane or None)
     app = create_app(config)
-    uvicorn.run(app, host=config.host, port=config.port)
+    serve(app, host=config.host, port=config.port)
 
 
 if __name__ == "__main__":

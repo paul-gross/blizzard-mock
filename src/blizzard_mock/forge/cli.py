@@ -8,10 +8,10 @@ app with uvicorn, bound to the winter service band.
 from __future__ import annotations
 
 import click
-import uvicorn
 
 from blizzard_mock.forge.app import create_app
 from blizzard_mock.forge.config import ForgeConfig
+from blizzard_mock.serve import serve
 
 
 @click.command()
@@ -30,7 +30,7 @@ def main(repos_dir: str | None, host: str | None, port: int | None) -> None:
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
     app = create_app(config)
-    uvicorn.run(app, host=config.host, port=config.port)
+    serve(app, host=config.host, port=config.port)
 
 
 if __name__ == "__main__":

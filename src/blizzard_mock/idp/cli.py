@@ -7,10 +7,10 @@ the stub-IdP FastAPI app with uvicorn.
 from __future__ import annotations
 
 import click
-import uvicorn
 
 from blizzard_mock.idp.app import create_app
 from blizzard_mock.idp.config import IdpConfig
+from blizzard_mock.serve import serve
 
 
 @click.command()
@@ -20,7 +20,7 @@ def main(host: str | None, port: int | None) -> None:
     """Serve the stub OAuth identity provider (OIDC + GitHub-style)."""
     config = IdpConfig.from_env(host=host, port=port)
     app = create_app()
-    uvicorn.run(app, host=config.host, port=config.port)
+    serve(app, host=config.host, port=config.port)
 
 
 if __name__ == "__main__":

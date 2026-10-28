@@ -8,10 +8,10 @@ and POSTs ``/_drive/*`` to exercise the real hub's API over the wire.
 from __future__ import annotations
 
 import click
-import uvicorn
 
 from blizzard_mock.mock_runner.app import create_app
 from blizzard_mock.mock_runner.config import MockRunnerConfig
+from blizzard_mock.serve import serve
 
 
 @click.command()
@@ -29,7 +29,7 @@ def main(host: str | None, port: int | None, hub_url: str | None, token: str | N
     """Serve the mock runner — a levered driver of the runner's outbound protocol."""
     config = MockRunnerConfig.from_env(host=host, port=port, hub_url=hub_url, token=token, name=name)
     app = create_app(config)
-    uvicorn.run(app, host=config.host, port=config.port)
+    serve(app, host=config.host, port=config.port)
 
 
 if __name__ == "__main__":
