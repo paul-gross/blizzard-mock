@@ -3,12 +3,13 @@
 ``host_plane_absent`` (or the startup switch) answers every ``/api/fleet/host`` route a
 route-missing 404. Four more levers: ``unreachable``/``unreachable_transcripts`` answer
 503 (every route / the transcripts route alone); ``delay``/``delay_transcripts`` sleep first, scoped the same
-way. Exempt: control-plane/liveness. ``RequestCaptureMiddleware`` records every
-``/api/*`` request."""
+way. ``idp_offered`` (or its startup switch) serves ``GET /api/auth/jwks.json`` an empty key set, a route
+otherwise absent. Exempt: control-plane/liveness. ``RequestCaptureMiddleware`` records every ``/api/*`` request."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -19,6 +20,7 @@ from blizzard_mock.mock_hub.domain.capture import ICaptureStore
 from blizzard_mock.mock_hub.domain.levers import HubLever
 
 HOST_PLANE_PREFIX = "/api/fleet/host"
+JWKS_PATH = "/api/auth/jwks.json"
 
 _EXEMPT_PREFIXES = ("/_levers", "/_seed", "/_captured", "/api/health", "/api/ready", "/docs", "/openapi.json")
 
@@ -42,10 +44,13 @@ def _on_host_plane(path: str) -> bool:
 class HubLeverMiddleware(BaseHTTPMiddleware):
     """Applies the transport-edge levers held in ``app.state.levers``."""
 
-    def __init__(self, app: object, levers: ILeverStore, *, host_plane_absent: bool = False) -> None:
+    def __init__(
+        self, app: object, levers: ILeverStore, *, host_plane_absent: bool = False, idp_offered: bool = False
+    ) -> None:
         super().__init__(app)  # type: ignore[arg-type]
         self._levers = levers
         self._host_plane_absent = host_plane_absent
+        self._idp_offered = idp_offered
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
@@ -81,6 +86,13 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
             self._levers.consume(delay)
             await asyncio.sleep(int(delay.payload.get("ms", 0)) / 1000.0)
 
+        if (
+            path == JWKS_PATH
+            and request.method == "GET"
+            and (self._idp_offered or self._levers.find(HubLever.IDP_OFFERED.value, None) is not None)
+        ):
+            return JSONResponse(status_code=200, content={"keys": []})
+
         return await call_next(request)
 
 
@@ -89,8 +101,15 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
 _CAPTURE_EXEMPT_PREFIXES = ("/api/health", "/api/ready")
 
 
+def _json_body(raw: bytes) -> object:
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
 class RequestCaptureMiddleware(BaseHTTPMiddleware):
-    """Records every hub-mirror ``/api/*`` request's method, path, headers.
+    """Records every hub-mirror ``/api/*`` request's method, path, headers, and body — parsed JSON, else ``None``.
 
     Excludes the control plane and liveness routes.
     """
@@ -102,5 +121,7 @@ class RequestCaptureMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if path.startswith("/api/") and not any(path.startswith(prefix) for prefix in _CAPTURE_EXEMPT_PREFIXES):
-            self._captured.record(method=request.method, path=path, headers=dict(request.headers))
+            self._captured.record(
+                method=request.method, path=path, headers=dict(request.headers), body=_json_body(await request.body())
+            )
         return await call_next(request)

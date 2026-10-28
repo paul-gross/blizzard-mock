@@ -42,7 +42,8 @@ def create_app(config: MockHubConfig | None = None, *, clock: Clock | None = Non
     app.state.captured = captured
 
     host_plane_absent = config is not None and config.host_plane_absent
-    app.add_middleware(HubLeverMiddleware, levers=levers, host_plane_absent=host_plane_absent)
+    idp_offered = config is not None and config.idp_offered
+    app.add_middleware(HubLeverMiddleware, levers=levers, host_plane_absent=host_plane_absent, idp_offered=idp_offered)
     app.add_middleware(RequestCaptureMiddleware, captured=captured)
 
     @app.exception_handler(ChunkNotFound)

@@ -921,7 +921,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_thirteen(client: TestClient) -> None:
+def test_lever_catalog_lists_all_fourteen(client: TestClient) -> None:
     catalog = client.get("/_levers").json()["catalog"]
     assert set(catalog) == {
         "delay",
@@ -936,6 +936,7 @@ def test_lever_catalog_lists_all_thirteen(client: TestClient) -> None:
         "dependency_unmet",
         "host_plane_absent",
         "fleet_flags",
+        "idp_offered",
         "version_refused",
     }
 
@@ -1060,6 +1061,17 @@ def test_captured_records_the_authorization_header_on_an_api_call(client: TestCl
     assert entry["method"] == "POST"
     assert entry["path"] == "/api/fleet/runners"
     assert entry["headers"]["authorization"] == "Bearer tok-123"
+
+
+def test_captured_records_a_json_body_parsed(client: TestClient) -> None:
+    client.post("/api/fleet/runners", json={"workspace_id": "ws"})
+    assert client.get("/_captured").json()["requests"][0]["body"] == {"workspace_id": "ws"}
+
+
+def test_captured_records_a_non_json_or_empty_body_as_null(client: TestClient) -> None:
+    client.post("/api/fleet/runners", content=b"not json", headers={"Content-Type": "text/plain"})
+    client.get("/api/fleet/queue/peek")
+    assert [r["body"] for r in client.get("/_captured").json()["requests"]] == [None, None]
 
 
 def test_captured_omits_a_request_with_no_authorization_header(client: TestClient) -> None:

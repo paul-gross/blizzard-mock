@@ -2,7 +2,8 @@
 
 Resolves the bind address (``--host`` / ``BZ_MOCK_HUB_HOST``, ``--port`` /
 ``BZ_MOCK_HUB_PORT``) and the host-plane-absent switch (``--no-host-plane`` /
-``BZ_MOCK_HUB_NO_HOST_PLANE``), and serves the mock-hub FastAPI app with uvicorn. A service-tier
+``BZ_MOCK_HUB_NO_HOST_PLANE``) and IdP-offered switch (``--offer-idp`` / ``BZ_MOCK_HUB_OFFER_IDP``), and serves
+the mock-hub FastAPI app with uvicorn. A service-tier
 test that runs the real runner out of process points ``BZ_HUB_URL`` at this address.
 """
 
@@ -24,9 +25,17 @@ from blizzard_mock.serve import serve
     default=None,
     help="Answer every /api/fleet/host route 404 — a hub from before hosts (env BZ_MOCK_HUB_NO_HOST_PLANE=1).",
 )
-def main(host: str | None, port: int | None, no_host_plane: bool | None) -> None:
+@click.option(
+    "--offer-idp",
+    is_flag=True,
+    default=None,
+    help='Serve GET /api/auth/jwks.json as 200 {"keys": []} — a hub offering an IdP (env BZ_MOCK_HUB_OFFER_IDP=1).',
+)
+def main(host: str | None, port: int | None, no_host_plane: bool | None, offer_idp: bool | None) -> None:
     """Serve the mock hub — a stateful stand-in for the hub API a runner consumes."""
-    config = MockHubConfig.from_env(host=host, port=port, host_plane_absent=no_host_plane or None)
+    config = MockHubConfig.from_env(
+        host=host, port=port, host_plane_absent=no_host_plane or None, idp_offered=offer_idp or None
+    )
     app = create_app(config)
     serve(app, host=config.host, port=config.port)
 

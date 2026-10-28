@@ -27,6 +27,7 @@ FastAPI app via uvicorn.
 | Bind host | `--host` | `BZ_MOCK_HUB_HOST` | `127.0.0.1` |
 | Bind port | `--port` | `BZ_MOCK_HUB_PORT` | `8421` |
 | Host plane absent | `--no-host-plane` | `BZ_MOCK_HUB_NO_HOST_PLANE=1` | off |
+| IdP offered | `--offer-idp` | `BZ_MOCK_HUB_OFFER_IDP=1` | off |
 
 A service-tier test points the real runner's `BZ_HUB_URL` at `http://{host}:{port}`.
 
@@ -246,8 +247,8 @@ to either a sample or a miss.
   /_levers/{kind}?chunk_id=` (clear), `POST /_levers/reset`.
 - `GET /_captured` — the header-inspection lever: every fleet-facing
   `/api/*` request received so far (liveness — `/api/health`, `/api/ready` — excluded,
-  same as the lever exemptions), `{requests: [{method, path, headers}, ...]}`, in
-  arrival order. `POST /_captured/reset` clears it. A service test uses this to assert
+  same as the lever exemptions), `{requests: [{method, path, headers, body}, ...]}`, in
+  arrival order; `body` is the parsed JSON body, `null` when the body is empty or not JSON. `POST /_captured/reset` clears it. A service test uses this to assert
   a real runner's
   outbound `Authorization` header actually reached the hub, on every runner→hub call
   including the work-items proxy forward.
@@ -267,6 +268,7 @@ to either a sample or a miss.
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
 | `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency; `GET /queue/peek` marks the same chunk `blocked`, read without consuming — sticky until cleared |
 | `host_plane_absent` | — | Every route under `/api/fleet/host` answers `404 {"detail": "Not Found"}` — a hub from before hosts; every other route, `POST /api/hosts` included, is unaffected. Sticky until cleared. The startup switch (`--no-host-plane`) does the same for the process's life, surviving `/_levers/reset` and `/_seed/reset` |
+| `idp_offered` | — | `GET /api/auth/jwks.json` answers `200 {"keys": []}` — a hub offering an IdP; while unarmed the route is absent (`404`). Sticky until cleared. The startup switch (`--offer-idp`) does the same for the process's life, surviving `/_levers/reset` — so it holds before a runner's first boot |
 | `fleet_flags` | `{<flag>: bool, …}` | `GET /api/fleet/identity` answers the payload as its `fleet_flags` map; `{}` while unarmed. Global and sticky — arming again replaces the map, `DELETE /_levers/fleet_flags` clears it |
 | `version_refused` | `{runner_id, reason?, hub_version?, floor?, detail?}` | `POST /api/fleet/runners` from `runner_id` alone answers **409** `RunnerVersionRefusal` — `reason` (default `too-old`), the runner's sent `version`, `hub_version` and `floor` (default the mock's own), and `detail` — before anything is recorded; every other runner registers as usual. Sticky until cleared |
 

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from blizzard_mock.harness.internal.logging import get_logger
-from blizzard_mock.harness.session import Ask, Invocation, SessionState, SessionStore
+from blizzard_mock.harness.session import Ask, Invocation, SessionState, SessionStore, SpawnCredential
 
 _log = get_logger(__name__)
 
@@ -39,6 +39,9 @@ ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
 #: The runner-injected lease identity, and the value the runner selftest pins on its spawn.
 LEASE_ID_ENV_VAR = "BLIZZARD_LEASE_ID"
 SELFTEST_LEASE_ID = "selftest"
+#: The rest of the runner-injected spawn credential, recorded beside the lease id.
+LEASE_TOKEN_ENV_VAR = "BLIZZARD_LEASE_TOKEN"
+RUNNER_URL_ENV_VAR = "BLIZZARD_RUNNER_URL"
 #: What the selftest responder commits on spawn, and what it later judges by.
 SELFTEST_FILENAME = "SELFTEST.txt"
 
@@ -526,6 +529,11 @@ def run_prompt(
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
         state.selftest = env.get(LEASE_ID_ENV_VAR) == SELFTEST_LEASE_ID
+        state.spawn_credential = SpawnCredential(
+            lease_id=env.get(LEASE_ID_ENV_VAR),
+            lease_token=env.get(LEASE_TOKEN_ENV_VAR),
+            runner_url=env.get(RUNNER_URL_ENV_VAR),
+        )
     # Keyed on the selftest's identity, never its wording, and only after the fence has passed.
     # A resume (the judge call included) carries no identity, so the session remembers it.
     if state.selftest and tagged is None:
