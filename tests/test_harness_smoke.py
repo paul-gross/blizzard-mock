@@ -1675,11 +1675,6 @@ def test_non_selftest_prose_is_still_a_script_error(fenced_repo) -> None:
     assert result.is_error
 
 
-# --------------------------------------------------------------------------- #
-# The spawn credential
-# --------------------------------------------------------------------------- #
-
-
 def test_spawn_records_the_runner_exported_credential(fenced_repo) -> None:
     cwd, env = fenced_repo
     spawn_env = {
@@ -1689,7 +1684,6 @@ def test_spawn_records_the_runner_exported_credential(fenced_repo) -> None:
         "BLIZZARD_RUNNER_URL": "http://127.0.0.1:9999",
     }
     _run("verdict('ok')", (cwd, spawn_env), session_id="cred-a")
-    # A resume carries no credential; the spawn's record survives it.
     _run("verdict('ok')", (cwd, env), session_id="cred-a", is_resume=True)
 
     state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-a")

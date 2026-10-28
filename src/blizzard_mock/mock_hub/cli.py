@@ -2,9 +2,8 @@
 
 Resolves the bind address (``--host`` / ``BZ_MOCK_HUB_HOST``, ``--port`` /
 ``BZ_MOCK_HUB_PORT``) and the host-plane-absent switch (``--no-host-plane`` /
-``BZ_MOCK_HUB_NO_HOST_PLANE``) and IdP-offered switch (``--offer-idp`` / ``BZ_MOCK_HUB_OFFER_IDP``), and serves
-the mock-hub FastAPI app with uvicorn. A service-tier
-test that runs the real runner out of process points ``BZ_HUB_URL`` at this address.
+``BZ_MOCK_HUB_NO_HOST_PLANE``) and IdP-offered (``--offer-idp``) switches, and serves the mock-hub FastAPI app
+with uvicorn. A service-tier test that runs the real runner out of process points ``BZ_HUB_URL`` here.
 """
 
 from __future__ import annotations

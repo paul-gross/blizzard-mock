@@ -1,7 +1,5 @@
 """Mock-hub configuration — bind address, plus the host-plane-absent and IdP-offered switches.
 
-The hub mock is pure in-memory state.
-
 Sourced from CLI flags with env fallbacks. The mock stands in for the real hub on the
 winter service band's hub port; a service-tier test that runs it out of process points
 the runner's ``BZ_HUB_URL`` at ``http://{host}:{port}``.
@@ -33,7 +31,6 @@ class MockHubConfig:
     port: int = DEFAULT_PORT
     #: Answer every ``/api/fleet/host`` route 404 for the process's life — a hub from before hosts.
     host_plane_absent: bool = False
-    #: Serve ``GET /api/auth/jwks.json`` an empty key set for the process's life — a hub offering an IdP.
     idp_offered: bool = False
 
     @property

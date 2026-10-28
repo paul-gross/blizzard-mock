@@ -49,8 +49,6 @@ class HubLever(StrEnum):
     #: ``GET /api/fleet/identity`` answers ``payload`` as its ``fleet_flags`` — the hub's ``fleet`` flags a runner
     #: applies on a matched answer. Global and sticky; arming again replaces the map.
     FLEET_FLAGS = "fleet_flags"
-    #: ``GET /api/auth/jwks.json`` answers ``200 {"keys": []}`` — a hub offering an IdP; the route is absent
-    #: (404) while unarmed. Sticky until cleared.
     IDP_OFFERED = "idp_offered"
     VERSION_REFUSED = "version_refused"
 

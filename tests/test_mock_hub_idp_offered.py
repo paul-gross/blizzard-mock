@@ -1,6 +1,3 @@
-"""The IdP-offered switch: ``GET /api/auth/jwks.json`` answers an empty key set while on, and is an absent route
-(404) while off — the default."""
-
 from __future__ import annotations
 
 import pytest

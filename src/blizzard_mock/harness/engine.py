@@ -39,7 +39,6 @@ ASK_CMD_ENV_VAR = "BLIZZARD_RUNNER_ASK_CMD"
 #: The runner-injected lease identity, and the value the runner selftest pins on its spawn.
 LEASE_ID_ENV_VAR = "BLIZZARD_LEASE_ID"
 SELFTEST_LEASE_ID = "selftest"
-#: The rest of the runner-injected spawn credential, recorded beside the lease id.
 LEASE_TOKEN_ENV_VAR = "BLIZZARD_LEASE_TOKEN"
 RUNNER_URL_ENV_VAR = "BLIZZARD_RUNNER_URL"
 #: What the selftest responder commits on spawn, and what it later judges by.
