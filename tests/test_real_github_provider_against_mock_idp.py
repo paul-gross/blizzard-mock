@@ -25,8 +25,8 @@ import uvicorn
 
 from blizzard_mock.idp.app import create_app
 
-#: Runs the sibling ``blizzard`` checkout's own interpreter; CI deselects the marker
-#: (`mise run test -- -m "not needs_blizzard"`) since a standalone checkout has no sibling.
+#: Runs the sibling ``blizzard`` checkout's own interpreter; the parity job
+#: supplies the synced checkout while the ordinary test job deselects this marker.
 pytestmark = pytest.mark.needs_blizzard
 
 #: The same sibling-resolution convention as ``test_wire_parity.py``'s ``_BLIZZARD``.
@@ -36,7 +36,7 @@ _BLIZZARD_PYTHON = _BLIZZARD / ".venv" / "bin" / "python"
 #: Exchanges one code through the real conformer and prints the identity it resolves to.
 _EXCHANGE = """
 import json, sys
-import httpx
+import httpx2 as httpx
 from blizzard.hub.auth.oauth.internal.github_provider import GithubProvider
 
 base, code = sys.argv[1], sys.argv[2]
