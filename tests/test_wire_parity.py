@@ -40,15 +40,13 @@ from blizzard_mock.mock_hub.domain import state as hub_state
 from blizzard_mock.mock_runner.domain import gateway as runner_gateway
 from blizzard_mock.mock_runner.domain import service as runner_service
 
-#: Every test here reads the sibling ``blizzard`` checkout; CI deselects the marker
+#: Every test but two reads the sibling ``blizzard`` checkout; CI deselects the marker
 #: (`mise run test -- -m "not needs_blizzard"`) since a standalone checkout has no sibling.
-pytestmark = pytest.mark.needs_blizzard
+needs_blizzard = pytest.mark.needs_blizzard
 
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _HUB_SPEC = _BLIZZARD / "openapi" / "hub.openapi.json"
 _FACT_KINDS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "fact_kinds.py"
-_OPENCODE_SHAPES_SOURCE = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode" / "shapes.py"
-_ROLES_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "roles.py"
 _EVENT_LOG_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "event_log.py"
 _HUB_EVENTS_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "domain" / "observability" / "hub_events.py"
 _HUB_SCHEMA_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "store" / "schema.py"
@@ -82,18 +80,61 @@ def _exec_source(name: str, path: Path) -> ModuleType:
     return module
 
 
-def _load_opencode_shapes() -> ModuleType:
-    """Import blizzard's real OpenCode ``shapes`` parser straight off the sibling worktree.
+#: Runs under blizzard's own interpreter: reads the facade's stdout on stdin, parses it with
+#: the production ``parse_run_jsonl``, and prints one JSON object per event — or, when the parser
+#: refuses the stream, one object naming the error class and its message.
+_PARSER_DRIVER = """
+import json, sys
+from blizzard.runner.harness.opencode.shapes import OpenCodeShapeError, parse_run_jsonl
 
-    This repo cannot depend on ``blizzard``, so the module loads from source; its one ``blizzard`` import,
-    the stdlib-only data-role markers module, loads under its real dotted name, then is unregistered so no
-    other test sees a ``blizzard`` package. This is the exact parser production code runs."""
-    roles = "blizzard.foundation.roles"
-    _exec_source(roles, _ROLES_SOURCE)
-    try:
-        return _exec_source("_opencode_shapes_wire_parity", _OPENCODE_SHAPES_SOURCE)
-    finally:
-        sys.modules.pop(roles, None)
+def part(p):
+    if p is None:
+        return None
+    state = p.state
+    return {
+        "tool": p.tool,
+        "call_id": p.call_id,
+        "state": None if state is None else {"status": state.status, "error": state.error},
+    }
+
+def error(e):
+    return None if e is None else {"name": e.name, "message": e.message, "status_code": e.status_code}
+
+def permission(p):
+    return None if p is None else {"id": p.id, "permission": p.permission, "patterns": list(p.patterns)}
+
+try:
+    events = parse_run_jsonl(sys.stdin.read())
+except OpenCodeShapeError as exc:
+    print(json.dumps({"refused": type(exc).__name__, "message": str(exc)}))
+else:
+    for event in events:
+        print(json.dumps({
+            "type": event.type,
+            "session_id": event.session_id,
+            "part": part(event.part),
+            "error": error(event.error),
+            "permission": permission(event.permission),
+        }))
+"""
+
+
+def _parse_through_blizzard(stdout: str) -> list[dict[str, Any]]:
+    """Feed ``stdout`` to blizzard's real ``parse_run_jsonl`` in a subprocess of blizzard's own
+    virtual environment; return one dict per parsed event, or a single ``{"refused": ...}``
+    dict when the parser refuses the stream. Nothing of blizzard's is imported in this process."""
+    python = _BLIZZARD.resolve() / ".venv" / "bin" / "python"
+    assert python.is_file(), (
+        f"no blizzard virtual environment at {python} — parity is unverifiable, not green; "
+        f"run `uv sync` in {_BLIZZARD} or set $BLIZZARD_SOURCE"
+    )
+    proc = subprocess.run([str(python), "-c", _PARSER_DRIVER], input=stdout, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return [json.loads(line) for line in proc.stdout.splitlines()]
+
+
+def _assert_refused(parsed: list[dict[str, Any]]) -> None:
+    assert len(parsed) == 1 and parsed[0].get("refused") == "OpenCodeShapeError", parsed
 
 
 def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subprocess.CompletedProcess[str]:
@@ -108,83 +149,83 @@ def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subproc
     )
 
 
+@needs_blizzard
 def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """A fresh mint's actual stdout must parse cleanly through blizzard's own
     production parser, and its root session id must be server-assigned — the caller
     supplied no ``--session`` at all, exactly as the real fresh-session handshake
     requires (execution spec, "Fresh-session handshake")."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(cwd, env, "run", "verdict('approve', 'looks good')")
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
     assert events
-    assert events[0].session_id  # server-assigned; never a caller-supplied hint
+    assert events[0]["session_id"]  # server-assigned; never a caller-supplied hint
 
 
+@needs_blizzard
 def test_mock_opencode_resume_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """A resume never re-mints: it keeps the session id the caller learned off the fresh
     mint's own first record, and its stdout still parses cleanly through the real parser."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     first = _run_mock_opencode(cwd, env, "run", "ask('proceed?', ['yes', 'no'])")
     assert first.returncode == 0, first.stderr
-    session_id = shapes.parse_run_jsonl(first.stdout)[0].session_id
+    session_id = _parse_through_blizzard(first.stdout)[0]["session_id"]
 
     second = _run_mock_opencode(
         cwd, env, "run", "--session", session_id, "--variant", "high", "--auto", "verdict('pass', 'resumed')"
     )
     assert second.returncode == 0, second.stderr
 
-    events = shapes.parse_run_jsonl(second.stdout)
+    events = _parse_through_blizzard(second.stdout)
 
     assert events
-    assert events[0].session_id == session_id
+    assert events[0]["session_id"] == session_id
 
 
+@needs_blizzard
 def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """A crashed turn's stdout still parses cleanly, carrying an explicit session error the
     real adapter's ``_session_error`` reads back — never a step-finish, since the turn never
     produced a usable completed step."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(cwd, env, "run", "crash()")
     assert proc.returncode == 1
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    assert any(event.type == "error" for event in events)
-    assert not any(event.type == "step_finish" for event in events)
+    assert any(event["type"] == "error" for event in events)
+    assert not any(event["type"] == "step_finish" for event in events)
 
 
+@needs_blizzard
 def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """``permission_denial()`` stages a ``permission`` event whose stdout still parses
     cleanly through the real parser, carrying the denied permission's name and patterns."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(
         cwd, env, "run", "permission_denial('bash', ['git push *']); verdict('deny', 'not allowed')"
     )
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    permission_events = [event for event in events if event.type == "permission"]
+    permission_events = [event for event in events if event["type"] == "permission"]
     assert len(permission_events) == 1
-    permission = permission_events[0].permission
+    permission = permission_events[0]["permission"]
     assert permission is not None
-    assert permission.id
-    assert permission.permission == "bash"
-    assert permission.patterns == ("git push *",)
+    assert permission["id"]
+    assert permission["permission"] == "bash"
+    assert permission["patterns"] == ["git push *"]
 
 
+@needs_blizzard
 def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """``interrupt_tool()`` stages a ``tool_use`` event whose part's ``state.status`` is
     ``"error"`` — an interruption reads on OpenCode's wire exactly as a tool failure does,
     since there is no separate "interrupted" discriminator — and it still parses cleanly."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(
         cwd,
@@ -194,101 +235,99 @@ def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser
     )
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    tool_events = [event for event in events if event.type == "tool_use"]
+    tool_events = [event for event in events if event["type"] == "tool_use"]
     assert len(tool_events) == 1
-    part = tool_events[0].part
+    part = tool_events[0]["part"]
     assert part is not None
-    assert part.tool == "bash"
-    assert part.state is not None
-    assert part.state.status == "error"
-    assert part.state.error == "interrupted by the user"
+    assert part["tool"] == "bash"
+    assert part["state"] is not None
+    assert part["state"]["status"] == "error"
+    assert part["state"]["error"] == "interrupted by the user"
 
 
+@needs_blizzard
 def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_repo) -> None:
     """``malformed_record()`` stages a line the real parser genuinely rejects — proving
     the production rejection path is exercised against this mock, not only against
     blizzard's own hand-built fixtures."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(cwd, env, "run", "malformed_record(); verdict('approve')")
     assert proc.returncode == 0, proc.stderr
 
-    with pytest.raises(shapes.OpenCodeShapeError):
-        shapes.parse_run_jsonl(proc.stdout)
+    _assert_refused(_parse_through_blizzard(proc.stdout))
 
 
+@needs_blizzard
 def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
     """``usage_limit_error()`` stages the captured OpenCode limit shape —
     still parseable by the real parser, carrying the 429 status and usage-limit phrasing
     the real runner adapter's own ``classify_usage_limit`` reads (proven directly by that
     adapter's own unit tests in the sibling ``blizzard`` checkout)."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(cwd, env, "run", "usage_limit_error(); verdict('deny')")
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    error_events = [event for event in events if event.type == "error"]
+    error_events = [event for event in events if event["type"] == "error"]
     assert len(error_events) == 1
-    error = error_events[0].error
+    error = error_events[0]["error"]
     assert error is not None
-    assert error.name == "AI_APICallError"
-    assert error.status_code == 429
-    assert "usage limit" in error.message.lower()
+    assert error["name"] == "AI_APICallError"
+    assert error["status_code"] == 429
+    assert "usage limit" in error["message"].lower()
 
 
+@needs_blizzard
 def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced_repo) -> None:
     """``permission_id`` is a non-default kwarg no prior test exercised — the staged
     event must carry the caller's id rather than always minting a fresh one."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(
         cwd, env, "run", "permission_denial('bash', permission_id='perm_fixed_1'); verdict('deny')"
     )
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    permission_events = [event for event in events if event.type == "permission"]
+    permission_events = [event for event in events if event["type"] == "permission"]
     assert len(permission_events) == 1
-    permission = permission_events[0].permission
+    permission = permission_events[0]["permission"]
     assert permission is not None
-    assert permission.id == "perm_fixed_1"
+    assert permission["id"] == "perm_fixed_1"
 
 
+@needs_blizzard
 def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo) -> None:
     """``call_id`` is a non-default kwarg no prior test exercised — the staged tool
     part must carry the caller's call id rather than always minting a fresh one."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     proc = _run_mock_opencode(cwd, env, "run", "interrupt_tool('bash', call_id='call_fixed_1'); verdict('deny')")
     assert proc.returncode == 0, proc.stderr
 
-    events = shapes.parse_run_jsonl(proc.stdout)
+    events = _parse_through_blizzard(proc.stdout)
 
-    tool_events = [event for event in events if event.type == "tool_use"]
+    tool_events = [event for event in events if event["type"] == "tool_use"]
     assert len(tool_events) == 1
-    part = tool_events[0].part
+    part = tool_events[0]["part"]
     assert part is not None
-    assert part.call_id == "call_fixed_1"
+    assert part["call_id"] == "call_fixed_1"
 
 
+@needs_blizzard
 def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> None:
     """An explicit ``line`` is a non-default kwarg no prior test exercised — a
     caller-chosen rejection shape (here, valid JSON missing a required field) must reach
     the wire verbatim, not just the default invalid-JSON line."""
-    shapes = _load_opencode_shapes()
     cwd, env = fenced_repo
     custom_line = '{"type": "tool_use", "sessionID": "s1"}'
     proc = _run_mock_opencode(cwd, env, "run", f"malformed_record(line={custom_line!r}); verdict('approve')")
     assert proc.returncode == 0, proc.stderr
     assert custom_line in proc.stdout
 
-    with pytest.raises(shapes.OpenCodeShapeError):
-        shapes.parse_run_jsonl(proc.stdout)
+    _assert_refused(_parse_through_blizzard(proc.stdout))
 
 
 def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
@@ -464,10 +503,12 @@ def _wire_field_names(model: type[BaseModel]) -> set[str]:
     return {f.alias or name for name, f in model.model_fields.items()}
 
 
+@needs_blizzard
 def test_every_mirror_model_is_mapped_to_a_real_schema() -> None:
     assert set(_mirror_models()) == set(_MIRRORED) | _UNSCHEMAED
 
 
+@needs_blizzard
 def test_every_mirrored_wire_body_is_mapped_to_a_real_schema() -> None:
     """``_MIRRORED_BODIES`` used to be checked only from below —
     every KEY in it was field-diffed, but nothing asserted the map was complete, so a new
@@ -476,6 +517,7 @@ def test_every_mirrored_wire_body_is_mapped_to_a_real_schema() -> None:
     assert set(_deps_mirror_bodies()) == set(_MIRRORED_BODIES)
 
 
+@needs_blizzard
 @pytest.mark.parametrize("name", sorted(_MIRRORED_BODIES))
 def test_transcript_body_field_set_agrees_with_the_real_schema(name: str) -> None:
     """The same field-set diff for the transcript lane's request bodies, which
@@ -489,6 +531,7 @@ def test_transcript_body_field_set_agrees_with_the_real_schema(name: str) -> Non
     assert real - mirrored == omitted, f"{name} omits {sorted(real - mirrored)}, declared {sorted(omitted)}"
 
 
+@needs_blizzard
 @pytest.mark.parametrize("name", sorted(_MIRRORED))
 def test_mirror_field_set_agrees_with_the_real_schema(name: str) -> None:
     schema_name, omitted = _MIRRORED[name]
@@ -500,6 +543,7 @@ def test_mirror_field_set_agrees_with_the_real_schema(name: str) -> None:
     assert real - mirrored == omitted, f"{name} omits {sorted(real - mirrored)}, declared {sorted(omitted)}"
 
 
+@needs_blizzard
 def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
     """The batched ``/events`` dispatch and the real ``foundation/fact_kinds`` constants name the same
     kinds — a real-side kind the mock never learned would be rejected, silently."""
@@ -510,6 +554,7 @@ def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
     assert mirrored == real
 
 
+@needs_blizzard
 def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
     """The incompatible claim ``409`` body appears in no OpenAPI schema, so the mock's ``reason``
     values are pinned to the real ``ClaimDenialReason`` here: a runner reads the value to tell a
@@ -522,6 +567,7 @@ def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
     assert real.ClaimDenialReason.PROJECT.value == hub_service.CLAIM_DENIED_PROJECT
 
 
+@needs_blizzard
 def test_hub_event_kinds_match_the_real_vocabulary() -> None:
     """``create event`` routes the hub's own kinds to ``hub_event_log`` by the real
     ``HubEventKind``, and lets a runner report only the kinds both logs carry — a hub kind
@@ -534,6 +580,7 @@ def test_hub_event_kinds_match_the_real_vocabulary() -> None:
     assert set(EXPORT_EVENT_KINDS) == hub_kinds & set(get_args(real.EventLogKind))
 
 
+@needs_blizzard
 def test_hub_global_tables_match_the_real_schema() -> None:
     """``reset --store hub`` keeps the hub's global tables by this hand-kept list when
     ``blizzard`` is not importable — a global table it missed would be emptied."""
