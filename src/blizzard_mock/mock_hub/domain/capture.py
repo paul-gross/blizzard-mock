@@ -1,7 +1,7 @@
 """Received-request capture — the header-inspection lever.
 
 The mirror image of the edge-state levers: capturing what a request
-presented (e.g. an ``Authorization`` header), read back via ``GET
+presented (e.g. an ``Authorization`` header) or carried (its JSON body), read back via ``GET
 /_captured`` rather than wiring assertion logic into the domain rules.
 """
 
@@ -13,7 +13,7 @@ from typing import Protocol
 class ICaptureStore(Protocol):
     """Read/write seam over the requests received on the hub-mirror ``/api/*`` surface."""
 
-    def record(self, *, method: str, path: str, headers: dict[str, str]) -> None: ...
+    def record(self, *, method: str, path: str, headers: dict[str, str], body: object) -> None: ...
     def all(self) -> list[dict[str, object]]: ...
     def clear(self) -> None: ...
 
@@ -24,8 +24,8 @@ class InMemoryCaptureStore:
     def __init__(self) -> None:
         self._requests: list[dict[str, object]] = []
 
-    def record(self, *, method: str, path: str, headers: dict[str, str]) -> None:
-        self._requests.append({"method": method, "path": path, "headers": headers})
+    def record(self, *, method: str, path: str, headers: dict[str, str], body: object) -> None:
+        self._requests.append({"method": method, "path": path, "headers": headers, "body": body})
 
     def all(self) -> list[dict[str, object]]:
         return list(self._requests)

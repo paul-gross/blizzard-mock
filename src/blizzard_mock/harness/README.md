@@ -115,6 +115,14 @@ and how a settings document's hook commands are executed* — see "Hook executio
   was launched with* is the observable a fleet-tier scenario asserts blizzard's
   mint-only model contract against. Note what that does and does not prove: the
   facade sees argv, so this checks the **flag**, never the effective model.
+  A spawn also records its `spawn_credential` — what the runner exported to the
+  worker: `{"lease_id", "lease_token", "runner_url"}` from `BLIZZARD_LEASE_ID`,
+  `BLIZZARD_LEASE_TOKEN`, `BLIZZARD_RUNNER_URL`, `null` for one absent from the
+  env. A resume that carries a token replaces the record (the runner re-mints a
+  lease's token for each resume, superseding the last); one without leaves it in
+  place. The record is written before the script runs and lives at `<state dir>/<session_id>.json` — `BLIZZARD_MOCK_HARNESS_STATE_DIR`,
+  else `.blizzard-mock-harness/sessions/` beside the fence marker — so a test finds
+  a lease's session by scanning those files for its `spawn_credential.lease_id`.
 - `helpers.py` — the terse helper library bound into every behavior script's
   namespace (no import needed): `ask`, `apply_diff`, `commit`, `tool_call`,
   `verdict`, `hang`, `crash`, plus `state()` / `answer()` for reading session
@@ -443,8 +451,8 @@ every acquired repo as a child and is **not itself a git repo**, so `git
 apply`/`git commit` fail there. A fleet-tier script targeting one repo must
 repoint the ambient context first — `ctx = current_context(); ctx.cwd =
 pathlib.Path(ctx.cwd) / "<repo-name>"` — before calling either helper (see
-the `blizzard` repo's `tests/service/test_runner_service.py`,
-`_TRANSCRIPT_BUILD_SCRIPT`, for the pattern and the why in full).
+the `blizzard` repo's `tests/service/runner/runner.spec.ts`,
+`TRANSCRIPT_BUILD`, for the pattern and the why in full).
 
 | Helper | Effect |
 |--------|--------|

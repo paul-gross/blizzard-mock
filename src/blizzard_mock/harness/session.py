@@ -37,6 +37,13 @@ class Invocation:
 
 
 @dataclass
+class SpawnCredential:
+    lease_id: str | None = None
+    lease_token: str | None = None
+    runner_url: str | None = None
+
+
+@dataclass
 class SessionState:
     """The durable state of one mock-harness session, keyed by ``session_id``.
 
@@ -52,6 +59,7 @@ class SessionState:
     #: Set when the spawn carried the runner selftest's lease identity; a later resume
     #: arrives without it, so the session remembers it.
     selftest: bool = False
+    spawn_credential: SpawnCredential | None = None
 
     @property
     def last_ask(self) -> Ask | None:
@@ -70,7 +78,9 @@ class SessionState:
         raw = json.loads(text)
         asks = [Ask(**a) for a in raw.pop("asks", [])]
         invocations = [Invocation(**i) for i in raw.pop("invocations", [])]
-        return cls(asks=asks, invocations=invocations, **raw)
+        credential = raw.pop("spawn_credential", None)
+        spawn_credential = SpawnCredential(**credential) if credential is not None else None
+        return cls(asks=asks, invocations=invocations, spawn_credential=spawn_credential, **raw)
 
 
 class SessionStore:

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from blizzard_mock.harness import engine, helpers
+from blizzard_mock.harness import engine, helpers, session
 from blizzard_mock.harness.engine import FenceError
 from blizzard_mock.harness.facades import claude_code
 from blizzard_mock.harness.facades._text import PlainTextWire
@@ -1673,3 +1673,55 @@ def test_non_selftest_prose_is_still_a_script_error(fenced_repo) -> None:
     code, result = _run("Create SELFTEST.txt and commit it.", fenced_repo)
     assert code == 1
     assert result.is_error
+
+
+def test_spawn_records_the_runner_exported_credential(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    spawn_env = {
+        **env,
+        "BLIZZARD_LEASE_ID": "lease-1",
+        "BLIZZARD_LEASE_TOKEN": "tok-1",
+        "BLIZZARD_RUNNER_URL": "http://127.0.0.1:9999",
+    }
+    _run("verdict('ok')", (cwd, spawn_env), session_id="cred-a")
+    _run("verdict('ok')", (cwd, env), session_id="cred-a", is_resume=True)
+
+    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-a")
+    assert state is not None
+    assert state.spawn_credential == session.SpawnCredential(
+        lease_id="lease-1", lease_token="tok-1", runner_url="http://127.0.0.1:9999"
+    )
+    raw = json.loads((engine._state_root(env, cwd) / "cred-a.json").read_text())
+    assert raw["spawn_credential"] == {
+        "lease_id": "lease-1",
+        "lease_token": "tok-1",
+        "runner_url": "http://127.0.0.1:9999",
+    }
+
+
+def test_resume_with_a_resupplied_token_supersedes_the_recorded_one(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    _run(
+        "verdict('ok')",
+        (cwd, {**env, "BLIZZARD_LEASE_ID": "lease-1", "BLIZZARD_LEASE_TOKEN": "tok-1"}),
+        session_id="cred-c",
+    )
+    _run(
+        "verdict('ok')",
+        (cwd, {**env, "BLIZZARD_LEASE_ID": "lease-1", "BLIZZARD_LEASE_TOKEN": "tok-2"}),
+        session_id="cred-c",
+        is_resume=True,
+    )
+    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-c")
+    assert state is not None
+    assert state.spawn_credential is not None
+    assert state.spawn_credential.lease_token == "tok-2"
+
+
+def test_spawn_without_credential_records_absent_vars_as_null(fenced_repo) -> None:
+    cwd, env = fenced_repo
+    env = {k: v for k, v in env.items() if not k.startswith("BLIZZARD_") or k == engine.FENCE_ENV_VAR}
+    _run("verdict('ok')", (cwd, env), session_id="cred-b")
+    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-b")
+    assert state is not None
+    assert state.spawn_credential == session.SpawnCredential()
