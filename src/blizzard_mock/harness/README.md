@@ -118,8 +118,9 @@ and how a settings document's hook commands are executed* — see "Hook executio
   A spawn also records its `spawn_credential` — what the runner exported to the
   worker: `{"lease_id", "lease_token", "runner_url"}` from `BLIZZARD_LEASE_ID`,
   `BLIZZARD_LEASE_TOKEN`, `BLIZZARD_RUNNER_URL`, `null` for one absent from the
-  env. A resume carries no credential and leaves the spawn's record in place. The
-  record lives at `<state dir>/<session_id>.json` — `BLIZZARD_MOCK_HARNESS_STATE_DIR`,
+  env. A resume that carries a token replaces the record (the runner re-mints a
+  lease's token for each resume, superseding the last); one without leaves it in
+  place. The record is written before the script runs and lives at `<state dir>/<session_id>.json` — `BLIZZARD_MOCK_HARNESS_STATE_DIR`,
   else `.blizzard-mock-harness/sessions/` beside the fence marker — so a test finds
   a lease's session by scanning those files for its `spawn_credential.lease_id`.
 - `helpers.py` — the terse helper library bound into every behavior script's

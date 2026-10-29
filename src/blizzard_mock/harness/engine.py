@@ -455,6 +455,14 @@ verdict("pass" if tracked else "fail")
 """
 
 
+def _spawn_credential(env: Mapping[str, str]) -> SpawnCredential:
+    return SpawnCredential(
+        lease_id=env.get(LEASE_ID_ENV_VAR),
+        lease_token=env.get(LEASE_TOKEN_ENV_VAR),
+        runner_url=env.get(RUNNER_URL_ENV_VAR),
+    )
+
+
 def run_prompt(
     prompt: str,
     *,
@@ -524,15 +532,14 @@ def run_prompt(
             raise ValueError("resume requires a session_id")
         state = store.load_or_create(session_id)
         state.resumes.append(message)
+        # A resume the runner re-supplied a token to supersedes the one the spawn was given.
+        if env.get(LEASE_TOKEN_ENV_VAR) is not None:
+            state.spawn_credential = _spawn_credential(env)
     else:
         session_id = session_id or str(uuid.uuid4())
         state = store.load_or_create(session_id)
         state.selftest = env.get(LEASE_ID_ENV_VAR) == SELFTEST_LEASE_ID
-        state.spawn_credential = SpawnCredential(
-            lease_id=env.get(LEASE_ID_ENV_VAR),
-            lease_token=env.get(LEASE_TOKEN_ENV_VAR),
-            runner_url=env.get(RUNNER_URL_ENV_VAR),
-        )
+        state.spawn_credential = _spawn_credential(env)
     # Keyed on the selftest's identity, never its wording, and only after the fence has passed.
     # A resume (the judge call included) carries no identity, so the session remembers it.
     if state.selftest and tagged is None:
@@ -551,6 +558,8 @@ def run_prompt(
             permission=permission,
         )
     )
+    # Saved before the script runs, so a turn that holds its process open is already readable by its credential.
+    store.save(state)
 
     ctx = RunContext(
         session=state,
