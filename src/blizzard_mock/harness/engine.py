@@ -532,7 +532,7 @@ def run_prompt(
             raise ValueError("resume requires a session_id")
         state = store.load_or_create(session_id)
         state.resumes.append(message)
-        # A resume the runner re-supplied a token to supersedes the one the spawn was given.
+        # A re-minted token supersedes the spawn's.
         if env.get(LEASE_TOKEN_ENV_VAR) is not None:
             state.spawn_credential = _spawn_credential(env)
     else:
@@ -558,7 +558,7 @@ def run_prompt(
             permission=permission,
         )
     )
-    # Saved before the script runs, so a turn that holds its process open is already readable by its credential.
+    # Saved first, so a turn that holds its process open is already readable.
     store.save(state)
 
     ctx = RunContext(
