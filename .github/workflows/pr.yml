@@ -1,7 +1,7 @@
 # PR to master or a release line — the merge gate.
 #
-# ruff format/check, pyright, and the unit + component suite minus the sibling-reading
-# `needs_blizzard` tests (gate.yml). No upper tier here: this repo has none of its own —
+# ruff format/check, pyright, the ordinary suite and sibling-checkout wire parity
+# (`needs_blizzard`) run in separate jobs. No upper tier here: this repo has none of its own —
 # `blizzard`'s service and crash-sweep tiers exercise this repo's code from `blizzard`'s
 # own CI, not from here.
 name: pr

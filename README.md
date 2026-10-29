@@ -53,9 +53,11 @@ vale --output=line .
 
 `uv run pytest` needs a sibling `blizzard` checkout: the wire-parity guard
 (`tests/test_wire_parity.py`) compares the hub mirrors against that repo's committed
-OpenAPI and fact-kind constants, and **fails** rather than skips when it cannot resolve
-one — parity it never checked is not a green. A winter feature environment supplies the
-sibling by construction; elsewhere, point `$BLIZZARD_SOURCE` at the checkout.
+OpenAPI and fact-kind constants; `tests/test_real_runner_against_mock_hub.py` runs the
+real runner against the mock hub. Both **fail** rather than skip when they cannot
+resolve the checkout — parity never checked is not a green. A winter feature
+environment supplies the sibling by construction; elsewhere, point `$BLIZZARD_SOURCE`
+and `$BLIZZARD_RUNNER_BIN` at the checkout and its runner binary.
 
 `vale --output=line .` (`styles/Blizzard/ProcessReference.yml` against `.vale.ini`'s
 `[*.md]` and `[{src,tests}/**/*.py]` sections) fails on a repo or hub tracker number, an
@@ -67,15 +69,16 @@ rest.
 ### CI
 
 A PR gate (`.github/workflows/pr.yml`, on pull requests into `master` and `release/**`) and a push-to-master gate (`.github/workflows/push.yml`)
-both run the reusable `gate.yml`: a `quality` job (`ruff format --check`, `mise run lint`,
-`mise run typecheck`), a `test` job (`mise run test -- -m "not needs_blizzard"`), and a
-`process-ref-lint` job (`mise run process-ref-lint`). CI deselects the `needs_blizzard`
-marker — the wire-parity guard (`tests/test_wire_parity.py`) and the
-real-runner-against-mock-hub proof (`tests/test_real_runner_against_mock_hub.py`), both of
-which read the sibling `blizzard` checkout a single-repo CI runner does not carry — so it
-stays a local-only, sibling-checkout gate; the bare `uv run pytest` above is unaffected
-and still runs (and fails closed on) both. The check names are `gate / ruff + pyright`,
-`gate / pytest (sans needs_blizzard)`, and `gate / process-reference lint`.
+both run the reusable `gate.yml`: `quality` (`ruff format --check`, lint, typecheck),
+`test` (`mise run test -- -m "not needs_blizzard"`), `process-ref-lint`, and a separate
+`parity` job (`mise run test -- -m needs_blizzard`). Parity checks out blizzard at a
+resolved commit: a same-named `v*` tag, the PR head's matching branch if it exists,
+otherwise the target line (`master` or `release/X.Y`), and `master` on a master push.
+The resolver logs the selected ref and commit. `.github/workflows/nightly.yml` calls the
+same gate on a schedule with an explicit blizzard `master` ref. The check names are
+`gate / ruff + pyright`, `gate / pytest (sans needs_blizzard)`,
+`gate / process-reference lint`, and `gate / wire parity (needs_blizzard)`; parity is
+optional until a green run supports requiring it in branch protection.
 
 ## Acceptance proof
 

@@ -1,17 +1,20 @@
 # The merge gate — the reusable check suite.
 #
-# This is the PR-to-master gate. `pr.yml` runs it on every pull request; `push.yml` calls
-# it too, so the gate is defined once and never drifts between triggers.
+# `pr.yml` and `push.yml` call it on pull requests and master pushes; the nightly
+# caller checks parity against blizzard's master.
 #
 # `tests/test_wire_parity.py` and `tests/test_real_runner_against_mock_hub.py` read a
-# sibling `blizzard` checkout this workflow does not carry, and are marked
-# `needs_blizzard` (blizzard-context verification/blizzard/commands/mock.md); the test job
-# deselects that marker rather than skip it silently. The wire-parity guard stays a
-# local-only, sibling-checkout gate.
+# sibling `blizzard` checkout and are marked `needs_blizzard`. The ordinary test
+# job deselects that marker; the parity job supplies the checkout and runs both.
 name: gate
 
 on:
   workflow_call:
+    inputs:
+      blizzard-ref:
+        description: Explicit blizzard branch or tag for the scheduled parity check.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +67,41 @@ jobs:
           install: false
       - name: pytest -m "not needs_blizzard" (mise run test)
         run: mise run test -- -m "not needs_blizzard"
+
+  parity:
+    name: wire parity (needs_blizzard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: blizzard-mock
+          persist-credentials: false
+      - name: resolve and check out matching blizzard
+        id: blizzard
+        uses: ./blizzard-mock/.github/actions/resolve-blizzard-ref
+        with:
+          explicit-ref: ${{ inputs.blizzard-ref }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+      - name: sync blizzard
+        run: uv sync
+        working-directory: blizzard
+      - name: sync blizzard-mock
+        run: uv sync
+        working-directory: blizzard-mock
+      - name: install mise
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.9.2
+          install: false
+      - name: pytest -m needs_blizzard
+        run: mise run test -- -m needs_blizzard
+        working-directory: blizzard-mock
+        env:
+          BLIZZARD_SOURCE: ${{ github.workspace }}/blizzard
+          BLIZZARD_RUNNER_BIN: ${{ github.workspace }}/blizzard/.venv/bin/blizzard-runner
 
   process-ref-lint:
     name: process-reference lint

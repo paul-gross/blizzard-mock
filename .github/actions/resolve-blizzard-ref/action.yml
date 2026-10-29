@@ -1,0 +1,42 @@
+name: resolve-blizzard-ref
+description: Resolve the matching blizzard ref to a commit and check it out.
+
+inputs:
+  path:
+    description: Checkout path relative to the workspace.
+    default: blizzard
+  explicit-ref:
+    description: Branch or tag to use instead of event-based resolution.
+    default: ""
+
+outputs:
+  ref:
+    description: Selected blizzard ref.
+    value: ${{ steps.resolve.outputs.ref }}
+  sha:
+    description: Selected blizzard commit.
+    value: ${{ steps.resolve.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: resolve the blizzard ref
+      id: resolve
+      shell: bash
+      env:
+        EXPLICIT_REF: ${{ inputs.explicit-ref }}
+        EVENT_NAME: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        BASE_REF: ${{ github.base_ref }}
+        HEAD_REF: ${{ github.head_ref }}
+        BLIZZARD_URL: https://github.com/paul-gross/blizzard
+      run: |
+        "$GITHUB_ACTION_PATH/resolve-blizzard-ref.sh" >> "$GITHUB_OUTPUT"
+        sed 's/^/resolved blizzard: /' "$GITHUB_OUTPUT" | tail -2
+    - name: checkout blizzard
+      uses: actions/checkout@v4
+      with:
+        repository: paul-gross/blizzard
+        path: ${{ inputs.path }}
+        ref: ${{ steps.resolve.outputs.sha }}
+        persist-credentials: false
