@@ -532,7 +532,6 @@ def run_prompt(
             raise ValueError("resume requires a session_id")
         state = store.load_or_create(session_id)
         state.resumes.append(message)
-        # A re-minted token supersedes the spawn's.
         if env.get(LEASE_TOKEN_ENV_VAR) is not None:
             state.spawn_credential = _spawn_credential(env)
     else:
@@ -558,7 +557,6 @@ def run_prompt(
             permission=permission,
         )
     )
-    # Saved first, so a turn that holds its process open is already readable.
     store.save(state)
 
     ctx = RunContext(
