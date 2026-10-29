@@ -43,6 +43,7 @@ fi
 
 case "$ref" in
   refs/tags/v*)
+    [ "$event" = push ] || fail "event '$event' on '$ref' matches no blizzard-ref rule"
     tag="${ref#refs/tags/}"
     sha="$(tag_sha "$tag" || true)"
     [ -n "$sha" ] || fail "blizzard has no tag '$tag'"

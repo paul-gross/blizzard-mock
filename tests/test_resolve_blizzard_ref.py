@@ -99,6 +99,7 @@ def test_explicit_ref_overrides_event(blizzard: dict[str, str], explicit: str) -
         ({"EVENT_NAME": "push", "REF": "refs/heads/release/0.2"}, "matches no"),
         ({"EVENT_NAME": "pull_request", "BASE_REF": "develop"}, "matches no"),
         ({"EVENT_NAME": "schedule", "REF": "refs/heads/master"}, "matches no"),
+        ({"EVENT_NAME": "workflow_dispatch", "REF": "refs/tags/v0.2.0"}, "matches no"),
     ],
 )
 def test_missing_refs_and_unmatched_events_fail_closed(
