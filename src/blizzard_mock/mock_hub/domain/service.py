@@ -682,7 +682,7 @@ class MockHubService:
         chunk.route_runner_id = runner_id
         chunk.route_workspace_id = workspace_id
         chunk.route_environment_ids = list(environment_ids)
-        chunk.current_node_id = chunk.entry
+        chunk.current_node_id = node_id
         chunk.status = ChunkStatus.RUNNING
         self._state.put_chunk(chunk)
         return RouteClaimResponse(
@@ -690,7 +690,7 @@ class MockHubService:
             runner_id=runner_id,
             workspace_id=workspace_id,
             environment_ids=list(environment_ids),
-            envelope=self._envelope(chunk, chunk.entry, epoch=chunk.latest_epoch),
+            envelope=self._envelope(chunk, node_id, epoch=chunk.latest_epoch),
             # A per-claim capability token. Deterministic on
             # purpose, so a scenario can predict it.
             route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}",

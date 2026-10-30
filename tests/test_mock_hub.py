@@ -254,7 +254,14 @@ def _release(client: TestClient, chunk_id: str, *, epoch: int = 1, runner_id: st
 def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
+    advanced = client.post(
+        f"/api/fleet/chunks/{chunk_id}/completions",
+        json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
+    )
+    assert advanced.status_code == 200
+    assert advanced.json()["next_envelope"]["node"]["node_name"] == "review"
     node_before = client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"]
+    assert node_before == "review"
 
     released = _release(client, chunk_id)
 
@@ -262,6 +269,10 @@ def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(cli
     assert released.json() == {"chunk_id": chunk_id, "released_id": 1}
     detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert (detail["status"], detail["route"], detail["current_node_id"]) == ("ready", None, node_before)
+    reclaimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
+    assert reclaimed.status_code == 201
+    assert reclaimed.json()["envelope"]["node"]["node_name"] == "review"
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == node_before
     service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
     chunk = service._state.get_chunk(chunk_id)  # the recorded write has no wire read
     assert chunk is not None
