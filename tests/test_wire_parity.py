@@ -372,6 +372,8 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "closed_prs",
                 "current_node_name",
                 "decision",
+                "flow_places",
+                "flow_record",
                 "graph_created_at",
                 "graph_name",
                 "history",
