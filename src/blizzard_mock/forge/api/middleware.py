@@ -7,8 +7,9 @@ reaches a route: ``unreachable`` (503), ``token_rejected`` (401), ``rate_limited
 exempt, so a test can always clear a lever it armed.
 
 ``RateHeaderMiddleware`` sits inside it, so a lever refusal short-circuits before
-anything is counted or hashed. It owns the ``/repos/`` surface only: every 200 ``GET``
-answers a strong ``ETag`` and a matching ``If-None-Match`` answers ``304``, uncounted;
+anything is counted or hashed. It owns the ``/repos/`` surface and ``/graphql``, which draws from its own
+window per credential and answers an exhausted one ``200`` with a ``RATE_LIMITED`` error. On ``/repos/``, every
+200 ``GET`` answers a strong ``ETag`` and a matching ``If-None-Match`` answers ``304``, uncounted;
 every other answer that reaches a route spends one request from the credential's
 window and carries ``X-RateLimit-*``.
 """
@@ -25,6 +26,8 @@ from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
 _EXEMPT_PREFIXES = ("/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
+
+_GRAPHQL_BUCKET_PREFIX = "graphql:"
 
 _SECONDARY_LIMIT_MESSAGE = "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
 
@@ -43,12 +46,12 @@ def _bucket(request: Request) -> str:
     return credential.strip() or ANONYMOUS_BUCKET
 
 
-def _rate_headers(window: RateWindow, remaining: int | None = None) -> dict[str, str]:
+def _rate_headers(window: RateWindow, remaining: int | None = None, resource: str = "core") -> dict[str, str]:
     return {
         "X-RateLimit-Limit": str(window.limit),
         "X-RateLimit-Remaining": str(window.remaining if remaining is None else remaining),
         "X-RateLimit-Reset": str(window.reset),
-        "X-RateLimit-Resource": "core",
+        "X-RateLimit-Resource": resource,
     }
 
 
@@ -106,6 +109,8 @@ class RateHeaderMiddleware(BaseHTTPMiddleware):
         self._rate = rate
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.url.path == "/graphql":
+            return await self._graphql(request, call_next)
         if not request.url.path.startswith("/repos/"):
             return await call_next(request)
 
@@ -122,6 +127,23 @@ class RateHeaderMiddleware(BaseHTTPMiddleware):
                 return Response(status_code=304, headers={"ETag": etag, **_rate_headers(self._rate.peek(bucket))})
 
         headers.update(_rate_headers(self._rate.count(bucket)))
+        return Response(content=body, status_code=response.status_code, headers=headers)
+
+    async def _graphql(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """``/graphql`` draws from its own ``graphql`` window per credential. An exhausted window answers
+        ``200`` with a ``RATE_LIMITED`` error, as GitHub's GraphQL does, and spends nothing."""
+        bucket = f"{_GRAPHQL_BUCKET_PREFIX}{_bucket(request)}"
+        window = self._rate.peek(bucket)
+        if window.remaining <= 0:
+            refusal = {
+                "data": None,
+                "errors": [{"type": "RATE_LIMITED", "message": "API rate limit already exceeded for user ID."}],
+            }
+            return JSONResponse(content=refusal, headers=_rate_headers(window, resource="graphql"))
+        response = await call_next(request)
+        body = b"".join([chunk async for chunk in response.body_iterator])  # type: ignore[attr-defined]
+        headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+        headers.update(_rate_headers(self._rate.count(bucket), resource="graphql"))
         return Response(content=body, status_code=response.status_code, headers=headers)
 
 
