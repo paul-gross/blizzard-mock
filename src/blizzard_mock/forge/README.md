@@ -56,6 +56,7 @@ armed.
 | `GET /repos/{o}/{r}/issues/{n}` | Get issue (body) |
 | `POST /repos/{o}/{r}/issues` | Create issue |
 | `GET /repos/{o}/{r}/issues/{n}/comments` | List the comment thread |
+| `POST /graphql` | The batch read of issues and pulls: `repository(owner:, name:)` holding aliased `issueOrPullRequest(number:)` fields selecting `title`, `body` and, when asked, `comments { nodes { body } }`; a missing number answers a null alias with a `NOT_FOUND` error |
 | `POST /repos/{o}/{r}/issues/{n}/comments` | Add a comment (issue or PR) |
 | `GET /repos/{o}/{r}/labels` | List repo-level label definitions |
 | `POST /repos/{o}/{r}/labels` | Create a repo-level label; 422 if the name already exists |
@@ -94,6 +95,11 @@ browser pages carry neither):
   `-Resource: core`. The credential is the one in `Authorization` (`token X` or
   `Bearer X`); a request with none shares one anonymous bucket. A window opens at a
   bucket's first counted answer and restores to the limit at its reset, an hour on.
+- `POST /graphql` draws from its own window per credential and answers
+  `X-RateLimit-Resource: graphql`. A window at zero answers `200` with a `RATE_LIMITED`
+  error and the window's `X-RateLimit-Reset`, spending nothing, as GitHub's GraphQL does.
+  `rate_budget` with no `token` reaches this window too; a named token reaches only its
+  `core` window.
 - Counting down never refuses. Only `rate_limited` and `secondary_rate_limited` do,
   and a lever refusal is answered before anything is counted.
 
@@ -161,6 +167,10 @@ clear one it armed.
 - **Every merge method rewrites.** A rebase always lands new commits, even when the head
   already descends from the base, and a squash is one commit whose only parent is the
   base tip.
+- **`/graphql` parses one restricted shape** rather than running a GraphQL engine: it reads the
+  `owner` and `name` variables and the aliased `issueOrPullRequest(number:)` fields by pattern, and
+  returns `comments` only when the query text selects them. Any other query answers an `errors` entry,
+  so a client drifting from the shape fails loudly instead of being guessed at.
 - **The default rate limit is 5000**, GitHub's own, held in `DEFAULT_RATE_LIMIT`. Hub
   traffic carries one token, so the counted `/repos/` requests in a suite's forge logs
   bound what that token spends in an hour; measured when the forge grew them, the full
