@@ -47,7 +47,8 @@ class ChunkStatus(StrEnum):
 #: The terminal statuses (mirrors ``chunk_status.TERMINAL_STATUSES``).
 TERMINAL_STATUSES = frozenset({ChunkStatus.STOPPED, ChunkStatus.DONE})
 
-#: The unclaimed statuses deletion and a graph re-pin admit (mirrors ``chunk_status.PRE_CLAIM_STATUSES``).
+#: The unclaimed statuses deletion and a graph re-pin admit (mirrors
+#: ``blizzard.hub.domain.chunk.model.PRE_CLAIM_STATUSES``).
 PRE_CLAIM_STATUSES = frozenset({ChunkStatus.NOT_READY, ChunkStatus.READY})
 
 
