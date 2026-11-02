@@ -20,7 +20,8 @@ class QueueMatchPolicy(Enum):
     """The matched fleet peek's hold-or-pass-over policy — applied to the
     capability-eligibility and blocked-dependency dimensions together, never one alone.
     :meth:`of` never raises: an unrecognized wire value reads as :attr:`PASS_OVER`,
-    mirroring ``blizzard.hub.domain.operations.queue.QueueMatchPolicy``."""
+    mirroring ``blizzard.hub.domain.operations.queue.queue_match_policy``, the hub's rule over
+    ``blizzard.foundation.queue_policy.QueueMatchPolicy``."""
 
     HOLD = "hold"
     PASS_OVER = "pass-over"
