@@ -62,8 +62,8 @@ between scenario runs, never mid-run.
 
 ## Standing instance — a running hub, a real browser, outside a test's lifetime
 
-The e2e tier (`tests/e2e/test_login_session_e2e.py` in `blizzard`) only proves the OAuth
-dance for a pytest fixture's lifetime. To point a **standing** hub — one left running for
+The UI tier (`tests/ui/auth/login-session.spec.ts` in `blizzard`, `blizzard:ui`) only proves the OAuth
+dance for a test fixture's lifetime. To point a **standing** hub — one left running for
 a human or an agent to click through by hand — at this IdP instead:
 
 ```bash
