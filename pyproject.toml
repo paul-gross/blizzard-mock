@@ -62,6 +62,7 @@ blizzard-mock-data = "blizzard_mock.mock_data.cli:cli"
 mock-claude-code = "blizzard_mock.harness.facades.claude_code:main"
 mock-codex = "blizzard_mock.harness.facades.codex:main"
 mock-opencode = "blizzard_mock.harness.facades.opencode:main"
+mock-opencode-2 = "blizzard_mock.harness.facades.opencode2:main"
 
 [dependency-groups]
 dev = [

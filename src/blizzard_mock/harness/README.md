@@ -147,6 +147,9 @@ and how a settings document's hook commands are executed* — see "Hook executio
   surface lives regardless of implementation strategy — an exec-engine facade
   here, a baked out-of-process CLI artifact there — not because it shares the
   engine's approach. See "OpenCode CLI-surface mode" below.
+- `opencode2_surface/` — OpenCode 2's CLI-surface artifact, `mock-opencode-2
+  emit`, sharing no code with `opencode_surface/` or the engine. See "OpenCode 2
+  CLI-surface mode" below.
 
 ## Conversation transcripts
 
@@ -405,6 +408,55 @@ executes a caller-supplied prompt; it answers a fixed CLI shape instead.
   a caller-named path at emit time — `mock-opencode` itself can never become
   one. See "The fence" below for what that means for this mode specifically.
 
+## OpenCode 2 CLI-surface mode
+
+`mock-opencode-2 emit` writes OpenCode 2's CLI-surface artifact: a standalone,
+stdlib-only fake that the 2.x compatibility diagnostic in `blizzard`
+(`blizzard.runner.harness.opencode_v2.compatibility`) and its service test run
+against in place of a real OpenCode 2. It shares no code with
+`opencode_surface/` — the two majors' surfaces have nothing in common — and
+holds to the same rules as that package: stdlib-only, immutable once emitted,
+never installed, never on `PATH`.
+
+- **The contract:** `mock-opencode-2 emit --out <path> [--version <v>]
+  [--lever NAME]...`. `--version` defaults to `2.1.4`. The whole lever set is
+  validated before anything is written; an unknown name fails, naming every bad
+  token, and writes no file.
+- **The surface:** `--version` prints `opencode v<version>`; `service
+  start|stop|status|restart` manage a detached service; `api --standalone GET
+  /api/session` opens an OpenCode 1 store as 2.x does the first time; and
+  `--session <id>` is the takeover TUI. The TUI reads one line from its
+  terminal, switches the session to the `build` agent, prompts it, and stays
+  open until it is ended.
+- **The managed service:** it listens on an ephemeral loopback port and writes
+  `$XDG_STATE_HOME/opencode/service.json` (`id`, `version`, `url`, `pid`,
+  `password`, mode `0600`), with a new `id` and password on every start. It
+  answers the non-experimental `/api/*` subset blizzard's client calls, under
+  HTTP Basic auth as `opencode`, with responses shaped like the committed 2.1.4
+  corpus. Sessions and messages persist in `$XDG_DATA_HOME/opencode/` across a
+  restart, and a turn that was running is resumed. A session's environment does
+  not survive a restart, as in 2.1.4.
+- **Turns are read, never executed.** `domain/script.py` reads a prompt's
+  shape: shell commands in backticks after `run`, a `read` call, a subagent's
+  instructions, and the reply the prompt asks for. A shell call runs a tiny
+  fixed grammar (`domain/shell.py`: `echo`, `echo … > file`, `touch`, `sleep`)
+  against the session's environment and directory. Nothing reaches a real
+  shell. A `sleep` holds a real stand-in process, capped at a few seconds, so
+  the tool's pid can be seen and an interrupt can end it. Permission rules
+  follow 2.1.4 (`domain/rules.py`):
+  - the last matching rule wins;
+  - a tool whose last matching rule denies every resource is withheld from the model;
+  - `ask` raises a request that holds the turn until it is answered.
+
+  A subagent call runs as a child session, and a background child's finish
+  wakes its root through the root's inbox.
+- **Levers are service-level only:** `levers.py`'s `CATALOG` is the one prose
+  home for each lever. Turn-level failures belong to the engine-backed mock,
+  not this artifact.
+- **Held to blizzard's prompts:** a `needs_blizzard` test plans every prompt in
+  blizzard's `opencode_v2/compatibility/script.py` and checks each yields the
+  tool calls and reply the proof expects.
+
 ## The fence
 
 Scoped to the exec-based modes (`run_prompt`/`assert_fenced`) — `run`, on all
@@ -490,6 +542,7 @@ Each facade registers a `[project.scripts]` binary:
 | `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--permission-mode <mode>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. `--permission-mode` is accepted but inert. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0, the runner's health probe's own shape. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
+| `mock-opencode-2` | `facades.opencode2:main` | `emit --out <path> [--version <v>] [--lever NAME]...` only — see "OpenCode 2 CLI-surface mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
@@ -502,6 +555,9 @@ seam: the lifecycle fire points, the exits that fire nothing, and real
 lever roster, `emit`'s validate-before-write contract, the emitted artifact
 running unfenced under a bare system `python3` with no `blizzard_mock` import
 reachable, and `run`'s output staying byte-identical to before `emit` existed.
+`tests/test_opencode2_cli_surface.py` covers OpenCode 2's artifact: the emit contract,
+stdlib-only modules, the registered service and its auth, a turn with a child, a
+restart, every lever, and the prompt plans against blizzard's proof prompts.
 `tests/test_codex_app_server.py` covers `app-server` instead: the id-matched
 response with an interleaved notification, a plain read, a refreshing
 rotation's atomic rewrite and audit log, a missing credential file, and two
