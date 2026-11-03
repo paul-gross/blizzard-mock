@@ -429,7 +429,8 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
     "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
     "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
-    "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset()),
+    # The mock models no graph set, so it flags no gate as unenforceable; the real field is optional.
+    "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset({"unenforceable_gates"})),
     "RunnerVersionRefusal": ("RunnerVersionRefusal", frozenset()),
     "RunnerBindingView": ("RunnerBindingView", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
