@@ -31,6 +31,9 @@ Gitea/Forgejo are the wrong (GitHub-*like*, not GitHub-native) vendor surface.
 
 ## Binary & configuration
 
+Set `BLIZZARD_CLOCK=controlled` and `BLIZZARD_CLOCK_FENCE=1` together to freeze the
+clock at startup; otherwise it reads system time.
+
 `blizzard-mock-forge` → `blizzard_mock.forge.cli:main` (a click command). Serves
 the FastAPI app via uvicorn. Config is resolved from flags with env fallbacks:
 
@@ -120,6 +123,11 @@ default_branch}`, `409` when it exists, `422` for an invalid owner or name or an
 control, not GitHub surface; exempt from the request-scoped levers like `/_levers`.
 
 ## Lever surface (`/_levers`)
+
+With the controlled clock enabled, `GET /_clock` reads `now` and `POST /_clock`
+accepts either `{"to": "<offset datetime>"}` or `{"advance_seconds": 1.5}`.
+Moves cannot go backwards. Resets do not move the clock; these control routes are
+hidden from OpenAPI and bypass request levers.
 
 `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm / fire),
 `DELETE /_levers/{kind}?repo=&number=&branch=&pattern=` (clear), `POST /_levers/reset`

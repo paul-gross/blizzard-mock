@@ -22,7 +22,16 @@ from blizzard_mock.mock_hub.domain.levers import HubLever
 HOST_PLANE_PREFIX = "/api/fleet/host"
 JWKS_PATH = "/api/auth/jwks.json"
 
-_EXEMPT_PREFIXES = ("/_levers", "/_seed", "/_captured", "/api/health", "/api/ready", "/docs", "/openapi.json")
+_EXEMPT_PREFIXES = (
+    "/_clock",
+    "/_levers",
+    "/_seed",
+    "/_captured",
+    "/api/health",
+    "/api/ready",
+    "/docs",
+    "/openapi.json",
+)
 
 
 def _chunk_from_path(path: str) -> str | None:

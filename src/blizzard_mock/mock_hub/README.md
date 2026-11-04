@@ -19,6 +19,9 @@ rather than contriving.
 
 ## Binary & configuration
 
+Set `BLIZZARD_CLOCK=controlled` and `BLIZZARD_CLOCK_FENCE=1` together to freeze the
+clock at startup; otherwise it reads system time.
+
 `blizzard-mock-hub` → `blizzard_mock.mock_hub.cli:main` (a click command). Serves the
 FastAPI app via uvicorn.
 
@@ -32,6 +35,11 @@ FastAPI app via uvicorn.
 A service-tier test points the real runner's `BZ_HUB_URL` at `http://{host}:{port}`.
 
 ## Hub API surface (the subset a runner calls)
+
+With the controlled clock enabled, `GET /_clock` reads `now` and `POST /_clock`
+accepts either `{"to": "<offset datetime>"}` or `{"advance_seconds": 1.5}`.
+Moves cannot go backwards. Resets do not move the clock; these control routes are
+hidden from OpenAPI and bypass request levers.
 
 Vendor-native paths + JSON, byte-compatible with the hub's wire models. Liveness stays
 unauthenticated at `/api/*`; every runner route lives under `/api/fleet/*`, beside the one

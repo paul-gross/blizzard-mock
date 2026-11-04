@@ -14,7 +14,8 @@ import httpx2 as httpx
 import structlog
 from fastapi import FastAPI
 
-from blizzard_mock.clock import Clock, SystemClock
+from blizzard_mock.clock import Clock, ControlledClock, resolve_clock
+from blizzard_mock.clock_api import clock_router
 from blizzard_mock.levers import InMemoryLeverStore
 from blizzard_mock.mock_runner.api.routes import api_router, drive_router, levers_router
 from blizzard_mock.mock_runner.config import MockRunnerConfig
@@ -36,7 +37,7 @@ def create_app(
     """
     cfg = config or MockRunnerConfig()
     log = structlog.get_logger("blizzard_mock.mock_runner")
-    the_clock = clock or SystemClock()
+    the_clock = clock if clock is not None else resolve_clock()
     levers = InMemoryLeverStore()
 
     owned_client: httpx.Client | None = None
@@ -53,6 +54,8 @@ def create_app(
                 owned_client.close()
 
     app = FastAPI(title="blizzard-mock runner", version="0.1.0", lifespan=_lifespan)
+    if isinstance(the_clock, ControlledClock):
+        app.include_router(clock_router(the_clock))
     service = MockRunnerService(gateway, levers, the_clock, name=cfg.name, workspace_id=cfg.workspace_id)
     app.state.service = service
     app.state.levers = levers

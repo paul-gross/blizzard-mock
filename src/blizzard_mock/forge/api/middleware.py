@@ -25,7 +25,7 @@ from starlette.responses import JSONResponse, Response
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
-_EXEMPT_PREFIXES = ("/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
+_EXEMPT_PREFIXES = ("/_clock", "/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
 
 _GRAPHQL_BUCKET_PREFIX = "graphql:"
 

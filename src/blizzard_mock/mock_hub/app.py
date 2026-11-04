@@ -11,7 +11,8 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from blizzard_mock.clock import Clock, SystemClock
+from blizzard_mock.clock import Clock, ControlledClock, resolve_clock
+from blizzard_mock.clock_api import clock_router
 from blizzard_mock.levers import InMemoryLeverStore
 from blizzard_mock.mock_hub.api.control import captured_router, levers_router, seed_router
 from blizzard_mock.mock_hub.api.middleware import HubLeverMiddleware, RequestCaptureMiddleware
@@ -29,7 +30,7 @@ from blizzard_mock.mock_hub.internal.state_store import InMemoryHubState
 def create_app(config: MockHubConfig | None = None, *, clock: Clock | None = None) -> FastAPI:
     """Build a fully wired mock-hub app."""
     log = structlog.get_logger("blizzard_mock.mock_hub")
-    the_clock = clock or SystemClock()
+    the_clock = clock if clock is not None else resolve_clock()
 
     state = InMemoryHubState()
     levers = InMemoryLeverStore()
@@ -37,6 +38,8 @@ def create_app(config: MockHubConfig | None = None, *, clock: Clock | None = Non
     service = MockHubService(state, levers, the_clock)
 
     app = FastAPI(title="blizzard-mock hub", version="0.1.0")
+    if isinstance(the_clock, ControlledClock):
+        app.include_router(clock_router(the_clock))
     app.state.service = service
     app.state.levers = levers
     app.state.captured = captured
