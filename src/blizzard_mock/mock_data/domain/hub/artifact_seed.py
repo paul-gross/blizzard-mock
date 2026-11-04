@@ -8,6 +8,7 @@ does, mirrored independently (no ``blizzard`` import).
 from __future__ import annotations
 
 from random import Random
+from typing import cast
 
 from blizzard_mock.clock import Clock
 from blizzard_mock.mock_data.domain import ids
@@ -78,7 +79,7 @@ def compose_artifact(
             )
         if (content is None) == (content_size is None):
             raise ArtifactCompositionError("asset requires exactly one of --content or --content-size")
-        data = content if content is not None else generate_asset_content(content_size, rng)  # type: ignore[arg-type]
+        data = content if content is not None else generate_asset_content(cast(int, content_size), rng)
         row_repo = None
         row_forge = None
 

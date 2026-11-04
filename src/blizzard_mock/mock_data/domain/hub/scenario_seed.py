@@ -129,7 +129,7 @@ class BoardScenario:
     what landed."""
 
     graph_id: str
-    rows: list[FactRow] = field(default_factory=list)
+    rows: list[FactRow] = field(default_factory=list[FactRow])
     census: BoardCensus | None = None
 
 

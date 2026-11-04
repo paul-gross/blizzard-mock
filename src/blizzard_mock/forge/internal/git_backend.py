@@ -10,8 +10,9 @@ from __future__ import annotations
 import contextlib
 import shutil
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from pathlib import Path
+from typing import cast
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
@@ -137,9 +138,9 @@ class GitBackend:
             status = "behind"
         else:
             status = "identical"
-        commits = []
+        commits: list[GitCompareCommit] = []
         for line in git.git.rev_list("--reverse", "--topo-order", "--parents", f"{base_sha}..{head_sha}").splitlines():
-            sha, *parents = line.split()
+            sha, *parents = cast("list[str]", line.split())
             commits.append(GitCompareCommit(sha=sha, parents=parents))
         return GitCompare(
             status=status,
@@ -166,7 +167,7 @@ class GitBackend:
             raw = git.git.diff("-M", base_sha, head_sha, "--", *paths)
             hunk_start = raw.find("\n@@")
             patch = raw[hunk_start + 1 :] if hunk_start != -1 else None
-            body = patch.split("\n") if patch is not None else []
+            body: list[str] = patch.split("\n") if patch is not None else []
             blob_at = base_sha if letter == "D" else head_sha
             files.append(
                 GitCompareFile(
@@ -303,7 +304,7 @@ class GitBackend:
         git.git.update_ref(f"refs/heads/{ref}", sha)
 
     @contextlib.contextmanager
-    def _throwaway_worktree(self, repo: RepoModel, *, checkout_ref: str, detach: bool) -> Iterator[Repo]:
+    def _throwaway_worktree(self, repo: RepoModel, *, checkout_ref: str, detach: bool) -> Generator[Repo]:
         """A throwaway linked worktree at ``checkout_ref``, torn down on the way out
         whether the block raises or not — the seam :meth:`merge` and :meth:`rebase` share
         for their only real difference: attached to a branch (merge) or detached at a sha

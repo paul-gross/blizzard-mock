@@ -14,9 +14,9 @@ from blizzard_mock.forge.domain.models import Comment, Issue, Label, PullRequest
 
 @dataclass
 class _RepoState:
-    issues: dict[int, Issue] = field(default_factory=dict)
-    pulls: dict[int, PullRequest] = field(default_factory=dict)
-    labels: dict[str, Label] = field(default_factory=dict)
+    issues: dict[int, Issue] = field(default_factory=dict[int, Issue])
+    pulls: dict[int, PullRequest] = field(default_factory=dict[int, PullRequest])
+    labels: dict[str, Label] = field(default_factory=dict[str, Label])
     next_number: int = 1
     next_comment_id: int = 1
 

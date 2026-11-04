@@ -86,7 +86,7 @@ def user_emails(
     return JSONResponse(content=_emails(profile))
 
 
-def _emails(profile: Profile) -> list[dict[str, object]]:
+def _emails(profile: Profile) -> list[dict[str, str | bool]]:
     """Every address on the account, primary first, each with its own verified flag."""
     primary = (
         [] if profile.email is None else [{"email": profile.email, "primary": True, "verified": profile.email_verified}]

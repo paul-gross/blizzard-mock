@@ -104,7 +104,7 @@ def create_seed_engine(url: str) -> Engine:
     return engine
 
 
-def _is_autoincrement_pk(column: Column, table: Table) -> bool:
+def _is_autoincrement_pk(column: Column[Any], table: Table) -> bool:
     if not column.primary_key:
         return False
     pk_columns = list(table.primary_key.columns)
@@ -335,5 +335,5 @@ class ReflectedStore:
 
 # Typecheck-time Protocol/adapter conformance sentinel (bzh:dependency-inversion) — pyright
 # rejects the return if ReflectedStore drifts from ISeedStore.
-def _conforms_seed_store(x: ReflectedStore) -> ISeedStore:
+def _conforms_seed_store(x: ReflectedStore) -> ISeedStore:  # pyright: ignore[reportUnusedFunction]
     return x

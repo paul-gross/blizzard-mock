@@ -7,7 +7,7 @@ instrument, so it reports rather than raises.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import httpx2 as httpx
 
@@ -18,10 +18,10 @@ _API = "/api/fleet"
 
 def _result(resp: httpx.Response) -> tuple[int, dict[str, Any]]:
     try:
-        body = resp.json()
+        body: object = resp.json()
     except ValueError:
         body = {"raw": resp.text}
-    return resp.status_code, body if isinstance(body, dict) else {"body": body}
+    return resp.status_code, cast("dict[str, Any]", body) if isinstance(body, dict) else {"body": body}
 
 
 class HttpxHubGateway:

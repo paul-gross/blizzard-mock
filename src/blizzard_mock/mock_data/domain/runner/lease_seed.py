@@ -20,7 +20,7 @@ class RunnerLeaseSeed:
     """One composed runner lease: its minted id and the two ``FactRow``\\ s to write."""
 
     lease_id: str
-    rows: list[FactRow] = field(default_factory=list)
+    rows: list[FactRow] = field(default_factory=list[FactRow])
 
 
 def compose_lease(

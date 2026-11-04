@@ -7,7 +7,7 @@ is created here and closed on shutdown so no other code touches httpx.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx2 as httpx
@@ -46,7 +46,7 @@ def create_app(
         gateway = HttpxHubGateway(owned_client, token=cfg.token or bootstrap_token(owned_client, name=cfg.name))
 
     @asynccontextmanager
-    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         try:
             yield
         finally:

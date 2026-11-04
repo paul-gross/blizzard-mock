@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import cast
 
 from sqlalchemy import Engine, MetaData, Table, select
 
@@ -67,15 +68,16 @@ def resolve_runner_id(runtime_dir: Path) -> str:
     ``--runner-dir`` pins a runner store's rows to; a host of several runners names none."""
     raw = _read_config(runtime_dir, "runner", "--runner-id")
     path = runtime_dir / _CONFIG_FILENAMES["runner"]
-    runners = raw.get("runner")
-    if not isinstance(runners, list) or not runners:
+    declared: object = raw.get("runner")
+    if not isinstance(declared, list) or not declared:
         raise RuntimeConfigError(f"{path} declares no [[runner]] — pass --runner-id directly")
+    runners = cast("list[object]", declared)
     if len(runners) > 1:
         raise RuntimeConfigError(
             f"{path} declares {len(runners)} [[runner]] entries — pass --runner-id to name the one to pin"
         )
-    entry = runners[0]
-    runner_id = entry.get("id") if isinstance(entry, dict) else None
+    entry: object = runners[0]
+    runner_id = cast("dict[str, object]", entry).get("id") if isinstance(entry, dict) else None
     if not runner_id:
         raise RuntimeConfigError(
             f"{path}'s [[runner]] has no id — it has not joined its hub yet "

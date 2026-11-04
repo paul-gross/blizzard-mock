@@ -31,7 +31,7 @@ def seeded_rng(seed: int | None) -> random.Random:
 
 
 def _encode(value: int, length: int) -> str:
-    chars = []
+    chars: list[str] = []
     for _ in range(length):
         value, rem = divmod(value, 32)
         chars.append(_CROCKFORD[rem])

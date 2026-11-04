@@ -20,7 +20,7 @@ from blizzard_mock.mock_data.domain.facts import FactRow
 class RunnerAskSeed:
     """One composed ask-and-park: the two ``FactRow``\\ s to write."""
 
-    rows: list[FactRow] = field(default_factory=list)
+    rows: list[FactRow] = field(default_factory=list[FactRow])
 
 
 def compose_ask_park(

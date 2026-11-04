@@ -24,7 +24,7 @@ class Held:
     epoch: int
     from_node_id: str
     route_token: str | None = None
-    last_submission: dict[str, Any] = field(default_factory=dict)
+    last_submission: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class RegisterBody(BaseModel):
@@ -49,7 +49,7 @@ class PeekMatchedBody(BaseModel):
     ``RegisterBody``'s. ``enrolled=False`` drives the tokenless case: no token presented, so
     the hub refuses it ``401``."""
 
-    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     policy: str = "pass-over"
     enrolled: bool = True
 
@@ -79,8 +79,8 @@ class CompleteBody(BaseModel):
 
     chunk_id: str
     choice: str
-    artifacts: list[dict[str, Any]] = Field(default_factory=list)
-    check_results: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
+    check_results: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
 
 
 class ChunkQueryBody(BaseModel):
@@ -156,7 +156,7 @@ class AskBody(BaseModel):
 
     chunk_id: str
     question: str
-    options: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list[str])
     harness_id: str | None = None
 
 
@@ -174,7 +174,7 @@ class PushTranscriptBody(BaseModel):
 
     chunk_id: str
     segment_id: str = "sg_mock"
-    turns: list[dict[str, Any]] = Field(default_factory=list)
+    turns: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     final: bool = False
     record_truncated: bool = False
     harness_id: str | None = None
@@ -216,7 +216,7 @@ class ReportExternalUsageBody(BaseModel):
     #: plane still documents and enforces the shape a real runner reports.
     slug: str = ""
     sampled_at: str
-    windows: list[dict[str, Any]] = Field(default_factory=list)
+    windows: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     name: str | None = None
     #: The malformed-slug lever. Set it to push this value as the fact's ``slug``
     #: unnarrowed, so a test can prove the hub's own intake rejects a shape the drive
