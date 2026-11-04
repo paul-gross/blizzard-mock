@@ -13,7 +13,7 @@ import tempfile
 import threading
 from contextlib import suppress
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 
 from ...opencode2_core.domain import records
 from ...opencode2_core.internal.sessions import Engine, Json, Session, final_text, kill
@@ -153,17 +153,20 @@ class _Turn:
             return None
         for line in requests:
             try:
-                request = json.loads(line)
+                decoded: object = json.loads(line)
             except ValueError:
                 continue
-            if not isinstance(request, dict):
+            if not isinstance(decoded, dict):
                 continue
+            request = cast(Json, decoded)
             op = str(request.get("op"))
             if op == "end":
                 return "end"
             if op == "fail":
                 error = request.get("error")
-                self.engine.fail_turn(self.session, self.assistant, error if isinstance(error, dict) else {})
+                self.engine.fail_turn(
+                    self.session, self.assistant, cast(Json, error) if isinstance(error, dict) else {}
+                )
                 return "failed"
             reply = self._answer(op, request)
             if self.session.cancel.is_set():
@@ -206,7 +209,9 @@ class _Turn:
                 if op == "tool.done":
                     metadata = request.get("metadata")
                     output = str(request.get("output", ""))
-                    engine.complete_tool(session, called, output, metadata if isinstance(metadata, dict) else None)
+                    engine.complete_tool(
+                        session, called, output, cast(Json, metadata) if isinstance(metadata, dict) else None
+                    )
                 else:
                     engine.fail_tool(session, called, str(request.get("kind")), str(request.get("message")))
             self._steer()
@@ -217,7 +222,9 @@ class _Turn:
             raised = engine.await_form(
                 session,
                 str(request.get("title", "")),
-                [f for f in fields if isinstance(f, dict)] if isinstance(fields, list) else [],
+                [cast(Json, f) for f in cast("list[object]", fields) if isinstance(f, dict)]
+                if isinstance(fields, list)
+                else [],
             )
             if raised is None:
                 raise _Interrupted
@@ -233,7 +240,9 @@ class _Turn:
         engine, session = self.engine, self.session
         name, resource = str(request.get("name")), str(request.get("resource", "*"))
         tool_input = request.get("input")
-        part = engine.open_tool(session, self.assistant, name, tool_input if isinstance(tool_input, dict) else {})
+        part = engine.open_tool(
+            session, self.assistant, name, cast(Json, tool_input) if isinstance(tool_input, dict) else {}
+        )
         if part is None:
             return {"verdict": "withheld"}
         verdict = engine.judge(session, self.assistant, part, name, resource, ask=request.get("ask") is True)
@@ -266,7 +275,7 @@ class _Turn:
         if reply is None:
             raise _Interrupted
         state = part.get("state")
-        status = state.get("status") if isinstance(state, dict) else None
+        status = cast(Json, state).get("status") if isinstance(state, dict) else None
         self._steer()
         return {"verdict": "allow", "output": reply, "session": child.id, "status": status}
 

@@ -61,7 +61,7 @@ class ClaudeTranscriptWriter:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
         usage = synthesize_usage_tokens(text)
         content = [{"type": "text", "text": text}]
-        message = {"role": "assistant", "model": MOCK_MODEL, "usage": usage, "content": content}
+        message: dict[str, object] = {"role": "assistant", "model": MOCK_MODEL, "usage": usage, "content": content}
         self._append("assistant", message)
 
     def record_tool_call(self, name: str, tool_input: Mapping[str, object]) -> str:
@@ -102,5 +102,5 @@ class ClaudeTranscriptWriter:
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
 # ``blizzard/exemplars/python/exemplar/hub/store/internal/permit_store.py`` documents.
-def _conforms_transcript_writer(x: ClaudeTranscriptWriter) -> ITranscriptWriter:
+def _conforms_transcript_writer(x: ClaudeTranscriptWriter) -> ITranscriptWriter:  # pyright: ignore[reportUnusedFunction]
     return x

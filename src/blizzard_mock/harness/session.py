@@ -18,7 +18,7 @@ class Ask:
     """One ask-and-exit event: what the worker asked before parking."""
 
     question: str
-    options: list[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list[str])
     asked_at: float = field(default_factory=time.time)
 
 
@@ -52,10 +52,10 @@ class SessionState:
 
     session_id: str
     turns: int = 0
-    asks: list[Ask] = field(default_factory=list)
-    resumes: list[str] = field(default_factory=list)
-    verdicts: list[str] = field(default_factory=list)
-    invocations: list[Invocation] = field(default_factory=list)
+    asks: list[Ask] = field(default_factory=list[Ask])
+    resumes: list[str] = field(default_factory=list[str])
+    verdicts: list[str] = field(default_factory=list[str])
+    invocations: list[Invocation] = field(default_factory=list[Invocation])
     #: Set when the spawn carried the runner selftest's lease identity; a later resume
     #: arrives without it, so the session remembers it.
     selftest: bool = False

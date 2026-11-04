@@ -11,6 +11,7 @@ import json
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from blizzard_mock.harness.engine import IHookRunner, RunResult
 from blizzard_mock.harness.internal.logging import get_logger
@@ -43,7 +44,7 @@ def _read_document(path: Path) -> Mapping[str, object]:
     except json.JSONDecodeError as exc:
         _log.warning("hook settings are not valid JSON", path=str(path), error=str(exc))
         return {}
-    return document if isinstance(document, Mapping) else {}
+    return cast("Mapping[str, object]", document) if isinstance(document, Mapping) else {}
 
 
 def _commands(document: Mapping[str, object], event: str) -> list[str]:
@@ -55,20 +56,23 @@ def _commands(document: Mapping[str, object], event: str) -> list[str]:
     hooks = document.get("hooks")
     if not isinstance(hooks, Mapping):
         return []
-    matchers = hooks.get(event)
+    matchers = cast("Mapping[str, object]", hooks).get(event)
     if not isinstance(matchers, Sequence) or isinstance(matchers, str):
         return []
     commands: list[str] = []
-    for matcher in matchers:
+    for matcher in cast("Sequence[object]", matchers):
         if not isinstance(matcher, Mapping):
             continue
-        entries = matcher.get("hooks")
+        entries = cast("Mapping[str, object]", matcher).get("hooks")
         if not isinstance(entries, Sequence) or isinstance(entries, str):
             continue
-        for entry in entries:
-            if not isinstance(entry, Mapping) or entry.get("type") != "command":
+        for entry in cast("Sequence[object]", entries):
+            if not isinstance(entry, Mapping):
                 continue
-            command = entry.get("command")
+            fields = cast("Mapping[str, object]", entry)
+            if fields.get("type") != "command":
+                continue
+            command = fields.get("command")
             if isinstance(command, str) and command.strip():
                 commands.append(command)
     return commands
@@ -196,5 +200,5 @@ def build_hook_runner(
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
 # ``blizzard/exemplars/python/exemplar/hub/store/internal/permit_store.py`` documents.
-def _conforms_hook_runner(x: SettingsHookRunner) -> IHookRunner:
+def _conforms_hook_runner(x: SettingsHookRunner) -> IHookRunner:  # pyright: ignore[reportUnusedFunction]
     return x

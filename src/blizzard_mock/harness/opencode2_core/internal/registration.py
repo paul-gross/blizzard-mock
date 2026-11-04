@@ -8,6 +8,7 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import cast
 
 
 def write(path: Path, record: dict[str, object]) -> None:
@@ -21,10 +22,10 @@ def write(path: Path, record: dict[str, object]) -> None:
 
 def read(path: Path) -> dict[str, object] | None:
     try:
-        loaded = json.loads(path.read_text())
+        loaded: object = json.loads(path.read_text())
     except (FileNotFoundError, ValueError):
         return None
-    return loaded if isinstance(loaded, dict) else None
+    return cast("dict[str, object]", loaded) if isinstance(loaded, dict) else None
 
 
 def remove_if_owned(path: Path, registration_id: str) -> None:

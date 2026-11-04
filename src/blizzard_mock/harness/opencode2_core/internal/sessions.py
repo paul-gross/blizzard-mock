@@ -17,7 +17,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from ..domain import records, rules
 from ..levers import Lever
@@ -86,12 +86,14 @@ class Session:
         for message in self.messages:
             used = message.get("tokens")
             if message.get("type") in {"assistant", "compaction"} and isinstance(used, dict):
+                used_tokens = cast(Json, used)
                 for key in totals:
-                    totals[key] += _count(used.get(key))
-                cached = used.get("cache")
+                    totals[key] += _count(used_tokens.get(key))
+                cached = used_tokens.get("cache")
                 if isinstance(cached, dict):
+                    cached_tokens = cast(Json, cached)
                     for key in cache:
-                        cache[key] += _count(cached.get(key))
+                        cache[key] += _count(cached_tokens.get(key))
                 spent = message.get("cost")
                 cost += spent if isinstance(spent, int | float) else 0
         tokens: Json = {**totals, "cache": cache}
@@ -268,7 +270,7 @@ class Engine:
     def create(self, body: Json) -> Session:
         session_id = str(body.get("id") or records.new_id("ses"))
         location = body.get("location")
-        directory = str(location.get("directory")) if isinstance(location, dict) else os.getcwd()
+        directory = str(cast(Json, location).get("directory")) if isinstance(location, dict) else os.getcwd()
         model = body.get("model")
         with self.lock:
             if session_id in self.sessions:
@@ -278,7 +280,7 @@ class Engine:
                 directory=directory,
                 metadata=_object(body.get("metadata")),
                 permissions=_objects(body.get("permissions")),
-                model=model if isinstance(model, dict) else None,
+                model=cast(Json, model) if isinstance(model, dict) else None,
                 title=str(body["title"]) if body.get("title") is not None else records.default_title(),
                 agent=str(body["agent"]) if body.get("agent") is not None else None,
                 parent_id=str(body["parentID"]) if body.get("parentID") else None,
@@ -664,7 +666,7 @@ class Engine:
             _state(part)["metadata"] = {"sessionID": child.id, "status": "running", "truncated": False}
             given = _state(part).get("input")
             _state(part)["input"] = {
-                **(given if isinstance(given, dict) else {}),
+                **_object(given),
                 "agent": "general",
                 "prompt": prompt,
                 "background": background,
@@ -808,8 +810,7 @@ class Engine:
             if parent is None or child.outcome != "succeeded":
                 return
             spawned_in_background = any(
-                isinstance(part, dict)
-                and part.get("name") == "subagent"
+                part.get("name") == "subagent"
                 and _object(_state(part).get("metadata")).get("sessionID") == child.id
                 and _object(_state(part).get("input")).get("background") is True
                 for message in parent.messages
@@ -887,28 +888,30 @@ def _now() -> Json:
 
 
 def _object(value: object) -> Json:
-    return dict(value) if isinstance(value, dict) else {}
+    return dict(cast(Json, value)) if isinstance(value, dict) else {}
 
 
 def _objects(value: object) -> list[Json]:
-    return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+    if not isinstance(value, list):
+        return []
+    return [dict(cast(Json, item)) for item in cast("list[object]", value) if isinstance(item, dict)]
 
 
 def _time(message: Json) -> Json:
     timing = message.setdefault("time", {})
     assert isinstance(timing, dict)
-    return timing
+    return cast(Json, timing)
 
 
 def _state(part: Json) -> Json:
     state = part.setdefault("state", {})
     assert isinstance(state, dict)
-    return state
+    return cast(Json, state)
 
 
 def _content(message: object) -> list[Json]:
-    content = message.get("content") if isinstance(message, dict) else None
-    return content if isinstance(content, list) else []
+    content = cast(Json, message).get("content") if isinstance(message, dict) else None
+    return cast("list[Json]", content) if isinstance(content, list) else []
 
 
 def _abort_assistant(message: Json, tool_message: str) -> None:

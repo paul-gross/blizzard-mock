@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from blizzard_mock.harness.engine import ITranscriptWriter, RunResult
 from blizzard_mock.harness.facades._text import render_ask_text
@@ -31,7 +31,7 @@ __all__ = [
 PROJECT_DIR_NAME = "mock-opencode"
 
 #: The pinned OpenCode version these export documents claim.
-_MOCK_VERSION = "1.18.25"
+MOCK_VERSION = "1.18.25"
 
 #: ``1`` runs mock-opencode subscription-billed: every reported cost is 0, tokens kept.
 BILLED_ZERO_ENV_VAR = "BLIZZARD_MOCK_OPENCODE_BILLED_ZERO"
@@ -154,12 +154,12 @@ class OpenCodeTranscriptWriter:
             # ``task_id`` input continues that child rather than minting a new one.
             child_id = str(tool_input.get("task_id") or _new_id("ses"))
             state["metadata"] = {"parentSessionId": self._session_id, "sessionId": child_id, "truncated": False}
-            child_calls = tool_input.get(CHILD_TOOL_CALLS_KEY) or []
+            child_calls: object = tool_input.get(CHILD_TOOL_CALLS_KEY) or []
             if not isinstance(child_calls, list):
                 raise ValueError(
                     f"{CHILD_TOOL_CALLS_KEY!r} must be a list of tool calls, got {type(child_calls).__name__}"
                 )
-            self._write_child_session(child_id, recorded, child_calls, started_at=started)
+            self._write_child_session(child_id, recorded, cast("list[Any]", child_calls), started_at=started)
         part = self._new_part(message, {"type": "tool", "callID": call_id, "tool": name, "state": state})
         message["parts"].append(part)
         self._write()
@@ -304,7 +304,7 @@ def _span(started_at: int | None = None) -> dict[str, int]:
 def _new_document(session_id: str, cwd: Path, *, title: str, parent_id: str | None = None) -> dict[str, Any]:
     info: dict[str, Any] = {
         "id": session_id,
-        "version": _MOCK_VERSION,
+        "version": MOCK_VERSION,
         "directory": str(cwd),
         "title": title,
     }
@@ -315,5 +315,5 @@ def _new_document(session_id: str, cwd: Path, *, title: str, parent_id: str | No
 
 # Typecheck-time Protocol conformance sentinel, matching the pattern
 # ``blizzard/exemplars/python/exemplar/hub/store/internal/permit_store.py`` documents.
-def _conforms_transcript_writer(x: OpenCodeTranscriptWriter) -> ITranscriptWriter:
+def _conforms_transcript_writer(x: OpenCodeTranscriptWriter) -> ITranscriptWriter:  # pyright: ignore[reportUnusedFunction]
     return x

@@ -180,8 +180,8 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length") or 0)
         if not length:
             return {}
-        decoded = json.loads(self.rfile.read(length))
-        return decoded if isinstance(decoded, dict) else {}
+        decoded: object = json.loads(self.rfile.read(length))
+        return cast(Json, decoded) if isinstance(decoded, dict) else {}
 
     def _send(self, status: int, payload: object | None = None) -> None:
         body = b"" if payload is None else json.dumps(payload).encode()
@@ -243,7 +243,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(204)
         elif route == ("PUT", "environment"):
             variables = self._body().get("variables")
-            engine.set_environment(sid, variables if isinstance(variables, dict) else {})
+            engine.set_environment(sid, cast(Json, variables) if isinstance(variables, dict) else {})
             self._send(204)
         elif route == ("POST", "prompt"):
             body = self._body()
@@ -258,7 +258,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(204)
         elif route == ("POST", "model"):
             model = self._body().get("model")
-            engine.switch_model(sid, model if isinstance(model, dict) else {})
+            engine.switch_model(sid, cast(Json, model) if isinstance(model, dict) else {})
             self._send(204)
         elif route == ("POST", "agent"):
             engine.switch_agent(sid, str(self._body().get("agent")))
@@ -323,9 +323,11 @@ def _shaped(message: Json, levers: frozenset[Lever]) -> Json:
         return message
     content = message.get("content")
     if isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "tool":
-                part["type"] = "tool-call"
+        for part in cast("list[object]", content):
+            if isinstance(part, dict):
+                tool_part = cast(Json, part)
+                if tool_part.get("type") == "tool":
+                    tool_part["type"] = "tool-call"
     return message
 
 

@@ -15,7 +15,7 @@ import re
 import textwrap
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Protocol
@@ -93,7 +93,7 @@ class EmptyBehaviorScriptError(ValueError):
     """
 
 
-class _AskExit(Exception):
+class AskExit(Exception):
     """Internal control-flow signal: a script called ``ask()`` and must exit now."""
 
     def __init__(self, ask: Ask) -> None:
@@ -400,7 +400,7 @@ def _ask_cmd(env: Mapping[str, str]) -> Sequence[str] | None:
 
 
 @contextlib.contextmanager
-def _chdir(target: Path) -> Iterator[None]:
+def _chdir(target: Path) -> Generator[None]:
     previous = Path.cwd()
     os.chdir(target)
     try:
@@ -602,7 +602,7 @@ def run_prompt(
         with _chdir(cwd):
             exec(compile(script, "<behavior-script>", "exec"), _script_globals(ctx))
         result = ctx.result or RunResult(session_id=session_id, subtype="success")
-    except _AskExit as exc:
+    except AskExit as exc:
         result = ctx.result or RunResult(session_id=session_id, subtype="ask", ask=exc.ask, text=exc.ask.question)
     except HarnessCrash as exc:
         _log.warning("behavior script crashed", session_id=session_id, error=str(exc))

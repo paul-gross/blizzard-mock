@@ -19,7 +19,7 @@ from typing import Any
 from blizzard_mock.harness.engine import ITranscriptWriter, RunResult, acquired_worktree, fence_base_dir
 from blizzard_mock.harness.facades import _common
 from blizzard_mock.harness.facades._opencode_transcript import (
-    _MOCK_VERSION,
+    MOCK_VERSION,
     OpenCodeTranscriptWriter,
     billed_zero_mode,
     document_path,
@@ -316,7 +316,7 @@ def main(argv: list[str] | None = None) -> None:
     if args_list and args_list[0] == "--version":
         # The health probe shells out to this same binary, not only
         # `emit`'s separate CLI-surface artifact — so `run` must answer `--version` too.
-        print(_MOCK_VERSION)
+        print(MOCK_VERSION)
         raise SystemExit(0)
     if args_list and args_list[0] == "emit":
         raise SystemExit(_run_emit(args_list[1:]))
