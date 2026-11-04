@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from ..levers import Lever
 
 
-def children_body() -> dict:
+def children_body() -> dict[str, object]:
     """``GET /session/{id}/children``'s body — always empty."""
     return {"children": []}
 
 
-def session_body(sid: str, cwd: str, levers: frozenset[Lever]) -> dict:
+def session_body(sid: str, cwd: str, levers: frozenset[Lever]) -> dict[str, object]:
     """``GET /session/{id}``'s body."""
     return {
         "id": "ses_wrong" if Lever.TAKEOVER_WRONG_SESSION in levers else sid,

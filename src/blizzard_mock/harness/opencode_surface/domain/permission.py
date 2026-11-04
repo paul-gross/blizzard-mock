@@ -23,7 +23,7 @@ def debug_agent_tool_lines(levers: frozenset[Lever]) -> list[str]:
     return lines
 
 
-def build_permission_events(levers: frozenset[Lever]) -> list[dict]:
+def build_permission_events(levers: frozenset[Lever]) -> list[dict[str, object]]:
     """The JSONL event(s) a "...permission" turn prints."""
     sid = SESSION_ID
     if Lever.PERMISSION_PROSE_ONLY in levers:
@@ -51,12 +51,24 @@ def build_permission_events(levers: frozenset[Lever]) -> list[dict]:
             },
         ]
     error = "unrelated tool failure" if Lever.PERMISSION_REQUEST_ONLY in levers else DENIAL
-    event = {
+    if Lever.PERMISSION_OS_ERROR in levers:
+        # Shared across every denial event, not just the last — matching the
+        # retired ground-truth fake's behavior when both levers are armed together.
+        error = "permission denied"
+    part_ids = ["prt_permission"]
+    if Lever.PERMISSION_DUPLICATE in levers:
+        part_ids.append("prt_permission_duplicate")
+    return [_denial_event(part_id, error) for part_id in part_ids]
+
+
+def _denial_event(part_id: str, error: str) -> dict[str, object]:
+    """One ``tool_use`` event carrying a denied ``printf permission-probe`` bash call."""
+    return {
         "type": "tool_use",
-        "sessionID": sid,
+        "sessionID": SESSION_ID,
         "part": {
-            "id": "prt_permission",
-            "sessionID": sid,
+            "id": part_id,
+            "sessionID": SESSION_ID,
             "messageID": "msg_permission",
             "type": "tool",
             "callID": "call_permission",
@@ -64,17 +76,6 @@ def build_permission_events(levers: frozenset[Lever]) -> list[dict]:
             "state": {"status": "error", "input": {"command": "printf permission-probe"}, "error": error},
         },
     }
-    events = [event]
-    if Lever.PERMISSION_DUPLICATE in levers:
-        duplicate = {**event, "part": {**event["part"], "id": "prt_permission_duplicate"}}
-        events.append(duplicate)
-    if Lever.PERMISSION_OS_ERROR in levers:
-        # Shared across every denial event above, not just the last — matching the
-        # retired ground-truth fake's behavior when both levers are armed together.
-        events = [
-            {**e, "part": {**e["part"], "state": {**e["part"]["state"], "error": "permission denied"}}} for e in events
-        ]
-    return events
 
 
 def permission_exit_code(levers: frozenset[Lever]) -> int:

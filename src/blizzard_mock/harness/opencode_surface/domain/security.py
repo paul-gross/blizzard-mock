@@ -8,14 +8,14 @@ from .permission import DENIAL
 SESSION_ID = "ses_security"
 
 
-def build_event(levers: frozenset[Lever], command: str) -> tuple[dict, bool]:
+def build_event(levers: frozenset[Lever], command: str) -> tuple[dict[str, object], bool]:
     """The ``tool_use`` event to print, and whether the caller must actually run ``command``."""
     execute = Lever.SECURITY_COMMAND_EXECUTES in levers
     if execute:
-        state = {"status": "completed", "input": {"command": command}, "output": "executed"}
+        state: dict[str, object] = {"status": "completed", "input": {"command": command}, "output": "executed"}
     else:
         state = {"status": "error", "input": {"command": command}, "error": DENIAL}
-    event = {
+    event: dict[str, object] = {
         "type": "tool_use",
         "sessionID": SESSION_ID,
         "part": {

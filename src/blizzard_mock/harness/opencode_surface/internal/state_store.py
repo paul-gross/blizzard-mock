@@ -5,18 +5,21 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from typing import cast
+
+from ..domain.state import State
 
 
-def read_state(path: str) -> dict:
+def read_state(path: str) -> State:
     """The persisted state, or ``{}`` when no file has been written yet."""
     try:
         with open(path) as fh:
-            return json.load(fh)
+            return cast("State", json.load(fh))
     except FileNotFoundError:
         return {}
 
 
-def write_state(path: str, state: dict) -> None:
+def write_state(path: str, state: State) -> None:
     """Persist ``state``, atomically: a temp file in the same directory, renamed over the
     target — the diagnostic's 0.1s poll only guards a missing file, never a partial one."""
     directory = os.path.dirname(path) or "."
