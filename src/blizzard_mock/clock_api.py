@@ -1,11 +1,12 @@
 """Shared test-control HTTP surface for controlled clocks."""
 
+import re
 from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from blizzard_mock.clock import ClockBackwardsError, ControlledClock
 
@@ -14,7 +15,16 @@ class ClockMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     to: datetime | None = None
-    advance_seconds: Annotated[float | None, Field(ge=0, allow_inf_nan=False)] = None
+    advance_seconds: Annotated[float | None, Field(strict=True, ge=0, allow_inf_nan=False)] = None
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def validate_instant_format(cls, value: object) -> object:
+        if not isinstance(value, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})", value
+        ):
+            raise ValueError("instant must be an ISO 8601 datetime with an offset")
+        return value
 
     @model_validator(mode="after")
     def validate_move(self) -> "ClockMove":

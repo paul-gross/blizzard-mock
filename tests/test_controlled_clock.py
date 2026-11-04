@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,9 +30,31 @@ def test_clock_moves_and_concurrency() -> None:
         clock.set(datetime(2030, 1, 1))
     with pytest.raises(ValueError):
         clock.advance(timedelta(seconds=-1))
+    barrier = Barrier(8)
+
+    def writer() -> list[datetime]:
+        moves = []
+        for _ in range(25):
+            barrier.wait()
+            moves.append(clock.advance(timedelta(seconds=1))[1])
+            barrier.wait()
+        return moves
+
+    def reader() -> list[datetime]:
+        readings = []
+        for _ in range(25):
+            barrier.wait()
+            readings.append(clock.now())
+            barrier.wait()
+        return readings
+
     with ThreadPoolExecutor(max_workers=8) as pool:
-        moves = list(pool.map(lambda _: clock.advance(timedelta(seconds=1)), range(100)))
-    assert {now for _, now in moves} == {start + timedelta(seconds=i) for i in range(1, 101)}
+        writers = [pool.submit(writer) for _ in range(4)]
+        readers = [pool.submit(reader) for _ in range(4)]
+        moves = [instant for future in writers for instant in future.result()]
+        readings = [instant for future in readers for instant in future.result()]
+    assert set(moves) == {start + timedelta(seconds=i) for i in range(1, 101)}
+    assert set(readings) <= {start, *moves}
     assert clock.now() == start + timedelta(seconds=100)
 
 
@@ -88,8 +111,13 @@ def test_routes_and_fence(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyP
         {"to": future.isoformat(), "advance_seconds": 1},
         {"advance_seconds": -1},
         {"to": "2030-01-01T00:00:00"},
+        {"to": 2000000000},
+        {"to": "2000000000"},
+        {"advance_seconds": True},
+        {"advance_seconds": "3"},
     ):
         assert client.post("/_clock", json=body).status_code == 422
+    assert datetime.fromisoformat(client.get("/_clock").json()["now"]) == future + timedelta(seconds=0.5)
     assert "/_clock" not in client.get("/openapi.json").json()["paths"]
     monkeypatch.delenv("BLIZZARD_CLOCK_FENCE")
     plain = build()
