@@ -335,5 +335,5 @@ class ReflectedStore:
 
 # Typecheck-time Protocol/adapter conformance sentinel (bzh:dependency-inversion) — pyright
 # rejects the return if ReflectedStore drifts from ISeedStore.
-def conforms_seed_store(x: ReflectedStore) -> ISeedStore:
+def _conforms_seed_store(x: ReflectedStore) -> ISeedStore:  # pyright: ignore[reportUnusedFunction]
     return x
