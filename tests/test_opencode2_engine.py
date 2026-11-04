@@ -507,9 +507,13 @@ def test_restarts_mid_turn_resumes_the_script_in_the_next_lifetime(tmp_path: Pat
     assert aborted["finish"] == "error"
 
 
-def test_takeover_prompts_the_session_through_the_registered_service(tmp_path: Path, start_service: Starter) -> None:
+def test_takeover_switches_the_agent_keeps_the_model_and_prompts_through_the_service(
+    tmp_path: Path, start_service: Starter
+) -> None:
     service = _started(start_service, tmp_path)
     service.open_session("ses_take", _repo(tmp_path))
+    luna = {"providerID": "openai", "id": "gpt-6-luna"}
+    assert service.call("POST", "/api/session/ses_take/model", {"model": luna})[0] == 204
     tui = subprocess.Popen(
         [str(service.binary), "--session", "ses_take"],
         env=service.env,
@@ -531,6 +535,9 @@ def test_takeover_prompts_the_session_through_the_registered_service(tmp_path: P
     assert _texts(_assistants(messages)[-1]) == ["TAKEN OVER"]
     record = service.data("GET", "/api/session/ses_take")
     assert isinstance(record, dict) and record["agent"] == "build"
+    assert record["model"] == luna
+    switches = [(m["type"], m.get("model", m.get("agent"))) for m in messages if str(m["type"]).endswith("-switched")]
+    assert switches == [("model-switched", luna), ("agent-switched", "build")]
 
 
 def test_the_api_subset_pages_messages_lists_the_inbox_compacts_and_reports_itself(
