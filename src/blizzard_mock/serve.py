@@ -42,7 +42,8 @@ def serve(build: Callable[[int], FastAPI], *, host: str, port: int, listening_fi
     bound_port: int = sock.getsockname()[1]
     app = build(bound_port)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=bound_port, timeout_keep_alive=KEEP_ALIVE_TIMEOUT_S))
-    asyncio.run(_run(server, sock, f"http://{host}:{bound_port}", listening_file))
+    authority = f"[{host}]" if ":" in host else host
+    asyncio.run(_run(server, sock, f"http://{authority}:{bound_port}", listening_file))
 
 
 async def _run(server: uvicorn.Server, sock: socket.socket, url: str, listening_file: Path | None) -> None:

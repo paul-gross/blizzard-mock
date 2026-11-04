@@ -21,7 +21,7 @@ from tests.forge_world import REPO, build_repos
 
 
 @contextlib.contextmanager
-def _daemon(module: str, tmp_path: Path, name: str, *args: str) -> Iterator[str]:
+def _daemon(module: str, tmp_path: Path, name: str, *args: str, host: str = "127.0.0.1") -> Iterator[str]:
     """Spawn ``module`` on ``--port 0`` and yield the URL its listening file publishes."""
     listening = tmp_path / f"{name}.url"
     log_path = tmp_path / f"{name}.log"
@@ -32,7 +32,7 @@ def _daemon(module: str, tmp_path: Path, name: str, *args: str) -> Iterator[str]
                 "-m",
                 module,
                 "--host",
-                "127.0.0.1",
+                host,
                 "--port",
                 "0",
                 "--listening-file",
@@ -96,3 +96,10 @@ def test_mock_hub_and_mock_runner_publish_their_bound_urls(tmp_path: Path) -> No
             _bound_port(runner_url)
             assert runner_url != hub_url
             assert httpx.get(f"{runner_url}/api/health").status_code == 200
+
+
+def test_forge_brackets_an_ipv6_host_in_its_published_url(tmp_path: Path) -> None:
+    repos = build_repos(tmp_path / "repos")
+    with _daemon("blizzard_mock.forge.cli", tmp_path, "forge6", "--repos-dir", str(repos), host="::1") as url:
+        assert url.startswith("http://[::1]:")
+        assert httpx.get(f"{url}/healthz").status_code == 200
