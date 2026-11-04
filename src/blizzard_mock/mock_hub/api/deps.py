@@ -126,8 +126,8 @@ class RunnerCapabilityBody(MirroredWireBody):
 
     harness_id: str
     version: str | None = None
-    tiers: list[str] = Field(default_factory=list)
-    supported_models: list[str] = Field(default_factory=list)
+    tiers: list[str] = Field(default_factory=list[str])
+    supported_models: list[str] = Field(default_factory=list[str])
     default: bool = False
     available: bool = True
 
@@ -147,7 +147,7 @@ class QueuePeekBody(MirroredWireBody):
     reuses :class:`RunnerCapabilityBody` for its element shape. Carries no ``runner_id``
     — the verb answers for the bearer token's principal alone."""
 
-    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list[RunnerCapabilityBody])
     policy: str = "pass-over"
     # Narrows the peek to one project of the runner's declaration, by entry or resolved id.
     project: str | None = None
@@ -164,15 +164,15 @@ class QueuePeekBody(MirroredWireBody):
 class RouteClaimBody(BaseModel):
     chunk_id: str
     workspace_id: str = "workspace-mock"
-    environment_ids: list[str] = Field(default_factory=list)
+    environment_ids: list[str] = Field(default_factory=list[str])
 
 
 class CompletionBody(BaseModel):
     choice: str
     epoch: int
     from_node_id: str
-    check_results: list[dict[str, object]] = Field(default_factory=list)
-    artifacts: list[dict[str, object]] = Field(default_factory=list)
+    check_results: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    artifacts: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class ReleaseBody(BaseModel):
@@ -184,8 +184,8 @@ class ReleaseBody(BaseModel):
 class DecisionBody(BaseModel):
     from_node_id: str
     epoch: int
-    check_results: list[dict[str, object]] = Field(default_factory=list)
-    artifacts: list[dict[str, object]] = Field(default_factory=list)
+    check_results: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    artifacts: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class RunnerBindingBody(MirroredWireBody):
@@ -217,13 +217,13 @@ class RunnerRegistrationBody(MirroredWireBody):
     # The runner's optional federation identity — round-tripped
     # into `MockHubService.register`, mirroring the real hub.
     url: str | None = None
-    redirect_uris: list[str] = Field(default_factory=list)
+    redirect_uris: list[str] = Field(default_factory=list[str])
     # The runner's capability snapshot — every harness/tier it can execute right now.
-    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list)
+    capabilities: list[RunnerCapabilityBody] = Field(default_factory=list[RunnerCapabilityBody])
     # The runner's declared subscription roster — kept distinct from an absent one.
     subscriptions: list[RunnerSubscriptionDeclarationBody] | None = None
     # The node names the runner holds for a human decision — reported, never enforced.
-    gates: list[str] = Field(default_factory=list)
+    gates: list[str] = Field(default_factory=list[str])
     # The projects the runner serves, by id or slug — ``None`` keeps the declaration the hub holds.
     projects: list[str] | None = None
     # The projects it serves through its host's workspaces; sent, they replace ``projects`` as the declaration.
@@ -244,7 +244,7 @@ class RunnerFactBody(BaseModel):
 
 
 class RunnerFactBatchBody(BaseModel):
-    facts: list[RunnerFactBody] = Field(default_factory=list)
+    facts: list[RunnerFactBody] = Field(default_factory=list[RunnerFactBody])
 
 
 class HostFactBody(MirroredWireBody):
@@ -334,7 +334,7 @@ class TranscriptSegmentRecordBody(MirroredWireBody):
 
 
 class TranscriptSegmentBatchBody(MirroredWireBody):
-    records: list[TranscriptSegmentRecordBody] = Field(default_factory=list)
+    records: list[TranscriptSegmentRecordBody] = Field(default_factory=list[TranscriptSegmentRecordBody])
 
 
 class RunnerAddBody(MirroredWireBody):
@@ -361,9 +361,11 @@ class HostReportBody(MirroredWireBody):
 
     name: str | None = None
     url: str | None = None
-    redirect_uris: list[str] = Field(default_factory=list)
-    workspaces: list[HostWorkspaceBody] = Field(default_factory=list)
-    subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(default_factory=list)
+    redirect_uris: list[str] = Field(default_factory=list[str])
+    workspaces: list[HostWorkspaceBody] = Field(default_factory=list[HostWorkspaceBody])
+    subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(
+        default_factory=list[RunnerSubscriptionDeclarationBody]
+    )
     version: str | None = None
 
 
@@ -378,7 +380,7 @@ class HostAddBody(MirroredWireBody):
     """Mirrors ``blizzard.wire.host.HostAddRequest`` field-for-field — stripped, and a blank name refused ``422``."""
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    adopt: list[str] = Field(default_factory=list)
+    adopt: list[str] = Field(default_factory=list[str])
 
 
 class RunnerRetireBody(MirroredWireBody):

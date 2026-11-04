@@ -48,18 +48,18 @@ class NodeConfig(BaseModel):
     # The **effective** session declaration for this node-step, already
     # merged hub-side (declaration over chunk default, field by field).
     session_name: str | None = None
-    session_model: list[str] = Field(default_factory=list)
+    session_model: list[str] = Field(default_factory=list[str])
     session_effort: str | None = None
-    session_harnesses: list[str] = Field(default_factory=list)
+    session_harnesses: list[str] = Field(default_factory=list[str])
     session_compaction_window: str | None = None
     session_rotate: RotatePolicyView | None = None
     judged_by: JudgedBy
-    checks: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list[str])
     checks_cwd: str | None = None  # where the runner runs `checks:`
     checks_timeout: int | None = None  # per-check timeout in seconds
-    produces: list[str] = Field(default_factory=list)
+    produces: list[str] = Field(default_factory=list[str])
     retries_max: int | None = None
-    choices: list[EnvelopeChoice] = Field(default_factory=list)
+    choices: list[EnvelopeChoice] = Field(default_factory=list[EnvelopeChoice])
 
 
 class GraphArtifact(BaseModel):
@@ -87,9 +87,9 @@ class NodeEnvelope(BaseModel):
     node: NodeConfig
     prompt: str | None
     judgement_prompt: str | None
-    work_refs: list[dict[str, str]] = Field(default_factory=list)
-    artifacts: list[dict[str, object]] = Field(default_factory=list)
-    graph_artifacts: list[GraphArtifact] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
+    artifacts: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    graph_artifacts: list[GraphArtifact] = Field(default_factory=list[GraphArtifact])
 
 
 class RouteClaimResponse(BaseModel):
@@ -128,7 +128,7 @@ class RouteView(BaseModel):
     # The holder's name — display only, absent when the registry holds no such runner.
     runner_name: str | None = None
     workspace_id: str
-    environment_ids: list[str] = Field(default_factory=list)
+    environment_ids: list[str] = Field(default_factory=list[str])
 
 
 class ChunkEscalationView(BaseModel):
@@ -151,7 +151,7 @@ class QuestionView(BaseModel):
     runner_name: str | None = None
     epoch: int
     question: str
-    options: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list[str])
     asked_at: str
     answered: bool = False
     answer: str | None = None
@@ -183,13 +183,13 @@ class ChunkDetail(BaseModel):
     status: str
     current_node_id: str | None
     latest_epoch: int | None
-    work_refs: list[dict[str, str]] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
     # The chunk's default model preference and effort, mirrored
     # so a real runner's wire model deserializes the mock's replies unchanged.
-    default_model: list[str] = Field(default_factory=list)
+    default_model: list[str] = Field(default_factory=list[str])
     default_effort: str | None = None
     # The chunk's default harness preference — the `default_model` shape.
-    default_harnesses: list[str] = Field(default_factory=list)
+    default_harnesses: list[str] = Field(default_factory=list[str])
     route: RouteView | None = None
     # The operator-verb affordances the real hub derives from status and node, each
     # computed the real hub's way from the mock's own status and node.
@@ -203,7 +203,7 @@ class ChunkDetail(BaseModel):
     terminal: bool = False
     current_node_terminal: bool = False
     escalation: ChunkEscalationView | None = None
-    questions: list[QuestionView] = Field(default_factory=list)
+    questions: list[QuestionView] = Field(default_factory=list[QuestionView])
     # The project the chunk belongs to — its id, current slug and display name.
     project_id: str | None = None
     project_slug: str | None = None
@@ -240,7 +240,7 @@ class QueuePeekEntry(BaseModel):
     chunk_id: str
     graph_id: str
     position: int
-    work_refs: list[dict[str, str]] = Field(default_factory=list)
+    work_refs: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
     blocked: BlockedView | None = None
     # The project the chunk belongs to — its id, current slug and display name.
     project_id: str | None = None
@@ -249,7 +249,7 @@ class QueuePeekEntry(BaseModel):
 
 
 class QueuePeekResponse(BaseModel):
-    entries: list[QueuePeekEntry] = Field(default_factory=list)
+    entries: list[QueuePeekEntry] = Field(default_factory=list[QueuePeekEntry])
 
 
 class ExternalSubscriptionUsageWindowView(BaseModel):
@@ -268,7 +268,9 @@ class SubscriptionUsageView(BaseModel):
     slug: str
     name: str
     sampled_at: str | None = None
-    windows: list[ExternalSubscriptionUsageWindowView] = Field(default_factory=list)
+    windows: list[ExternalSubscriptionUsageWindowView] = Field(
+        default_factory=list[ExternalSubscriptionUsageWindowView]
+    )
     condition: str | None = None
     miss_reason: str | None = None
     missed_at: str | None = None
@@ -281,8 +283,8 @@ class RunnerCapabilityView(BaseModel):
 
     harness_id: str
     version: str | None = None
-    tiers: list[str] = Field(default_factory=list)
-    supported_models: list[str] = Field(default_factory=list)
+    tiers: list[str] = Field(default_factory=list[str])
+    supported_models: list[str] = Field(default_factory=list[str])
     default: bool = False
     available: bool = True
 
@@ -336,23 +338,23 @@ class RunnerView(BaseModel):
     # The agents the runner declared it runs at once; ``None`` from a runner that predates the shared count.
     agents: int | None = None
     # Every reported per-slug sample, empty when no sample was reported.
-    subscriptions: list[SubscriptionUsageView] = Field(default_factory=list)
+    subscriptions: list[SubscriptionUsageView] = Field(default_factory=list[SubscriptionUsageView])
     # The runner's reported capability snapshot — every harness/tier it can execute right now.
-    capabilities: list[RunnerCapabilityView] = Field(default_factory=list)
+    capabilities: list[RunnerCapabilityView] = Field(default_factory=list[RunnerCapabilityView])
     # Retired runners hold no token, so a fleet read only ever renders these at their defaults.
     retired: bool = False
     retired_at: str | None = None
     retired_by: str | None = None
     # The node names the runner declared it holds for a human decision.
-    gates: list[str] = Field(default_factory=list)
+    gates: list[str] = Field(default_factory=list[str])
     # The projects the runner serves, one entry per declared entry.
-    projects: list[ServedProjectView] = Field(default_factory=list)
+    projects: list[ServedProjectView] = Field(default_factory=list[ServedProjectView])
     # The bindings the runner declared, flagged against its host's latest report; ``None`` when it sent none.
     bindings: list[RunnerBindingView] | None = None
     subscription: str | None = None
     subscription_unrostered: bool = False
     # The throttles the runner last reported as saying no; empty when none, or when it sent none.
-    declining: list[RunnerDecliningView] = Field(default_factory=list)
+    declining: list[RunnerDecliningView] = Field(default_factory=list[RunnerDecliningView])
 
 
 class VersionWindowView(BaseModel):
@@ -424,7 +426,7 @@ class HostRecordResponse(BaseModel):
     host_name: str
     registered_at: str | None = None
     last_seen_at: str | None = None
-    runners: list[HostRunnerView] = Field(default_factory=list)
+    runners: list[HostRunnerView] = Field(default_factory=list[HostRunnerView])
 
 
 class HostAddResponse(BaseModel):
@@ -433,7 +435,7 @@ class HostAddResponse(BaseModel):
     host_id: str
     host_name: str
     token: str
-    adopted: list[str] = Field(default_factory=list)
+    adopted: list[str] = Field(default_factory=list[str])
 
 
 class RunnerIdentityView(BaseModel):
@@ -484,11 +486,11 @@ class MeView(BaseModel):
 class RunnerFactAck(BaseModel):
     runner_id: str
     high_water: int
-    applied: list[int] = Field(default_factory=list)
-    already_applied: list[int] = Field(default_factory=list)
-    rejected: list[int] = Field(default_factory=list)
+    applied: list[int] = Field(default_factory=list[int])
+    already_applied: list[int] = Field(default_factory=list[int])
+    rejected: list[int] = Field(default_factory=list[int])
     # The subset of `rejected` refused for a chunk with no live route — the mock refuses none so.
-    route_ended: list[int] = Field(default_factory=list)
+    route_ended: list[int] = Field(default_factory=list[int])
 
 
 class HostFactAck(BaseModel):
@@ -496,9 +498,9 @@ class HostFactAck(BaseModel):
 
     host_id: str
     high_water: int
-    applied: list[int] = Field(default_factory=list)
-    already_applied: list[int] = Field(default_factory=list)
-    rejected: list[int] = Field(default_factory=list)
+    applied: list[int] = Field(default_factory=list[int])
+    already_applied: list[int] = Field(default_factory=list[int])
+    rejected: list[int] = Field(default_factory=list[int])
 
 
 class TranscriptSegmentAck(BaseModel):
@@ -508,10 +510,10 @@ class TranscriptSegmentAck(BaseModel):
 
     runner_id: str
     high_water: int
-    applied: list[int] = Field(default_factory=list)
-    already_applied: list[int] = Field(default_factory=list)
-    capped: list[int] = Field(default_factory=list)
-    refused: list[int] = Field(default_factory=list)
+    applied: list[int] = Field(default_factory=list[int])
+    already_applied: list[int] = Field(default_factory=list[int])
+    capped: list[int] = Field(default_factory=list[int])
+    refused: list[int] = Field(default_factory=list[int])
 
 
 class LeaseTranscriptView(BaseModel):
@@ -523,7 +525,7 @@ class LeaseTranscriptView(BaseModel):
     node_id: str
     epoch: int
     truncated: bool = False
-    turns: list[dict[str, object]] = Field(default_factory=list)
+    turns: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class WorkItemAuthorView(BaseModel):
@@ -552,14 +554,14 @@ class WorkItemEntry(BaseModel):
     fetched_at: str
     title: str | None = None
     body: str | None = None
-    comments: list[str] = Field(default_factory=list)
+    comments: list[str] = Field(default_factory=list[str])
     error: str | None = None
     author: WorkItemAuthorView | None = None
     stated_priority: str | None = None
 
 
 class WorkItemsView(BaseModel):
-    items: list[WorkItemEntry] = Field(default_factory=list)
+    items: list[WorkItemEntry] = Field(default_factory=list[WorkItemEntry])
 
 
 class FindingView(BaseModel):

@@ -14,6 +14,7 @@ import json
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from blizzard_mock.levers import ILeverStore
 from blizzard_mock.mock_hub.domain.capture import ICaptureStore
@@ -54,9 +55,9 @@ class HubLeverMiddleware(BaseHTTPMiddleware):
     """Applies the transport-edge levers held in ``app.state.levers``."""
 
     def __init__(
-        self, app: object, levers: ILeverStore, *, host_plane_absent: bool = False, idp_offered: bool = False
+        self, app: ASGIApp, levers: ILeverStore, *, host_plane_absent: bool = False, idp_offered: bool = False
     ) -> None:
-        super().__init__(app)  # type: ignore[arg-type]
+        super().__init__(app)
         self._levers = levers
         self._host_plane_absent = host_plane_absent
         self._idp_offered = idp_offered
@@ -123,8 +124,8 @@ class RequestCaptureMiddleware(BaseHTTPMiddleware):
     Excludes the control plane and liveness routes.
     """
 
-    def __init__(self, app: object, captured: ICaptureStore) -> None:
-        super().__init__(app)  # type: ignore[arg-type]
+    def __init__(self, app: ASGIApp, captured: ICaptureStore) -> None:
+        super().__init__(app)
         self._captured = captured
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:

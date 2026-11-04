@@ -13,7 +13,7 @@ import secrets
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -996,9 +996,8 @@ class MockHubService:
                 already_applied.append(seq)
                 continue
             kind = str(fact.get("kind", ""))
-            payload = fact.get("payload")
-            if not isinstance(payload, dict):
-                payload = {}
+            raw_payload = fact.get("payload")
+            payload: dict[str, Any] = cast("dict[str, Any]", raw_payload) if isinstance(raw_payload, dict) else {}
             if self._apply_fact(runner_id, kind, payload):
                 applied.append(seq)
                 mark = max(mark, seq)
@@ -1023,8 +1022,9 @@ class MockHubService:
             if seq <= mark:
                 already_applied.append(seq)
                 continue
-            payload = fact.get("payload")
-            if self._apply_host_fact(row, str(fact.get("kind", "")), payload if isinstance(payload, dict) else {}):
+            raw_payload = fact.get("payload")
+            payload: dict[str, Any] = cast("dict[str, Any]", raw_payload) if isinstance(raw_payload, dict) else {}
+            if self._apply_host_fact(row, str(fact.get("kind", "")), payload):
                 applied.append(seq)
                 mark = seq
             else:
@@ -1116,7 +1116,7 @@ class MockHubService:
         turns: list[dict[str, Any]] = []
         for record in sorted(records.values(), key=_order_key):
             turns.extend(record.get("turns", []))
-        renumbered = [{**turn, "index": i} for i, turn in enumerate(turns)]
+        renumbered: list[dict[str, object]] = [{**turn, "index": i} for i, turn in enumerate(turns)]
         return LeaseTranscriptView(chunk_id=chunk_id, node_id=node_id, epoch=epoch, turns=renumbered)
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
@@ -1433,7 +1433,7 @@ class MockHubService:
     def _declared(self, tenant_id: str, entries: Sequence[str]) -> tuple[ServedEntry, ...]:
         """``entries`` resolved in ``tenant_id``, each kept beside what it resolved to — ``None`` for one no
         project answers to, which serves nothing until one does."""
-        resolved = []
+        resolved: list[ServedEntry] = []
         for entry in entries:
             project = self._resolve_project(tenant_id, entry)
             resolved.append(ServedEntry(entry=entry, project_id=project.project_id if project else None))
@@ -1524,7 +1524,7 @@ class MockHubService:
     def _served_views(self, row: RunnerRow) -> list[ServedProjectView]:
         """The runner's stored declaration with each entry's project read now, so a renamed project shows its
         current slug and name."""
-        views = []
+        views: list[ServedProjectView] = []
         for e in row.projects:
             project = self._state.get_project(e.project_id) if e.project_id is not None else None
             views.append(
@@ -1933,9 +1933,9 @@ class MockHubService:
 
         ``sampled_at`` defaults exactly as the real hub's ingest does. ``name`` defaults to ``slug``
         itself for a payload with no additive ``name`` field, mirroring the real hub's own default."""
-        windows = []
+        windows: list[ExternalSubscriptionUsageWindowView] = []
         entries = payload.get("windows")
-        for entry in entries if isinstance(entries, list) else []:
+        for entry in cast("list[object]", entries) if isinstance(entries, list) else []:
             try:
                 window = _ExternalSubscriptionUsageWindowFact.model_validate(entry)
                 windows.append(
