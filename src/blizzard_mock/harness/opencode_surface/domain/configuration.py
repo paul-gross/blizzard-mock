@@ -6,6 +6,8 @@ probed command is denied and what to render."""
 
 from __future__ import annotations
 
+from typing import cast
+
 from ..levers import Lever
 
 SESSION_ID = "ses_config"
@@ -13,7 +15,7 @@ SESSION_ID = "ses_config"
 PROSE_DENIAL = "The configured permission rule prevented this specific tool call."
 
 
-def debug_config_pure(levers: frozenset[Lever], config: dict) -> dict:
+def debug_config_pure(levers: frozenset[Lever], config: dict[str, object]) -> dict[str, object]:
     """The effective-config document ``debug config --pure`` echoes back, given the same
     resolved config the "...configuration turn" probe uses (``internal.configuration.resolve_config``)."""
     if Lever.IGNORE_CONFIG in levers:
@@ -26,22 +28,27 @@ def debug_config_pure(levers: frozenset[Lever], config: dict) -> dict:
     return effective
 
 
-def decide(levers: frozenset[Lever], config: dict) -> bool:
+def decide(levers: frozenset[Lever], config: dict[str, object]) -> bool:
     """Whether the configuration turn's probed bash command is denied."""
     if Lever.IGNORE_CONFIG in levers:
         return False
-    try:
-        bash_permission = config["permission"]["bash"]
-        return bash_permission == "deny" or (
-            isinstance(bash_permission, dict) and bash_permission["printf config-isolation-probe"] == "deny"
-        )
-    except KeyError:
+    permission = config.get("permission")
+    if not isinstance(permission, dict):
         return False
+    bash_permission: object = cast("dict[str, object]", permission).get("bash")
+    if bash_permission == "deny":
+        return True
+    if isinstance(bash_permission, dict):
+        return cast("dict[str, object]", bash_permission).get("printf config-isolation-probe") == "deny"
+    return False
 
 
-def build_event(levers: frozenset[Lever], denied: bool) -> dict:
+def build_event(levers: frozenset[Lever], denied: bool) -> dict[str, object]:
     """The ``tool_use`` event the configuration turn prints."""
-    state: dict = {"status": "error" if denied else "completed", "input": {"command": "printf config-isolation-probe"}}
+    state: dict[str, object] = {
+        "status": "error" if denied else "completed",
+        "input": {"command": "printf config-isolation-probe"},
+    }
     if denied:
         state["error"] = "permission denied" if Lever.CONFIGURATION_OS_ERROR in levers else PROSE_DENIAL
     else:

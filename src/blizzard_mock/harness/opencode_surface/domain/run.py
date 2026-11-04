@@ -44,7 +44,7 @@ def is_sleep5_turn(args: list[str]) -> bool:
     return "sleep 5" in (args[-1] if args else "")
 
 
-def provider_refusal_event(sid: str) -> dict:
+def provider_refusal_event(sid: str) -> dict[str, object]:
     """The provider-error event ``PROVIDER_REFUSAL`` emits instead of a normal turn."""
     return {
         "type": "error",
@@ -53,7 +53,7 @@ def provider_refusal_event(sid: str) -> dict:
     }
 
 
-def sleep5_step_start(sid: str) -> dict:
+def sleep5_step_start(sid: str) -> dict[str, object]:
     """The step-start event printed before the observable one-second sleep."""
     return {
         "type": "step_start",
@@ -62,7 +62,7 @@ def sleep5_step_start(sid: str) -> dict:
     }
 
 
-def default_turn_events(sid: str) -> list[dict]:
+def default_turn_events(sid: str) -> list[dict[str, object]]:
     """The step-start/text/step-finish trio every ordinary turn ends with."""
     return [
         {

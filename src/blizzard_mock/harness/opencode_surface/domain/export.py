@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from ..levers import Lever
-from .state import is_running
+from .state import State, is_running
 
 #: Independent of whatever ``--version`` this artifact was emitted with.
 _INFO_VERSION = "1.18.25"
 
 
-def _user_message(sid: str) -> dict:
+def _user_message(sid: str) -> dict[str, object]:
     """The initial "proof" user turn — present only while the tool call is still running."""
     return {
         "info": {"id": "msg_user", "sessionID": sid, "role": "user"},
@@ -17,10 +17,10 @@ def _user_message(sid: str) -> dict:
     }
 
 
-def _assistant_message(sid: str, tool_state: dict, *, running: bool) -> dict:
+def _assistant_message(sid: str, tool_state: dict[str, object], *, running: bool) -> dict[str, object]:
     """The assistant turn that ran the long-running tool call — carries the trailing
     text/step-finish parts once it has actually finished."""
-    parts = [
+    parts: list[dict[str, object]] = [
         {"id": "prt_start", "sessionID": sid, "messageID": "msg_assistant", "type": "step-start"},
         {
             "id": "prt_tool",
@@ -68,7 +68,7 @@ def _assistant_message(sid: str, tool_state: dict, *, running: bool) -> dict:
     }
 
 
-def _compaction_user_message(sid: str, compaction_generation: int) -> dict:
+def _compaction_user_message(sid: str, compaction_generation: int) -> dict[str, object]:
     """The synthetic user turn a compaction inserts once the tool call has finished."""
     return {
         "info": {"id": "msg_compaction_user", "sessionID": sid, "role": "user"},
@@ -83,7 +83,7 @@ def _compaction_user_message(sid: str, compaction_generation: int) -> dict:
     }
 
 
-def _after_compaction_message(sid: str) -> dict:
+def _after_compaction_message(sid: str) -> dict[str, object]:
     """The assistant turn that follows a compaction."""
     return {
         "info": {
@@ -106,7 +106,7 @@ def _after_compaction_message(sid: str) -> dict:
     }
 
 
-def _takeover_message(sid: str, takeover_prompt: str) -> dict:
+def _takeover_message(sid: str, takeover_prompt: str) -> dict[str, object]:
     """The trailing user turn recording the operator's takeover line, when one arrived."""
     return {
         "info": {"id": "msg_takeover_user", "sessionID": sid, "role": "user"},
@@ -122,7 +122,7 @@ def _takeover_message(sid: str, takeover_prompt: str) -> dict:
     }
 
 
-def build(sid: str, state: dict, levers: frozenset[Lever], cwd: str) -> dict:
+def build(sid: str, state: State, levers: frozenset[Lever], cwd: str) -> dict[str, object]:
     """The export document for session ``sid``, given its persisted state. While the tool call
     is running, the transcript is the plain user+assistant pair; once finished, the user turn is
     replaced by a compaction sequence and the assistant message survives with its completed
@@ -133,7 +133,11 @@ def build(sid: str, state: dict, levers: frozenset[Lever], cwd: str) -> dict:
     command = "sleep 30" if phase == "process_control" else "sleep 5"
 
     if running:
-        tool_state = {"status": "running", "input": {"command": command}, "title": "Long-running command"}
+        tool_state: dict[str, object] = {
+            "status": "running",
+            "input": {"command": command},
+            "title": "Long-running command",
+        }
         messages = [_user_message(sid), _assistant_message(sid, tool_state, running=True)]
     else:
         tool_state = {
@@ -143,7 +147,7 @@ def build(sid: str, state: dict, levers: frozenset[Lever], cwd: str) -> dict:
             "title": "Long-running command",
             "metadata": {},
         }
-        compaction_generation = int(state.get("compaction_generation", 0))
+        compaction_generation = state.get("compaction_generation", 0)
         messages = [
             _assistant_message(sid, tool_state, running=False),
             _compaction_user_message(sid, compaction_generation),

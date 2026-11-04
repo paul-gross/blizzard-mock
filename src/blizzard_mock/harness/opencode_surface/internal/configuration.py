@@ -10,19 +10,25 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
+from typing import cast
 
 
-def _read_config(path: str | None) -> dict | None:
+def _as_object(document: object) -> dict[str, object] | None:
+    """``document`` when it is a JSON object, else ``None``."""
+    return cast("dict[str, object]", document) if isinstance(document, dict) else None
+
+
+def _read_config(path: str | None) -> dict[str, object] | None:
     if not path:
         return None
     try:
         with open(path) as fh:
-            return json.load(fh)
+            return _as_object(json.load(fh))
     except (OSError, json.JSONDecodeError):
         return None
 
 
-def resolve_config(env: Mapping[str, str], cwd: str) -> dict:
+def resolve_config(env: Mapping[str, str], cwd: str) -> dict[str, object]:
     """The effective config dict, following real OpenCode's file precedence."""
     config = _read_config(env.get("OPENCODE_CONFIG", ""))
     if config is None and env.get("OPENCODE_DISABLE_PROJECT_CONFIG") != "1":
@@ -33,5 +39,5 @@ def resolve_config(env: Mapping[str, str], cwd: str) -> dict:
         config = {}
     content = env.get("OPENCODE_CONFIG_CONTENT")
     if content:
-        config = json.loads(content)
+        config = _as_object(json.loads(content)) or {}
     return config

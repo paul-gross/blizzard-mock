@@ -5,7 +5,7 @@ from __future__ import annotations
 SESSION_ID = "ses_process_control"
 
 
-def build_event() -> dict:
+def build_event() -> dict[str, object]:
     """The one event a process-control turn prints before it sleeps."""
     return {
         "type": "step_start",
