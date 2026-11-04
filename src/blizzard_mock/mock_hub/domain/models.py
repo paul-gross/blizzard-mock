@@ -185,17 +185,17 @@ class NodeSpec(BaseModel):
     # seeded per node (pinned by tests/test_mock_hub.py).
     session_source: str | None = None
     session_name: str | None = None
-    session_model: list[str] = Field(default_factory=list)
+    session_model: list[str] = Field(default_factory=list[str])
     session_effort: str | None = None
-    session_harnesses: list[str] = Field(default_factory=list)
+    session_harnesses: list[str] = Field(default_factory=list[str])
     session_compaction_window: str | None = None
     session_rotate: RotatePolicySpec | None = None
     judged_by: JudgedBy = JudgedBy.WORKER
     prompt: str | None = None
     judgement_prompt: str | None = None
-    choices: list[ChoiceSpec] = Field(default_factory=list)
-    produces: list[str] = Field(default_factory=list)
-    checks: list[str] = Field(default_factory=list)
+    choices: list[ChoiceSpec] = Field(default_factory=list[ChoiceSpec])
+    produces: list[str] = Field(default_factory=list[str])
+    checks: list[str] = Field(default_factory=list[str])
     checks_cwd: str | None = None  # where the runner runs `checks:`
     checks_timeout: int | None = None  # per-check timeout in seconds
     retries_max: int | None = None
@@ -234,7 +234,7 @@ class QuestionState(BaseModel):
     runner_id: str
     epoch: int
     question: str
-    options: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list[str])
     asked_at: str
     answered: bool = False
     answer: str | None = None
@@ -363,7 +363,7 @@ class GardenProposalSpec(BaseModel):
     class_: str = Field(alias="class")
     title: str
     body: str
-    findings: list[str] = Field(default_factory=list)
+    findings: list[str] = Field(default_factory=list[str])
     created_at: str | None = None
     closure: GardenProposalClosureSpec | None = None
 
@@ -400,12 +400,12 @@ class AnalyticsSpec(BaseModel):
     ``garden_findings``/``garden_proposals`` on the chunk's own seeded
     :class:`GardenRunSpec` rather than a flag of its own."""
 
-    counts_files: list[AnalyticsCountRowSpec] = Field(default_factory=list)
-    counts_skills: list[AnalyticsCountRowSpec] = Field(default_factory=list)
-    counts_agent_types: list[AnalyticsCountRowSpec] = Field(default_factory=list)
-    counts_nodes: list[AnalyticsCountRowSpec] = Field(default_factory=list)
-    spend_nodes: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
-    spend_graphs: list[AnalyticsSpendRowSpec] = Field(default_factory=list)
+    counts_files: list[AnalyticsCountRowSpec] = Field(default_factory=list[AnalyticsCountRowSpec])
+    counts_skills: list[AnalyticsCountRowSpec] = Field(default_factory=list[AnalyticsCountRowSpec])
+    counts_agent_types: list[AnalyticsCountRowSpec] = Field(default_factory=list[AnalyticsCountRowSpec])
+    counts_nodes: list[AnalyticsCountRowSpec] = Field(default_factory=list[AnalyticsCountRowSpec])
+    spend_nodes: list[AnalyticsSpendRowSpec] = Field(default_factory=list[AnalyticsSpendRowSpec])
+    spend_graphs: list[AnalyticsSpendRowSpec] = Field(default_factory=list[AnalyticsSpendRowSpec])
 
 
 class ChunkCostSpec(BaseModel):
@@ -441,23 +441,23 @@ class ChunkSpec(BaseModel):
     graph_name: str | None = None
     # Both default to express no preference, pinned by
     # tests/test_pin_mock.py.
-    default_model: list[str] = Field(default_factory=list)
+    default_model: list[str] = Field(default_factory=list[str])
     default_effort: str | None = None
     # The chunk's default harness preference — the `default_model` shape.
-    default_harnesses: list[str] = Field(default_factory=list)
+    default_harnesses: list[str] = Field(default_factory=list[str])
     entry: str
     nodes: dict[str, NodeSpec]
-    work_refs: list[WorkRefSpec] = Field(default_factory=list)
-    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
+    work_refs: list[WorkRefSpec] = Field(default_factory=list[WorkRefSpec])
+    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list[GraphArtifactSpec])
     #: The chunk's own run identity, or ``None`` for a chunk that is not a routine run.
     garden_run: GardenRunSpec | None = None
-    garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
+    garden_findings: list[GardenFindingSpec] = Field(default_factory=list[GardenFindingSpec])
     #: The findings the chunk's own accepted, minted garden proposal answers
     #: — ``None`` for a chunk answering no such proposal.
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
     #: The chunk's own routine's open proposal bucket, seeded per chunk exactly like
     #: ``garden_findings`` — the real ``GardenProposal`` carries no chunk at all.
-    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
+    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list[GardenProposalSpec])
     #: The chunk's own canned counts/spend rows — served as-is, gated on
     #: ``garden_run`` exactly like the garden reads above.
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
@@ -485,17 +485,17 @@ class ChunkState(BaseModel):
     project_id: str = FIRST_PROJECT_ID
     graph_id: str
     graph_name: str | None = None
-    default_model: list[str] = Field(default_factory=list)
+    default_model: list[str] = Field(default_factory=list[str])
     default_effort: str | None = None
-    default_harnesses: list[str] = Field(default_factory=list)
+    default_harnesses: list[str] = Field(default_factory=list[str])
     entry: str
     nodes: dict[str, NodeSpec]
-    work_refs: list[WorkRefSpec] = Field(default_factory=list)
-    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list)
+    work_refs: list[WorkRefSpec] = Field(default_factory=list[WorkRefSpec])
+    graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list[GraphArtifactSpec])
     garden_run: GardenRunSpec | None = None
-    garden_findings: list[GardenFindingSpec] = Field(default_factory=list)
+    garden_findings: list[GardenFindingSpec] = Field(default_factory=list[GardenFindingSpec])
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
-    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list)
+    garden_proposals: list[GardenProposalSpec] = Field(default_factory=list[GardenProposalSpec])
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
     cost: ChunkCostSpec | None = None
     #: ``None`` until claimed; then the node the chunk is being worked at.
@@ -506,7 +506,7 @@ class ChunkState(BaseModel):
     claimed: bool = False
     route_runner_id: str | None = None
     route_workspace_id: str | None = None
-    route_environment_ids: list[str] = Field(default_factory=list)
+    route_environment_ids: list[str] = Field(default_factory=list[str])
     #: How many times the live route's capability token has been re-keyed,
     #: folded into the token string so a re-key never repeats.
     route_token_rekey_count: int = 0
@@ -520,7 +520,7 @@ class ChunkState(BaseModel):
     #: read-only via ``ChunkDetail.escalation``.
     escalation: EscalationState | None = None
     #: Every release the holding runner made of this chunk, oldest first.
-    releases: list[ReleaseRecord] = Field(default_factory=list)
+    releases: list[ReleaseRecord] = Field(default_factory=list[ReleaseRecord])
 
     def node(self, node_id: str) -> NodeSpec | None:
         return self.nodes.get(node_id)

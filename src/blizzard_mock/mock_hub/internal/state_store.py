@@ -215,5 +215,5 @@ class InMemoryHubState:
 
 # Typecheck-time Protocol/adapter conformance sentinel (bzh:dependency-inversion) — pyright
 # rejects the return if InMemoryHubState drifts from IHubState.
-def _conforms_hub_state(x: InMemoryHubState) -> IHubState:
+def _conforms_hub_state(x: InMemoryHubState) -> IHubState:  # pyright: ignore[reportUnusedFunction]
     return x
