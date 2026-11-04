@@ -7,11 +7,14 @@ app with uvicorn, bound to the winter service band.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 import click
 
 from blizzard_mock.forge.app import create_app
 from blizzard_mock.forge.config import ForgeConfig
-from blizzard_mock.serve import serve
+from blizzard_mock.serve import listening_file_option, serve
 
 
 @click.command()
@@ -23,14 +26,19 @@ from blizzard_mock.serve import serve
 )
 @click.option("--host", envvar="BZ_FORGE_HOST", default=None, help="Bind host.")
 @click.option("--port", envvar="BZ_FORGE_PORT", type=int, default=None, help="Bind port.")
-def main(repos_dir: str | None, host: str | None, port: int | None) -> None:
+@listening_file_option
+def main(repos_dir: str | None, host: str | None, port: int | None, listening_file: Path | None) -> None:
     """Serve the mock GitHub forge over a directory of bare git repos."""
     try:
         config = ForgeConfig.from_env(repos_dir=repos_dir, host=host, port=port)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
-    app = create_app(config)
-    serve(app, host=config.host, port=config.port)
+    serve(
+        lambda bound: create_app(replace(config, port=bound)),
+        host=config.host,
+        port=config.port,
+        listening_file=listening_file,
+    )
 
 
 if __name__ == "__main__":

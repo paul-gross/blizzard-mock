@@ -29,6 +29,7 @@ FastAPI app via uvicorn.
 |---------|------|-----|---------|
 | Bind host | `--host` | `BZ_MOCK_HUB_HOST` | `127.0.0.1` |
 | Bind port | `--port` | `BZ_MOCK_HUB_PORT` | `8421` |
+| Listening file | `--listening-file` | — | *(none)* — once serving, `http://<host>:<bound-port>` is written there atomically; with `--port 0` the bound port is the one the OS picked, and every URL the daemon emits carries it |
 | Host plane absent | `--no-host-plane` | `BZ_MOCK_HUB_NO_HOST_PLANE=1` | off |
 | IdP offered | `--offer-idp` | `BZ_MOCK_HUB_OFFER_IDP=1` | off |
 
