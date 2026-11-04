@@ -24,6 +24,11 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def default_title() -> str:
+    """The title a session created without one gets, as 2.1.4 names it."""
+    return "New session - " + time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".000Z"
+
+
 def new_id(prefix: str) -> str:
     """Sortable within and across service lifetimes: the time, a counter, then randomness."""
     with _COUNTER_LOCK:
@@ -82,4 +87,13 @@ def service_info(version: str, url: str, pid: int) -> dict[str, object]:
     }
 
 
-__all__ = ["DEFAULT_MODEL", "model_listing", "new_id", "now_ms", "route_error", "service_info", "usage"]
+__all__ = [
+    "DEFAULT_MODEL",
+    "default_title",
+    "model_listing",
+    "new_id",
+    "now_ms",
+    "route_error",
+    "service_info",
+    "usage",
+]

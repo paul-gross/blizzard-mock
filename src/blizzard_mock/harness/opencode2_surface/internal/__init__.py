@@ -1,2 +1,1 @@
-"""The I/O adapters: the registration, the detached service, its HTTP surface and turn engine, the takeover TUI,
-and the store migration."""
+"""The CLI-surface artifact's own I/O: the turns it answers with fixed behavior."""

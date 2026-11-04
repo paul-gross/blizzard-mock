@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from ..domain import records
 from ..levers import Lever
 from . import paths, registration
-from .engine import ConflictError, Engine, NotFoundError, restart_in_background
+from .sessions import ConflictError, Engine, NotFoundError, TurnRunner, restart_in_background
 
 START_WAIT_SECONDS = 15.0
 STOP_WAIT_SECONDS = 10.0
@@ -329,11 +329,12 @@ def _shaped(message: Json, levers: frozenset[Lever]) -> Json:
     return message
 
 
-def serve(env: Mapping[str, str], argv0: str, levers: frozenset[Lever], version: str) -> int:
-    """The service's own process: listen, register, resume what the last lifetime was running, and answer."""
+def serve(env: Mapping[str, str], argv0: str, levers: frozenset[Lever], version: str, runner: TurnRunner) -> int:
+    """The service's own process: listen, register, resume what the last lifetime was running, and answer, running
+    each turn through ``runner``."""
     path = paths.registration_path(env)
     log = paths.service_log_path(env)
-    engine = Engine(levers, paths.store_path(env), lambda: restart_in_background(argv0, log))
+    engine = Engine(levers, paths.store_path(env), lambda: restart_in_background(argv0, log), runner)
     interrupted = engine.load()
     server = _Server(engine, secrets.token_urlsafe(24), _version(version, levers), levers)
     registration_id = records.new_id("svc")
