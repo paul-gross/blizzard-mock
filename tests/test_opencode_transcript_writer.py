@@ -19,8 +19,10 @@ from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades._opencode_transcript import OpenCodeTranscriptWriter, document_path
 
 
-def _read(path: Path) -> dict:
-    return json.loads(path.read_text())
+def _read(path: Path) -> dict[str, Any]:
+    """The on-disk document: an untyped JSON tree, navigated by key."""
+    document: dict[str, Any] = json.loads(path.read_text())
+    return document
 
 
 def test_record_user_writes_the_root_document_with_a_matching_session_id(tmp_path: Path) -> None:
