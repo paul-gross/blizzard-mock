@@ -53,5 +53,5 @@ def _publish(path: Path, url: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     with os.fdopen(fd, "w") as fh:
-        fh.write(url)
+        fh.write(url + "\n")
     os.replace(tmp, path)

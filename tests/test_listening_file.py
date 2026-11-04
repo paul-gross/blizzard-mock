@@ -48,7 +48,7 @@ def _daemon(module: str, tmp_path: Path, name: str, *args: str) -> Iterator[str]
                 assert proc.poll() is None, f"{name} exited early ({proc.returncode}):\n{log_path.read_text()}"
                 assert time.monotonic() < deadline, f"{name} never published:\n{log_path.read_text()}"
                 time.sleep(0.05)
-            yield listening.read_text()
+            yield listening.read_text().strip()
         finally:
             proc.terminate()
             with contextlib.suppress(subprocess.TimeoutExpired):
