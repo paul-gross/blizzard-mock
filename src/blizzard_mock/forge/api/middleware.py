@@ -17,10 +17,13 @@ window and carries ``X-RateLimit-*``.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterable
+from typing import cast
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.types import ASGIApp
 
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
@@ -63,11 +66,17 @@ def _error(status: int, message: str, headers: dict[str, str] | None = None) -> 
     )
 
 
+async def _read_body(response: Response) -> bytes:
+    """The fully drained body of a response returned by ``call_next``, which is always a streaming response."""
+    stream = cast(AsyncIterable[bytes], cast(StreamingResponse, response).body_iterator)
+    return b"".join([chunk async for chunk in stream])
+
+
 class LeverMiddleware(BaseHTTPMiddleware):
     """Applies the request-scoped levers held in ``app.state.levers``."""
 
-    def __init__(self, app: object, levers: ILeverStore, rate: IRateLedger) -> None:
-        super().__init__(app)  # type: ignore[arg-type]
+    def __init__(self, app: ASGIApp, levers: ILeverStore, rate: IRateLedger) -> None:
+        super().__init__(app)
         self._levers = levers
         self._rate = rate
 
@@ -104,8 +113,8 @@ class LeverMiddleware(BaseHTTPMiddleware):
 class RateHeaderMiddleware(BaseHTTPMiddleware):
     """Conditional reads and the rate headers, over the ``/repos/`` surface only."""
 
-    def __init__(self, app: object, rate: IRateLedger) -> None:
-        super().__init__(app)  # type: ignore[arg-type]
+    def __init__(self, app: ASGIApp, rate: IRateLedger) -> None:
+        super().__init__(app)
         self._rate = rate
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -115,7 +124,7 @@ class RateHeaderMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         response = await call_next(request)
-        body = b"".join([chunk async for chunk in response.body_iterator])  # type: ignore[attr-defined]
+        body = await _read_body(response)
         headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
         bucket = _bucket(request)
 
@@ -141,7 +150,7 @@ class RateHeaderMiddleware(BaseHTTPMiddleware):
             }
             return JSONResponse(content=refusal, headers=_rate_headers(window, resource="graphql"))
         response = await call_next(request)
-        body = b"".join([chunk async for chunk in response.body_iterator])  # type: ignore[attr-defined]
+        body = await _read_body(response)
         headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
         headers.update(_rate_headers(self._rate.count(bucket), resource="graphql"))
         return Response(content=body, status_code=response.status_code, headers=headers)

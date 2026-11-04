@@ -39,8 +39,9 @@ def graphql(
     service: Annotated[ForgeService, Depends(get_service)],
 ) -> JSONResponse:
     query = str(payload.get("query") or "")
-    variables = payload.get("variables") or {}
-    owner, name = variables.get("owner"), variables.get("name")
+    variables: dict[str, Any] = payload.get("variables") or {}
+    owner: object = variables.get("owner")
+    name: object = variables.get("name")
     aliases = _ALIAS_RE.findall(query)
     if not isinstance(owner, str) or not isinstance(name, str) or not aliases:
         message = "unsupported query: expected repository(owner:, name:) with aliased issueOrPullRequest(number:)"

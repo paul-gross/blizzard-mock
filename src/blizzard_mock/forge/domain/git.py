@@ -25,13 +25,13 @@ class GitCommit:
     sha: str
     message: str
     author: GitAuthor
-    parents: list[str] = field(default_factory=list)
+    parents: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
 class GitCompareCommit:
     sha: str
-    parents: list[str] = field(default_factory=list)
+    parents: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)

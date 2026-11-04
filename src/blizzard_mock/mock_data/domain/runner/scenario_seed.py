@@ -64,8 +64,8 @@ class RunnerFleetScenario:
     """One composed runner-store mirror, split by write order: ``brake`` must land
     before the hub half's ``ready`` chunks, ``rows`` after it."""
 
-    rows: list[FactRow] = field(default_factory=list)
-    brake: list[FactRow] = field(default_factory=list)
+    rows: list[FactRow] = field(default_factory=list[FactRow])
+    brake: list[FactRow] = field(default_factory=list[FactRow])
 
 
 def _workdir(chunk_id: str) -> str:

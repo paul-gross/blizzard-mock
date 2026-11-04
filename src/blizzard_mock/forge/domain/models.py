@@ -91,7 +91,7 @@ class Issue(BaseModel):
     labels: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
-    comments: list[Comment] = Field(default_factory=list)
+    comments: list[Comment] = Field(default_factory=list[Comment])
 
 
 class Label(BaseModel):
@@ -128,7 +128,7 @@ class PullRequest(BaseModel):
     base: str
     created_at: datetime
     updated_at: datetime
-    comments: list[Comment] = Field(default_factory=list)
+    comments: list[Comment] = Field(default_factory=list[Comment])
     merged: bool = False
     merged_at: datetime | None = None
     merged_by: str | None = None

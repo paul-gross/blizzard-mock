@@ -27,7 +27,7 @@ class QuestionSeed:
     """One composed question: its minted id and the exact ``FactRow``\\ s to write."""
 
     question_id: str
-    rows: list[FactRow] = field(default_factory=list)
+    rows: list[FactRow] = field(default_factory=list[FactRow])
 
 
 def compose_question(

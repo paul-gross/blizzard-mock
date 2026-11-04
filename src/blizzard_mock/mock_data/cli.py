@@ -352,7 +352,7 @@ def _resolve_usage_defaults(
             resolved_epoch = (
                 resolved_epoch
                 if resolved_epoch is not None
-                else int(require_column(newest, "epoch", table="lease_facts"))  # type: ignore[arg-type]
+                else int(str(require_column(newest, "epoch", table="lease_facts")))
             )
             resolved_runner = (
                 resolved_runner
@@ -375,7 +375,7 @@ def _resolve_usage_defaults(
 def _next_artifact_seq(service: SeedService, chunk_id: str) -> int:
     """Read the chunk's next artifact sequence without burdening the composer."""
     existing = service.query("artifacts", {"chunk_id": chunk_id})
-    return max((int(require_column(row, "seq", table="artifacts")) for row in existing), default=0) + 1  # type: ignore[arg-type]
+    return max((int(str(require_column(row, "seq", table="artifacts"))) for row in existing), default=0) + 1  # type: ignore[arg-type]
 
 
 def _resolve_artifact_defaults(
@@ -418,7 +418,7 @@ def _resolve_artifact_defaults(
         leases = service.query("lease_facts", {"chunk_id": chunk_id})
         if leases:
             newest = max(leases, key=lambda row: str(require_column(row, "minted_at", table="lease_facts")))
-            resolved_epoch = int(require_column(newest, "epoch", table="lease_facts"))  # type: ignore[arg-type]
+            resolved_epoch = int(str(require_column(newest, "epoch", table="lease_facts")))
     resolved_epoch = resolved_epoch if resolved_epoch is not None else 1
     return resolved_node_id, resolved_node_name, resolved_epoch
 
