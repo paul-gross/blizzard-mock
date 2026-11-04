@@ -30,7 +30,7 @@ jobs:
           # Pinned to match mise.toml's [tools] uv version: `mise run lint`/`typecheck`
           # below resolve uv through mise's own shim, not this step's — an unpinned
           # "latest" here would drift from mise's pin inside the same job.
-          version: "0.11.21"
+          version: "0.13.6"
           enable-cache: true
           python-version: "3.12"
       - run: uv sync
@@ -56,7 +56,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           # Pinned to match mise.toml's [tools] uv version — see the quality job's comment.
-          version: "0.11.21"
+          version: "0.13.6"
           enable-cache: true
           python-version: "3.12"
       - run: uv sync
@@ -83,7 +83,7 @@ jobs:
           explicit-ref: ${{ inputs.blizzard-ref }}
       - uses: astral-sh/setup-uv@v6
         with:
-          version: "0.11.21"
+          version: "0.13.6"
           python-version: "3.12"
       - name: sync blizzard
         run: uv sync
