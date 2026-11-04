@@ -150,7 +150,9 @@ def _run_mock_opencode(cwd: Path, env: Mapping[str, str], *args: str) -> subproc
 
 
 @needs_blizzard
-def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """A fresh mint's actual stdout must parse cleanly through blizzard's own
     production parser, and its root session id must be server-assigned — the caller
     supplied no ``--session`` at all, exactly as the real fresh-session handshake
@@ -166,7 +168,9 @@ def test_mock_opencode_fresh_turn_parses_through_the_real_run_jsonl_parser(fence
 
 
 @needs_blizzard
-def test_mock_opencode_resume_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_resume_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """A resume never re-mints: it keeps the session id the caller learned off the fresh
     mint's own first record, and its stdout still parses cleanly through the real parser."""
     cwd, env = fenced_repo
@@ -186,7 +190,9 @@ def test_mock_opencode_resume_parses_through_the_real_run_jsonl_parser(fenced_re
 
 
 @needs_blizzard
-def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """A crashed turn's stdout still parses cleanly, carrying an explicit session error the
     real adapter's ``_session_error`` reads back — never a step-finish, since the turn never
     produced a usable completed step."""
@@ -201,7 +207,9 @@ def test_mock_opencode_error_turn_parses_through_the_real_run_jsonl_parser(fence
 
 
 @needs_blizzard
-def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """``permission_denial()`` stages a ``permission`` event whose stdout still parses
     cleanly through the real parser, carrying the denied permission's name and patterns."""
     cwd, env = fenced_repo
@@ -222,7 +230,9 @@ def test_mock_opencode_permission_denial_parses_through_the_real_run_jsonl_parse
 
 
 @needs_blizzard
-def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """``interrupt_tool()`` stages a ``tool_use`` event whose part's ``state.status`` is
     ``"error"`` — an interruption reads on OpenCode's wire exactly as a tool failure does,
     since there is no separate "interrupted" discriminator — and it still parses cleanly."""
@@ -248,7 +258,9 @@ def test_mock_opencode_interrupted_tool_parses_through_the_real_run_jsonl_parser
 
 
 @needs_blizzard
-def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """``malformed_record()`` stages a line the real parser genuinely rejects — proving
     the production rejection path is exercised against this mock, not only against
     blizzard's own hand-built fixtures."""
@@ -260,7 +272,9 @@ def test_mock_opencode_malformed_record_fails_the_real_run_jsonl_parser(fenced_r
 
 
 @needs_blizzard
-def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parser(fenced_repo) -> None:
+def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parser(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """``usage_limit_error()`` stages the captured OpenCode limit shape —
     still parseable by the real parser, carrying the 429 status and usage-limit phrasing
     the real runner adapter's own ``classify_usage_limit`` reads (proven directly by that
@@ -281,7 +295,9 @@ def test_mock_opencode_usage_limit_error_parses_through_the_real_run_jsonl_parse
 
 
 @needs_blizzard
-def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced_repo) -> None:
+def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """``permission_id`` is a non-default kwarg no prior test exercised — the staged
     event must carry the caller's id rather than always minting a fresh one."""
     cwd, env = fenced_repo
@@ -300,7 +316,7 @@ def test_mock_opencode_permission_denial_honors_an_explicit_permission_id(fenced
 
 
 @needs_blizzard
-def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo) -> None:
+def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """``call_id`` is a non-default kwarg no prior test exercised — the staged tool
     part must carry the caller's call id rather than always minting a fresh one."""
     cwd, env = fenced_repo
@@ -317,7 +333,7 @@ def test_mock_opencode_interrupted_tool_honors_an_explicit_call_id(fenced_repo) 
 
 
 @needs_blizzard
-def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> None:
+def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """An explicit ``line`` is a non-default kwarg no prior test exercised — a
     caller-chosen rejection shape (here, valid JSON missing a required field) must reach
     the wire verbatim, not just the default invalid-JSON line."""
@@ -330,7 +346,7 @@ def test_mock_opencode_malformed_record_honors_an_explicit_line(fenced_repo) -> 
     _assert_refused(_parse_through_blizzard(proc.stdout))
 
 
-def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo) -> None:
+def test_permission_denial_refuses_on_a_non_opencode_wire(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The misbehaviour-injection plane (``permission_denial``, ``interrupt_tool``,
     ``malformed_record``, ``usage_limit_error``) is OpenCode-only — a facade whose wire
     has no JSONL stream to carry it fails the turn clearly, not silently no-op's."""
