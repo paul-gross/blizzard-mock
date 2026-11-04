@@ -15,142 +15,31 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+import zipfile
 from pathlib import Path
-from typing import Protocol
 
 import pytest
 
+from blizzard_mock.harness.opencode2_core import emit as core_emit
+from blizzard_mock.harness.opencode2_core import levers as surface_levers
+from blizzard_mock.harness.opencode2_core.domain import rules
 from blizzard_mock.harness.opencode2_surface import _baked
 from blizzard_mock.harness.opencode2_surface import emit as surface_emit
-from blizzard_mock.harness.opencode2_surface import levers as surface_levers
-from blizzard_mock.harness.opencode2_surface.domain import rules, script, shell
+from blizzard_mock.harness.opencode2_surface.domain import script, shell
+from tests.opencode2_service import (
+    Starter,
+    artifact,
+    bare_env,
+    emit_cli,
+    objects,
+    output,
+    tool_parts,
+)
 
 _PACKAGE = Path(surface_emit.__file__).resolve().parent
+_CORE = Path(core_emit.__file__).resolve().parent
 _BLIZZARD = Path(os.environ.get("BLIZZARD_SOURCE") or Path(__file__).resolve().parents[2] / "blizzard")
 _PROOF_SCRIPT = _BLIZZARD / "src" / "blizzard" / "runner" / "harness" / "opencode_v2" / "compatibility" / "script.py"
-
-type Json = dict[str, object]
-
-
-def _emit_cli(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "blizzard_mock.harness.facades.opencode2", "emit", *args],
-        capture_output=True,
-        text=True,
-    )
-
-
-def _artifact(tmp_path: Path, *levers: str, version: str | None = None) -> Path:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    out = tmp_path / "opencode"
-    args = ["--out", str(out), *(arg for lever in levers for arg in ("--lever", lever))]
-    proc = _emit_cli(*args, *(["--version", version] if version else []))
-    assert proc.returncode == 0, proc.stderr
-    return out
-
-
-def _bare_env(home: Path) -> dict[str, str]:
-    return {
-        "PATH": "/usr/bin:/bin",
-        "HOME": str(home),
-        "XDG_STATE_HOME": str(home / ".local" / "state"),
-        "XDG_DATA_HOME": str(home / ".local" / "share"),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-        "XDG_CACHE_HOME": str(home / ".cache"),
-    }
-
-
-class _Service:
-    """One emitted artifact's service under an isolated home, stopped on teardown."""
-
-    def __init__(self, binary: Path, home: Path) -> None:
-        self.binary = binary
-        self.env = _bare_env(home)
-        self.registration_path = home / ".local" / "state" / "opencode" / "service.json"
-
-    def cli(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.binary), *args], env=self.env, capture_output=True, text=True, timeout=60)
-
-    def registration(self) -> Json:
-        return json.loads(self.registration_path.read_text())
-
-    def call(self, method: str, path: str, body: object | None = None, *, auth: bool = True) -> tuple[int, object]:
-        record = self.registration()
-        request = urllib.request.Request(
-            f"{record['url']}{path}", data=json.dumps(body).encode() if body is not None else None, method=method
-        )
-        if auth:
-            token = base64.b64encode(f"opencode:{record['password']}".encode()).decode()
-            request.add_header("authorization", f"Basic {token}")
-        request.add_header("content-type", "application/json")
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        try:
-            with opener.open(request, timeout=10) as response:
-                raw = response.read()
-                return response.status, json.loads(raw) if raw else None
-        except urllib.error.HTTPError as exc:
-            return exc.code, None
-
-    def data(self, method: str, path: str, body: object | None = None) -> object:
-        status, answer = self.call(method, path, body)
-        assert 200 <= status < 300, (method, path, status)
-        assert isinstance(answer, dict)
-        return answer["data"]
-
-    def open_session(self, session_id: str, directory: Path, rules: list[Json] | None = None) -> None:
-        self.data(
-            "POST",
-            "/api/session",
-            {"id": session_id, "location": {"directory": str(directory)}, "metadata": {}, "permissions": rules or []},
-        )
-
-    def settle(self, session_id: str, timeout: float = 30) -> list[Json]:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            active = self.data("GET", "/api/session/active")
-            assert isinstance(active, dict)
-            if session_id not in active:
-                messages = self.data("GET", f"/api/session/{session_id}/message")
-                assert isinstance(messages, list)
-                return messages
-            time.sleep(0.2)
-        raise AssertionError(f"{session_id} did not settle")
-
-
-class _Starter(Protocol):
-    def __call__(self, binary: Path, home: Path | None = None) -> _Service: ...
-
-
-@pytest.fixture
-def start_service(tmp_path: Path) -> Iterator[_Starter]:
-    started: list[_Service] = []
-
-    def start(binary: Path, home: Path | None = None) -> _Service:
-        service = _Service(binary, home or tmp_path / "home")
-        started.append(service)
-        return service
-
-    yield start
-    for service in started:
-        service.cli("service", "stop")
-
-
-def _objects(value: object) -> list[Json]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _tool_parts(messages: list[Json]) -> list[Json]:
-    return [part for message in messages for part in _objects(message.get("content")) if part.get("type") == "tool"]
-
-
-def _output(part: Json) -> str:
-    state = part["state"]
-    assert isinstance(state, dict)
-    content = state.get("content") or []
-    assert isinstance(content, list)
-    return "".join(str(item["text"]) for item in content if isinstance(item, dict))
-
 
 # --------------------------------------------------------------------------- #
 # `mock-opencode-2 emit`'s contract
@@ -159,7 +48,7 @@ def _output(part: Json) -> str:
 
 def test_emit_rejects_every_unknown_lever_and_writes_no_file(tmp_path: Path) -> None:
     out = tmp_path / "opencode"
-    proc = _emit_cli("--out", str(out), "--lever", "NOT_A_LEVER", "--lever", "ALSO_NOT", "--lever", "NO_PRICES")
+    proc = emit_cli("--out", str(out), "--lever", "NOT_A_LEVER", "--lever", "ALSO_NOT", "--lever", "NO_PRICES")
     assert proc.returncode == 2
     assert "ALSO_NOT, NOT_A_LEVER" in proc.stderr
     assert not out.exists()
@@ -168,14 +57,14 @@ def test_emit_rejects_every_unknown_lever_and_writes_no_file(tmp_path: Path) -> 
 def test_the_artifact_reports_its_baked_version_under_a_bare_system_python3(tmp_path: Path) -> None:
     for version, home in (("2.1.4", tmp_path / "a"), ("2.0.0", tmp_path / "b")):
         home.mkdir()
-        out = _artifact(home, version=None if version == "2.1.4" else version)
+        out = artifact(home, version=None if version == "2.1.4" else version)
         assert out.stat().st_mode & stat.S_IXUSR
-        proc = subprocess.run([str(out), "--version"], env=_bare_env(home), capture_output=True, text=True)
+        proc = subprocess.run([str(out), "--version"], env=bare_env(home), capture_output=True, text=True)
         assert (proc.returncode, proc.stdout) == (0, f"opencode v{version}\n")
 
 
 def test_the_artifact_refuses_a_surface_it_does_not_answer(tmp_path: Path) -> None:
-    proc = subprocess.run([str(_artifact(tmp_path)), "run", "hi"], env=_bare_env(tmp_path), capture_output=True)
+    proc = subprocess.run([str(artifact(tmp_path)), "run", "hi"], env=bare_env(tmp_path), capture_output=True)
     assert proc.returncode == 2
 
 
@@ -187,23 +76,34 @@ def test_baked_module_fields_match_emits_generated_template() -> None:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
         }
 
-    rendered = surface_emit._render_baked(frozenset({surface_levers.Lever.NO_PRICES}), "2.1.4")
+    rendered = core_emit.render_baked(frozenset({surface_levers.Lever.NO_PRICES}), "2.1.4")
     assert fields(Path(_baked.__file__).read_text()) == fields(rendered)
 
 
-def test_every_artifact_module_imports_only_the_standard_library() -> None:
-    for path in _PACKAGE.rglob("*.py"):
-        if path.name == "emit.py":
-            continue
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names = [node.module]
-            else:
+def test_every_artifact_module_imports_only_the_standard_library_and_its_two_packages() -> None:
+    for root in (_PACKAGE, _CORE):
+        for path in root.rglob("*.py"):
+            if path.name == "emit.py":
                 continue
-            for name in names:
-                assert name.split(".")[0] in sys.stdlib_module_names, f"{path.name} imports {name}"
+            depth = len(path.relative_to(root).parts)
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    names = [node.module]
+                elif isinstance(node, ast.ImportFrom) and node.level > depth:
+                    assert node.level == depth + 1 and (node.module or "").split(".")[0] == _CORE.name, path
+                    continue
+                else:
+                    continue
+                for name in names:
+                    assert name.split(".")[0] in sys.stdlib_module_names, f"{path.name} imports {name}"
+
+
+def test_the_surface_artifact_ships_nothing_of_the_engine_backed_mock(tmp_path: Path) -> None:
+    with zipfile.ZipFile(artifact(tmp_path)) as zipped:
+        packages = {name.split("/")[1] for name in zipped.namelist() if name.count("/") >= 2}
+    assert packages == {_CORE.name, _PACKAGE.name}
 
 
 def test_the_catalog_names_every_lever_once() -> None:
@@ -216,9 +116,9 @@ def test_the_catalog_names_every_lever_once() -> None:
 
 
 def test_service_start_registers_an_authenticated_loopback_service_and_stop_ends_it(
-    tmp_path: Path, start_service: _Starter
+    tmp_path: Path, start_service: Starter
 ) -> None:
-    service = start_service(_artifact(tmp_path))
+    service = start_service(artifact(tmp_path))
     assert service.cli("service", "start").returncode == 0
     record = service.registration()
     assert set(record) == {"id", "version", "url", "pid", "password"}
@@ -237,9 +137,9 @@ def test_service_start_registers_an_authenticated_loopback_service_and_stop_ends
 
 
 def test_a_turn_runs_the_fixed_shell_against_the_session_environment_and_spawns_a_child(
-    tmp_path: Path, start_service: _Starter
+    tmp_path: Path, start_service: Starter
 ) -> None:
-    service = start_service(_artifact(tmp_path))
+    service = start_service(artifact(tmp_path))
     service.cli("service", "start")
     service.open_session("ses_root", tmp_path)
     assert service.call("PUT", "/api/session/ses_root/environment", {"variables": {"BLZ_PROOF_ENV": "x1"}})[0] == 204
@@ -250,20 +150,20 @@ def test_a_turn_runs_the_fixed_shell_against_the_session_environment_and_spawns_
     )
     service.data("POST", "/api/session/ses_root/prompt", {"text": prompt})
     messages = service.settle("ses_root")
-    shell_part, spawn = _tool_parts(messages)
-    assert _output(shell_part) == "ROOT=x1\n"
+    shell_part, spawn = tool_parts(messages)
+    assert output(shell_part) == "ROOT=x1\n"
     children = service.data("GET", "/api/session?parentID=ses_root")
     assert isinstance(children, list) and len(children) == 1
     child = children[0]
     assert isinstance(child, dict) and child["parentID"] == "ses_root"
     assert isinstance(spawn["state"], dict) and spawn["state"]["metadata"]["sessionID"] == child["id"]
-    child_parts = _tool_parts(service.settle(str(child["id"])))
-    assert _output(child_parts[0]) == "CHILD=\n"
+    child_parts = tool_parts(service.settle(str(child["id"])))
+    assert output(child_parts[0]) == "CHILD=\n"
     assert messages[-1]["type"] == "idle" and messages[-1]["outcome"] == "succeeded"
 
 
-def test_a_service_restart_is_a_new_lifetime_that_keeps_the_sessions(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path))
+def test_a_service_restart_is_a_new_lifetime_that_keeps_the_sessions(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path))
     service.cli("service", "start")
     before = service.registration()
     service.open_session("ses_kept", tmp_path)
@@ -278,35 +178,35 @@ def test_a_service_restart_is_a_new_lifetime_that_keeps_the_sessions(tmp_path: P
 # --------------------------------------------------------------------------- #
 
 
-def test_never_registered_starts_nothing(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path, "NEVER_REGISTERED"))
+def test_never_registered_starts_nothing(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path, "NEVER_REGISTERED"))
     assert service.cli("service", "start").returncode == 0
     assert not service.registration_path.exists()
 
 
-def test_never_answers_registers_an_address_nothing_answers_at(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path, "NEVER_ANSWERS"))
+def test_never_answers_registers_an_address_nothing_answers_at(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path, "NEVER_ANSWERS"))
     assert service.cli("service", "start").returncode == 0
     with pytest.raises(urllib.error.URLError):
         service.call("GET", "/api/info")
 
 
-def test_version_mismatch_reports_the_next_patch_release(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path, "VERSION_MISMATCH"))
+def test_version_mismatch_reports_the_next_patch_release(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path, "VERSION_MISMATCH"))
     service.cli("service", "start")
     _, info = service.call("GET", "/api/info")
     assert isinstance(info, dict) and info["version"] == "2.1.5"
     assert service.cli("--version").stdout == "opencode v2.1.4\n"
 
 
-def test_no_prices_empties_every_listed_price(tmp_path: Path, start_service: _Starter) -> None:
-    priced = start_service(_artifact(tmp_path / "priced"), tmp_path / "priced-home")
-    bare = start_service(_artifact(tmp_path, "NO_PRICES"))
+def test_no_prices_empties_every_listed_price(tmp_path: Path, start_service: Starter) -> None:
+    priced = start_service(artifact(tmp_path / "priced"), tmp_path / "priced-home")
+    bare = start_service(artifact(tmp_path, "NO_PRICES"))
     for service in (priced, bare):
         service.cli("service", "start")
     listed = {service: service.data("GET", "/api/model") for service in (priced, bare)}
-    assert all(m["cost"] for m in _objects(listed[priced]))
-    assert all(m["cost"] == [] for m in _objects(listed[bare]))
+    assert all(m["cost"] for m in objects(listed[priced]))
+    assert all(m["cost"] == [] for m in objects(listed[bare]))
 
 
 @pytest.mark.parametrize(
@@ -320,9 +220,9 @@ def test_no_prices_empties_every_listed_price(tmp_path: Path, start_service: _St
     ],
 )
 def test_shape_levers_distort_the_message_list(
-    tmp_path: Path, start_service: _Starter, lever: str, observed: object
+    tmp_path: Path, start_service: Starter, lever: str, observed: object
 ) -> None:
-    service = start_service(_artifact(tmp_path, lever))
+    service = start_service(artifact(tmp_path, lever))
     service.cli("service", "start")
     service.open_session("ses_shape", tmp_path)
     service.data("POST", "/api/session/ses_shape/prompt", {"text": "Use the shell tool exactly once to run `echo A`."})
@@ -332,8 +232,8 @@ def test_shape_levers_distort_the_message_list(
     assert callable(observed) and observed(service.data("GET", "/api/session/ses_shape/message"))
 
 
-def test_events_dropped_closes_the_stream_at_once(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path, "EVENTS_DROPPED"))
+def test_events_dropped_closes_the_stream_at_once(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path, "EVENTS_DROPPED"))
     service.cli("service", "start")
     record = service.registration()
     request = urllib.request.Request(f"{record['url']}/api/event")
@@ -343,8 +243,8 @@ def test_events_dropped_closes_the_stream_at_once(tmp_path: Path, start_service:
         assert response.read() == b""
 
 
-def test_interrupt_ignored_answers_interrupted_and_the_turn_runs_on(tmp_path: Path, start_service: _Starter) -> None:
-    service = start_service(_artifact(tmp_path, "INTERRUPT_IGNORED"))
+def test_interrupt_ignored_answers_interrupted_and_the_turn_runs_on(tmp_path: Path, start_service: Starter) -> None:
+    service = start_service(artifact(tmp_path, "INTERRUPT_IGNORED"))
     service.cli("service", "start")
     service.open_session("ses_busy", tmp_path)
     service.data("POST", "/api/session/ses_busy/prompt", {"text": "Use the shell tool exactly once to run `sleep 3`."})
@@ -355,9 +255,9 @@ def test_interrupt_ignored_answers_interrupted_and_the_turn_runs_on(tmp_path: Pa
 
 
 def test_restarts_mid_turn_replaces_the_service_once_while_its_first_shell_tool_runs(
-    tmp_path: Path, start_service: _Starter
+    tmp_path: Path, start_service: Starter
 ) -> None:
-    service = start_service(_artifact(tmp_path, "RESTARTS_MID_TURN"))
+    service = start_service(artifact(tmp_path, "RESTARTS_MID_TURN"))
     service.cli("service", "start")
     first = service.registration()
     service.open_session("ses_restart", tmp_path)

@@ -1,4 +1,4 @@
-"""The service-level lever vocabulary a ``mock-opencode-2 emit`` artifact bakes in, immutable once emitted."""
+"""The service-level lever vocabulary an emitted OpenCode 2 artifact bakes in, immutable once emitted."""
 
 from __future__ import annotations
 

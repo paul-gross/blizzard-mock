@@ -6,7 +6,7 @@ caller's validated set into the staged package before zipping it."""
 
 from __future__ import annotations
 
-from .levers import Lever
+from ..opencode2_core.levers import Lever
 
 LEVERS: frozenset[Lever] = frozenset()
 VERSION: str = "2.1.4"

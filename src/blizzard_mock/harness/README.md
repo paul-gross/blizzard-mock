@@ -147,9 +147,19 @@ and how a settings document's hook commands are executed* — see "Hook executio
   surface lives regardless of implementation strategy — an exec-engine facade
   here, a baked out-of-process CLI artifact there — not because it shares the
   engine's approach. See "OpenCode CLI-surface mode" below.
+- `opencode2_core/` — what OpenCode 2's two artifacts share, and nothing that
+  executes a prompt: the managed service and its `/api/*` surface, the sessions
+  and the operations a turn is built from, the permission rules, the
+  corpus-shaped records, the service-level levers, the takeover TUI, the store
+  migration, and `emit.py`, which bakes one artifact. It shares no code with
+  `opencode_surface/` or the exec engine.
 - `opencode2_surface/` — OpenCode 2's CLI-surface artifact, `mock-opencode-2
-  emit`, sharing no code with `opencode_surface/` or the engine. See "OpenCode 2
-  CLI-surface mode" below.
+  emit`: `opencode2_core/` with a turn runner that answers a prompt's plan. See
+  "OpenCode 2 CLI-surface mode" below.
+- `opencode2_engine/` — OpenCode 2's engine-backed mock service,
+  `mock-opencode-2 emit-engine`: `opencode2_core/` with a turn runner that runs
+  each turn's prompt as a script in a child process. See "OpenCode 2
+  engine-backed mode" below.
 
 ## Conversation transcripts
 
@@ -416,7 +426,12 @@ stdlib-only fake that the 2.x compatibility diagnostic in `blizzard`
 against in place of a real OpenCode 2. It shares no code with
 `opencode_surface/` — the two majors' surfaces have nothing in common — and
 holds to the same rules as that package: stdlib-only, immutable once emitted,
-never installed, never on `PATH`.
+never installed, never on `PATH`. The artifact is `opencode2_core/` and
+`opencode2_surface/` zipped side by side; `opencode2_engine/` is never in it.
+Everything below but the turns is `opencode2_core/`'s — the surface, the
+managed service, the sessions, the rules, the levers, and the takeover TUI —
+and the engine-backed mock shares it; `opencode2_surface/` owns only the turns,
+`domain/script.py`'s plan and `domain/shell.py`'s fake shell.
 
 - **The contract:** `mock-opencode-2 emit --out <path> [--version <v>]
   [--lever NAME]...`. `--version` defaults to `2.1.4`. The whole lever set is
@@ -443,19 +458,100 @@ never installed, never on `PATH`.
   against the session's environment and directory. Nothing reaches a real
   shell. A `sleep` holds a real stand-in process, capped at a few seconds, so
   the tool's pid can be seen and an interrupt can end it. Permission rules
-  follow 2.1.4 (`domain/rules.py`):
+  follow 2.1.4 (`opencode2_core/domain/rules.py`):
   - the last matching rule wins;
   - a tool whose last matching rule denies every resource is withheld from the model;
   - `ask` raises a request that holds the turn until it is answered.
 
   A subagent call runs as a child session, and a background child's finish
   wakes its root through the root's inbox.
-- **Levers are service-level only:** `levers.py`'s `CATALOG` is the one prose
-  home for each lever. Turn-level failures belong to the engine-backed mock,
-  not this artifact.
+- **Levers are service-level only:** `opencode2_core/levers.py`'s `CATALOG` is
+  the one prose home for each lever, and both OpenCode 2 artifacts bake the
+  same roster. Turn-level failures belong to the engine-backed mock's script
+  helpers, not this artifact.
 - **Held to blizzard's prompts:** a `needs_blizzard` test plans every prompt in
   blizzard's `opencode_v2/compatibility/script.py` and checks each yields the
   tool calls and reply the proof expects.
+
+## OpenCode 2 engine-backed mode
+
+`mock-opencode-2 emit-engine` writes OpenCode 2's engine-backed mock service:
+the managed service the CLI-surface artifact answers as, with the same
+registration, `/api/*` surface, rules, records, and levers, but a turn's prompt
+*is* its program. It is what blizzard's OpenCode 2 driver and runner are tested
+against in place of a real service and a real token.
+
+- **The contract:** `mock-opencode-2 emit-engine --out <path> [--version <v>]
+  [--lever NAME]...`, validated as `emit` is. The artifact is `opencode2_core/`
+  and `opencode2_engine/` zipped side by side, stdlib-only, run under a bare
+  system `python3`.
+- **A turn is a child process.** Each turn's prompt runs as a Python script
+  (whole-message: every line is the program) in a process of its own, started
+  by the artifact's internal `turn` verb in the session's directory, under the
+  session's environment (or the service's, for a session with none, as every
+  child session is). The script talks to the service over a pipe, one JSON
+  object per line each way: every text and reasoning part it writes, each
+  step's usage, and every tool call, which the service judges before the
+  script may run it. The pipe is moved off the script's stdout before it runs,
+  so nothing it prints can forge a message.
+- **The turn's end.** A script that runs out ends its turn `succeeded`; one that
+  raises fails it, the error naming what raised; a failure helper fails it with
+  its provider error, recorded on the step it ended in and on the idle. An
+  interrupt ends the script's process group, and with it every command the
+  script started; a steer ends the script at its next tool call or step and
+  runs as the turn's next script. A restarted service runs the interrupted
+  turn's script again, `resumed()` true.
+- **Permission rules are enforced, not recorded.** A call a rule denies by
+  pattern fails with `permission.rejected` and the script carries on with the
+  refusal; a tool whose last matching rule denies every resource is withheld,
+  so no call is made; an `ask` raises a permission request and holds the call
+  until it is answered, an `always` reply saving its pattern as an allow rule.
+- **Children run their own scripts.** `subagent(script)` starts a `general`
+  child session whose turn runs `script` in a child process of its own. A
+  background child that outlives its root's turn wakes the root through its
+  inbox, to run the `wake` script the call named. That script lives only in
+  the running service's memory: a child that finishes after a restart wakes
+  its root to an empty step, and a restart during a wake turn does not resume
+  it.
+- **Usage is scripted.** `usage(...)` sets the current step's tokens and cost;
+  a step without it gets the same generated figures the CLI-surface artifact
+  reports.
+- **Fenced.** Executing caller-supplied code is the feature, so a turn's script
+  runs only under the exec engine's two-factor fence (below): `BLIZZARD_MOCK_HARNESS_FENCE=1`
+  in the environment the script would run under, and a
+  `.blizzard-mock-harness-fence` marker in the session's directory or above.
+  A turn outside the fence fails without running anything.
+- **Levers are service-level; turn-level failures are helpers.** The service
+  bakes the same lever roster as the CLI-surface artifact. Provider refusal,
+  usage limits, overload, an unknown model or variant, permission and form
+  requests, and a child that wakes its root are script helpers, below.
+- **Held to the corpus:** `tests/test_opencode2_corpus_conformance.py`
+  (`needs_blizzard`) drives both OpenCode 2 artifacts and holds every session,
+  message, part, tool state, event, model, permission request, form, and error
+  they answer with to the committed 2.1.4 corpus's samples of its kind. The
+  keys the mock does not mint are declared there, each with why.
+
+The helpers bound into a turn script's namespace, in summary —
+`opencode2_engine/turn/helpers.py` owns their exact signatures and defaults:
+
+| Helper | Effect |
+|--------|--------|
+| `text(content)` / `reasoning(content)` | Add a text or reasoning part to the current step; the reply is the last step's text. |
+| `usage(input=, output=, reasoning=, cache_read=, cache_write=, cost=)` | Set the current step's tokens and cost. |
+| `step()` | End the current step, finished `tool-calls`, and start the next. |
+| `shell(command, timeout=None) -> ToolResult` | Run `command` under `/bin/sh` once the rules allow it. |
+| `read(path) -> ToolResult` | Read a file once the rules allow it. |
+| `tool(name, tool_input=None, resource="*", output="ok") -> ToolResult` | Record a call of any other tool — an MCP tool, say — once the rules allow it. |
+| `permission_request(action, resource) -> ToolResult` | Call `action` through a permission request, whatever the rules would allow. |
+| `subagent(script, background=False, description="", wake=None) -> ToolResult` | Run `script` in a child session; a background child's finish runs `wake` in this session. |
+| `form(title, fields=None)` | Raise a form and hold the turn until it is cancelled; returns the form as listed. |
+| `provider_refusal()` / `usage_limit(retry_after_ms, kind=)` / `overload()` | End the turn with that provider error. |
+| `unknown_model()` / `unknown_variant()` | End the turn as the session's model or variant not routing. |
+| `hang()` | Hold the turn until it is interrupted. |
+| `resumed()` / `wake_result()` / `session_id()` / `model()` | Read the turn: a restart's resume, the waking child's text, the session, its model. |
+
+A `ToolResult`'s `status` is `completed`, `failed`, `refused`, or `withheld`;
+`output`, `exit_code`, and a subagent's child `session` ride along.
 
 ## The fence
 
@@ -464,7 +560,11 @@ three facades. The OpenCode CLI-surface mode ("OpenCode CLI-surface mode"
 above) never executes caller-supplied code, so it imports none of this and
 runs with no `BLIZZARD_MOCK_HARNESS_FENCE` env var and no fence marker file;
 what gates it instead is that an emitted artifact is only ever written to a
-caller-named path, never installed, never on `PATH`.
+caller-named path, never installed, never on `PATH`. OpenCode 2's CLI-surface
+artifact is gated the same way. OpenCode 2's engine-backed mock does execute
+caller-supplied code, so it holds each turn's script to the same two factors,
+checked by its own stdlib-only copy (`opencode2_engine/domain/fence.py`, its
+constants pinned equal to the engine's by a test).
 
 Arbitrary code execution is the feature, so the engine refuses to run unless
 **both** factors mark the environment as test scaffolding — it can never pass as
@@ -542,7 +642,7 @@ Each facade registers a `[project.scripts]` binary:
 | `mock-claude-code` | `facades.claude_code:main` | `-p [--output-format json] [--session-id <id>] [--resume <id>] [--settings <path>] [--permission-mode <mode>] [--model <name>] [--effort <level>] "<script>"`; single `{"type":"result", …}` JSON envelope. `--permission-mode` is accepted but inert. Also `--version` — intercepted before argparse, prints the pinned `2.1.278 (Claude Code)` and exits 0, the runner's health probe's own shape. |
 | `mock-codex` | `facades.codex:main` | `exec [--json] [resume <id>] "<script>"`; JSONL event stream, self-assigned session. Also `app-server` — a JSON-RPC-over-stdio double for `codex app-server`'s `initialize`/`account/read` exchange, reading and rotating `$CODEX_HOME/auth.json`; unfenced, and runs no behavior script. |
 | `mock-opencode` | `facades.opencode:main` | `run [--session <id>] [--model <name>] [--variant <v>] [--auto] "<script>"`; JSONL event stream (`step_start`/`text`/`step_finish`, or `error`), server-assigned session on a fresh mint. A bare `--session <id>` with no `run` and no script is the interactive-takeover shape — answered without driving the engine. Also `emit --out <path> [--lever NAME]...` — see "OpenCode CLI-surface mode" above. |
-| `mock-opencode-2` | `facades.opencode2:main` | `emit --out <path> [--version <v>] [--lever NAME]...` only — see "OpenCode 2 CLI-surface mode" above. |
+| `mock-opencode-2` | `facades.opencode2:main` | `emit` and `emit-engine`, each `--out <path> [--version <v>] [--lever NAME]...` — see "OpenCode 2 CLI-surface mode" and "OpenCode 2 engine-backed mode" above. |
 
 Tests: `tests/test_harness_smoke.py` (fence, verdict, real commit, ask→resume
 state, crash, hang, the `<behavior-script>` tag's three cases — tagged, untagged
@@ -558,6 +658,12 @@ reachable, and `run`'s output staying byte-identical to before `emit` existed.
 `tests/test_opencode2_cli_surface.py` covers OpenCode 2's artifact: the emit contract,
 stdlib-only modules, the registered service and its auth, a turn with a child, a
 restart, every lever, and the prompt plans against blizzard's proof prompts.
+`tests/test_opencode2_engine.py` covers the engine-backed mock: the emit
+contract, the fence, a script's steps, usage, process, directory, and
+environment, enforced rules, interrupt, steer, forms, child sessions, every
+failure helper, the levers it acts on, and takeover.
+`tests/test_opencode2_corpus_conformance.py` holds both OpenCode 2 artifacts to
+the committed 2.1.4 corpus.
 `tests/test_codex_app_server.py` covers `app-server` instead: the id-matched
 response with an interleaved notification, a plain read, a refreshing
 rotation's atomic rewrite and audit log, a missing credential file, and two

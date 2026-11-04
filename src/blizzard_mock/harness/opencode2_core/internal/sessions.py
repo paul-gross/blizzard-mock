@@ -1,9 +1,7 @@
-"""The fake service's sessions and the turns they run, one worker thread per running session.
-
-A turn answers its prompt's plan (``domain.script``) with fixed behavior: shell calls run the fake shell's grammar
-against the session's environment and directory, a ``sleep`` holds a real stand-in process so the tool's pid can be
-seen and stopped, rules are enforced as OpenCode 2.1.4 enforces them, and a subagent runs as a child session. Sessions
-and messages persist across service lifetimes; a session's environment does not, as in 2.1.4."""
+"""The fake service's sessions, one worker thread per running session, and the operations a turn is built from:
+assistant steps, tool parts judged by the session's rules, permission requests, forms, child sessions, and the idle
+that ends a turn. What a turn does belongs to the :class:`TurnRunner` the service is given. Sessions and messages
+persist across service lifetimes; a session's environment does not, as in 2.1.4."""
 
 from __future__ import annotations
 
@@ -19,16 +17,14 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
-from ..domain import records, rules, script, shell
+from ..domain import records, rules
 from ..levers import Lever
 
-#: The longest a fake ``sleep`` holds its tool; long enough to be seen running, short enough for a test tier.
-TOOL_SECONDS_CAP = 6.0
 #: The pause before each step, so a running turn is observable between polls.
 STEP_SECONDS = 0.3
-#: How long a parent waits after its child was interrupted before it carries on, so an interrupt of the parent
-#: issued right after the child's still lands mid-turn.
+#: How long a parent holds after its child's interrupt, so an interrupt of the parent sent next still lands mid-turn.
 AFTER_CHILD_INTERRUPT_SECONDS = 1.5
 
 type Json = dict[str, object]
@@ -47,6 +43,12 @@ class _Ask:
     request: Json
     answered: threading.Event = field(default_factory=threading.Event)
     decision: str | None = None
+
+
+@dataclass
+class _Form:
+    record: Json
+    settled: threading.Event = field(default_factory=threading.Event)
 
 
 @dataclass
@@ -70,7 +72,7 @@ class Session:
     pending: deque[tuple[str, str]] = field(default_factory=deque[tuple[str, str]])
     inbox: list[Json] = field(default_factory=list[Json])
     asks: dict[str, _Ask] = field(default_factory=dict[str, _Ask])
-    forms: dict[str, Json] = field(default_factory=dict[str, Json])
+    forms: dict[str, _Form] = field(default_factory=dict[str, _Form])
     cancel: threading.Event = field(default_factory=threading.Event)
     holder: subprocess.Popen[bytes] | None = None
 
@@ -79,16 +81,20 @@ class Session:
 
     def record(self) -> Json:
         totals = {"input": 0, "output": 0, "reasoning": 0}
+        cache = {"read": 0, "write": 0}
         cost = 0.0
         for message in self.messages:
             used = message.get("tokens")
             if message.get("type") in {"assistant", "compaction"} and isinstance(used, dict):
                 for key in totals:
-                    count = used.get(key)
-                    totals[key] += count if isinstance(count, int) else 0
+                    totals[key] += _count(used.get(key))
+                cached = used.get("cache")
+                if isinstance(cached, dict):
+                    for key in cache:
+                        cache[key] += _count(cached.get(key))
                 spent = message.get("cost")
                 cost += spent if isinstance(spent, int | float) else 0
-        tokens: Json = {**totals, "cache": {"read": 0, "write": 0}}
+        tokens: Json = {**totals, "cache": cache}
         timing: Json = {"created": self.created, "updated": self.updated}
         if self.idle_at is not None:
             timing["idle"] = self.idle_at
@@ -121,15 +127,31 @@ class Session:
         }
 
 
+class TurnRunner(Protocol):
+    """What a turn does. Each call ends the turn it was handed — through :meth:`Engine.idle`, directly or by way of
+    :meth:`Engine.interrupted` — before it returns."""
+
+    def run(self, engine: Engine, session: Session, prompt: str) -> None:
+        """Run ``prompt`` as the session's turn; also how a restarted service resumes the turn it was running."""
+        ...
+
+    def wake(self, engine: Engine, session: Session, child: Session) -> None:
+        """Run the turn a background ``child``'s finish wakes its root for, its result already delivered."""
+        ...
+
+
 class Engine:
-    def __init__(self, levers: frozenset[Lever], store: Path, restart: Callable[[], None]) -> None:
+    def __init__(self, levers: frozenset[Lever], store: Path, restart: Callable[[], None], runner: TurnRunner) -> None:
         self.levers = levers
         self._store = store
         self._restart = restart
+        self._runner = runner
         self.lock = threading.RLock()
         self.sessions: dict[str, Session] = {}
         self._subscribers: list[queue.Queue[Json]] = []
         self._seq = 0
+        #: Each tool part's assistant step, by part id, so its events can name the step.
+        self._owners: dict[str, str] = {}
         self._restarted_by_lever = False
         self._halted = False
 
@@ -189,11 +211,11 @@ class Engine:
             threading.Thread(target=self._resume_worker, args=(session,), daemon=True).start()
 
     def halt(self) -> None:
-        """Stop every stand-in process and persist the state as it is, running turns included."""
+        """Stop every turn's processes and persist the state as it is, running turns included."""
         with self.lock:
             self._halted = True
             for session in self.sessions.values():
-                _kill(session.holder)
+                kill(session.holder)
             self.save()
 
     # -- events -----------------------------------------------------------------------------------------------------
@@ -208,17 +230,30 @@ class Engine:
         with self.lock, suppress(ValueError):
             self._subscribers.remove(subscriber)
 
-    def publish(self, kind: str, session: Session, **data: object) -> None:
+    def publish(
+        self,
+        kind: str,
+        session: Session,
+        data: Json | None = None,
+        *,
+        durable: bool = True,
+        located: bool = True,
+        **fields: object,
+    ) -> None:
+        """Send one event to every subscriber, enveloped as 2.1.4 envelopes ``kind``: ``durable`` events carry their
+        place in the session's log, ``located`` ones the session's directory."""
         with self.lock:
-            self._seq += 1
             event: Json = {
                 "id": records.new_id("evt"),
                 "type": kind,
                 "created": records.now_ms(),
-                "data": {"sessionID": session.id, **data},
-                "location": {"directory": session.directory},
-                "durable": {"aggregateID": session.id, "seq": self._seq, "version": 1},
+                "data": {"sessionID": session.id, **(data or {}), **fields},
             }
+            if located:
+                event["location"] = {"directory": session.directory}
+            if durable:
+                self._seq += 1
+                event["durable"] = {"aggregateID": session.id, "seq": self._seq, "version": 1}
             for subscriber in self._subscribers:
                 subscriber.put(event)
 
@@ -244,13 +279,14 @@ class Engine:
                 metadata=_object(body.get("metadata")),
                 permissions=_objects(body.get("permissions")),
                 model=model if isinstance(model, dict) else None,
-                title=str(body["title"]) if body.get("title") is not None else None,
+                title=str(body["title"]) if body.get("title") is not None else records.default_title(),
                 agent=str(body["agent"]) if body.get("agent") is not None else None,
                 parent_id=str(body["parentID"]) if body.get("parentID") else None,
             )
             self.sessions[session_id] = session
             self.save()
-        self.publish("session.created", session)
+        created = {k: v for k, v in session.record().items() if k not in {"id", "time", "tokens", "cost", "outcome"}}
+        self.publish("session.created", session, created)
         return session
 
     def update(self, session_id: str, body: Json) -> None:
@@ -357,7 +393,7 @@ class Engine:
 
     def forms(self, session_id: str) -> list[Json]:
         with self.lock:
-            return list(self.get(session_id).forms.values())
+            return [form.record for form in self.get(session_id).forms.values()]
 
     def create_form(self, session_id: str, body: Json) -> Json:
         with self.lock:
@@ -368,15 +404,337 @@ class Engine:
                 "title": body.get("title"),
                 "fields": body.get("fields") or [],
             }
-            session.forms[str(form["id"])] = form
+            session.forms[str(form["id"])] = _Form(form)
             return form
 
     def cancel_form(self, session_id: str, form_id: str) -> None:
         with self.lock:
-            if self.get(session_id).forms.pop(form_id, None) is None:
+            form = self.get(session_id).forms.pop(form_id, None)
+            if form is None:
                 raise NotFoundError(form_id)
+            form.settled.set()
 
-    # -- turns ------------------------------------------------------------------------------------------------------
+    # -- the building blocks of a turn ------------------------------------------------------------------------------
+
+    def wait(self, session: Session, seconds: float) -> bool:
+        """Sleep ``seconds`` unless the session is interrupted first; ``True`` when it was."""
+        return session.cancel.wait(seconds)
+
+    def hold(self, session: Session, process: subprocess.Popen[bytes] | None) -> None:
+        """Make ``process`` (its whole group) what an interrupt of ``session`` ends; ``None`` releases it."""
+        with self.lock:
+            session.holder = process
+
+    def open_step(self, session: Session) -> Json:
+        """Start one assistant step — a message of its own, as 2.1.4 records each model call."""
+        assistant: Json = {
+            "id": records.new_id("msg"),
+            "type": "assistant",
+            "agent": session.agent or "build",
+            "model": session.effective_model(),
+            "content": [],
+            "time": {"created": records.now_ms()},
+            "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+            "cost": 0,
+        }
+        with self.lock:
+            session.messages.append(assistant)
+            self.save()
+        self.publish(
+            "session.step.started",
+            session,
+            assistantMessageID=assistant["id"],
+            agent=assistant["agent"],
+            model=assistant["model"],
+            started=_time(assistant)["created"],
+        )
+        return assistant
+
+    def add_part(self, session: Session, assistant: Json, part: Json) -> None:
+        with self.lock:
+            _content(assistant).append(part)
+            self.save()
+
+    def close_step(
+        self, session: Session, assistant: Json, *, tokens: Json, cost: float, finish: str, text: str = ""
+    ) -> None:
+        """End one assistant step with its usage; ``finish`` is ``stop`` for a turn's last, ``tool-calls`` otherwise."""
+        with self.lock:
+            if text:
+                _content(assistant).append({"type": "text", "text": text})
+            assistant.update({"tokens": tokens, "cost": cost, "finish": finish})
+            _time(assistant).update({"completed": records.now_ms()})
+            session.updated = records.now_ms()
+            self.save()
+        if text:
+            self.text_ended(session, assistant, text)
+        self.publish("session.usage.updated", session, durable=False, located=False, tokens=tokens, cost=cost)
+        self._step_ended(session, assistant)
+
+    def text_ended(self, session: Session, assistant: Json, text: str) -> None:
+        """Publish a text part written to ``assistant``, numbered among its text parts."""
+        ordinal = sum(1 for part in _content(assistant) if part.get("type") == "text") - 1
+        self.publish("session.text.ended", session, assistantMessageID=assistant["id"], ordinal=ordinal, text=text)
+
+    def _step_ended(self, session: Session, assistant: Json) -> None:
+        self.publish(
+            "session.step.ended",
+            session,
+            assistantMessageID=assistant["id"],
+            cost=assistant.get("cost", 0),
+            files=[],
+            finish=assistant.get("finish"),
+            tokens=assistant.get("tokens"),
+        )
+
+    def user_message(self, session: Session, text: str) -> None:
+        with self.lock:
+            session.current = text
+            session.cancel.clear()
+            session.messages.append({"id": records.new_id("msg"), "type": "user", "text": text, **_now()})
+            self.save()
+
+    def take_steer(self, session: Session) -> str | None:
+        """The first steer waiting on ``session``, taken off its queue, or ``None``."""
+        with self.lock:
+            for index, (kind, text) in enumerate(session.pending):
+                if kind == "steer":
+                    del session.pending[index]
+                    return text
+        return None
+
+    def open_tool(self, session: Session, assistant: Json, name: str, tool_input: Json) -> Json | None:
+        """Add a running tool part to ``assistant``; ``None`` when the session's rules withhold ``name`` from the model,
+        so the call is never made."""
+        if rules.withheld(session.permissions, name):
+            return None
+        part: Json = {
+            "id": records.new_id("call"),
+            "type": "tool",
+            "name": name,
+            "executed": False,
+            "state": {"status": "running", "input": tool_input},
+            "time": {"created": records.now_ms()},
+        }
+        self.add_part(session, assistant, part)
+        with self.lock:
+            self._owners[str(part["id"])] = str(assistant["id"])
+        self.publish(
+            "session.tool.called",
+            session,
+            assistantMessageID=assistant["id"],
+            executed=False,
+            id=part["id"],
+            input=tool_input,
+        )
+        return part
+
+    def judge(
+        self, session: Session, assistant: Json, part: Json, action: str, resource: str, *, ask: bool = False
+    ) -> str | None:
+        """Hold a tool call to the session's rules: ``allow``, or ``deny`` with the part already failed as refused, or
+        ``None`` when the session was interrupted while a permission request held it. An ``ask`` — the rules', or one
+        ``ask`` forces on a call they would allow — raises a request and waits for its reply; an ``always`` reply
+        saves the request's pattern as an allow rule."""
+        effect = rules.evaluate(session.permissions, action, resource)
+        if ask and effect == "allow":
+            effect = "ask"
+        if effect == "deny":
+            self.fail_tool(session, part, "permission.rejected", f"Permission denied: {action}")
+            return "deny"
+        if effect != "ask":
+            return "allow"
+        source: Json = {"type": "tool", "id": part["id"], "messageID": assistant["id"]}
+        decision = self.request_permission(session, action, resource, source, holding=part)
+        if decision is None:
+            return None
+        if decision == "reject":
+            self.fail_tool(session, part, "permission.rejected", f"Permission rejected: {action}")
+            return "deny"
+        if decision == "always":
+            with self.lock:
+                session.permissions.append(
+                    {"action": action, "resource": rules.save_pattern(resource), "effect": "allow"}
+                )
+        return "allow"
+
+    def request_permission(
+        self, session: Session, action: str, resource: str, source: Json, *, holding: Json | None = None
+    ) -> str | None:
+        """Raise a permission request and wait for its reply: ``once``, ``always``, or ``reject``; ``None`` when the
+        session was interrupted first. ``holding`` is the tool part the request pends."""
+        ask = _Ask(
+            {
+                "id": records.new_id("per"),
+                "sessionID": session.id,
+                "action": action,
+                "resources": [resource],
+                "save": [rules.save_pattern(resource)],
+                "source": source,
+            }
+        )
+        with self.lock:
+            session.asks[str(ask.request["id"])] = ask
+            if holding is not None:
+                _state(holding)["status"] = "pending"
+        self.publish("session.permission.asked", session, requestID=ask.request["id"])
+        ask.answered.wait()
+        with self.lock:
+            session.asks.pop(str(ask.request["id"]), None)
+            if holding is not None:
+                _state(holding)["status"] = "running"
+        if session.cancel.is_set() or ask.decision is None:
+            return None
+        return ask.decision
+
+    def await_form(self, session: Session, title: str, fields: list[Json]) -> Json | None:
+        """Raise a form and hold the turn until it is cancelled; the form, or ``None`` when the session was
+        interrupted first."""
+        form = self.create_form(session.id, {"title": title, "fields": fields})
+        with self.lock:
+            pending = session.forms.get(str(form["id"]))
+        while pending is not None and not pending.settled.wait(0.1):
+            if session.cancel.is_set():
+                with self.lock:
+                    session.forms.pop(str(form["id"]), None)
+                return None
+        return form
+
+    def complete_tool(self, session: Session, part: Json, output: str, metadata: Json | None = None) -> None:
+        with self.lock:
+            _state(part).update(
+                {
+                    "status": "completed",
+                    "content": [{"type": "text", "text": output}],
+                    "metadata": metadata or {"exit": 0, "status": "completed", "truncated": False},
+                }
+            )
+            _time(part).update({"ran": records.now_ms(), "completed": records.now_ms()})
+            self.save()
+        state = _state(part)
+        self.publish(
+            "session.tool.success",
+            session,
+            assistantMessageID=self._owners.get(str(part["id"])),
+            content=state.get("content"),
+            executed=False,
+            id=part["id"],
+            metadata=state.get("metadata"),
+        )
+
+    def fail_tool(self, session: Session, part: Json, kind: str, message: str) -> None:
+        with self.lock:
+            state = _state(part)
+            state.update({"status": "error", "error": {"type": kind, "message": message}})
+            state.pop("content", None)
+            _time(part).update({"completed": records.now_ms()})
+            self.save()
+        self.publish(
+            "session.tool.failed",
+            session,
+            assistantMessageID=self._owners.get(str(part["id"])),
+            id=part["id"],
+            error=_state(part).get("error"),
+        )
+
+    def restart_due(self) -> bool:
+        """Under ``RESTARTS_MID_TURN``, the first shell tool of the store's life asks for a restart and then holds,
+        so the restart ends this lifetime while the tool still runs."""
+        with self.lock:
+            if Lever.RESTARTS_MID_TURN not in self.levers or self._restarted_by_lever:
+                return False
+            self._restarted_by_lever = True
+            self.save()
+        self._restart()
+        return True
+
+    def spawn_child(self, session: Session, part: Json, prompt: str, *, title: str, background: bool) -> Session:
+        """Start a ``general`` child session on ``prompt``, recorded on the spawning tool part as 2.1.4 records it."""
+        child = self.create(
+            {
+                "id": records.new_id("ses"),
+                "parentID": session.id,
+                "location": {"directory": session.directory},
+                "model": session.model,
+                "title": title,
+                "agent": "general",
+            }
+        )
+        with self.lock:
+            _state(part)["metadata"] = {"sessionID": child.id, "status": "running", "truncated": False}
+            given = _state(part).get("input")
+            _state(part)["input"] = {
+                **(given if isinstance(given, dict) else {}),
+                "agent": "general",
+                "prompt": prompt,
+                "background": background,
+            }
+        self.prompt(child.id, prompt, None)
+        return child
+
+    def settle_child(self, session: Session, part: Json, child: Session, *, background: bool) -> str | None:
+        """Close the spawning part: at once for a ``background`` child, else once the child idles, with its final
+        text. ``None`` when ``session`` was interrupted first; an unsucceeded child fails the part."""
+        if background:
+            self.complete_tool(
+                session,
+                part,
+                f'<subagent sessionID="{child.id}" state="running">\n</subagent>',
+                {"sessionID": child.id, "status": "running", "truncated": False},
+            )
+            return ""
+        while child.running:
+            if self.wait(session, 0.1):
+                return None
+        if child.outcome != "succeeded":
+            self.fail_tool(session, part, "aborted", "Subagent interrupted")
+            if self.wait(session, AFTER_CHILD_INTERRUPT_SECONDS):
+                return None
+            return ""
+        reply = final_text(child)
+        self.complete_tool(
+            session,
+            part,
+            f'<subagent sessionID="{child.id}" state="completed">\n{reply}\n</subagent>',
+            {"sessionID": child.id, "status": "completed", "truncated": False},
+        )
+        return reply
+
+    def fail_turn(self, session: Session, assistant: Json, error: Json) -> None:
+        """End the turn as failed with ``error``, recorded on the step it ended in and on the idle."""
+        with self.lock:
+            assistant.update({"error": error, "finish": "error"})
+            _time(assistant).setdefault("completed", records.now_ms())
+            self.save()
+        self._step_ended(session, assistant)
+        self.idle(session, "failed", error)
+
+    def interrupted(self, session: Session, assistant: Json | None) -> None:
+        with self.lock:
+            if assistant is not None:
+                _abort_assistant(assistant, "Tool execution interrupted")
+            self.save()
+        self.idle(session, "interrupted")
+
+    def idle(self, session: Session, outcome: str, error: Json | None = None) -> None:
+        with self.lock:
+            idle: Json = {"id": records.new_id("msg"), "type": "idle", "outcome": outcome, **_now()}
+            if error is not None:
+                idle["error"] = error
+            session.messages.append(idle)
+            session.outcome = outcome
+            session.idle_at = records.now_ms()
+            session.updated = session.idle_at
+            session.current = None
+            if outcome == "interrupted":
+                session.pending.clear()
+            self.save()
+        suffix = {"succeeded": "succeeded", "interrupted": "interrupted"}.get(outcome, "failed")
+        self.publish(f"session.execution.{suffix}", session, located=False)
+        if session.parent_id is not None:
+            self._child_settled(session)
+
+    # -- the worker -------------------------------------------------------------------------------------------------
 
     def _tree(self, root_id: str) -> list[str]:
         ordered = [root_id] if root_id in self.sessions else []
@@ -391,7 +749,7 @@ class Engine:
             session.cancel.set()
         session.pending.clear()
         session.inbox.clear()
-        _kill(session.holder)
+        kill(session.holder)
         for ask in session.asks.values():
             ask.answered.set()
         for sid in self._tree(session.id)[1:]:
@@ -409,8 +767,8 @@ class Engine:
 
     def _resume_worker(self, session: Session) -> None:
         if session.current is not None:
-            self.publish("session.execution.started", session)
-            self._execute(session, script.plan(session.current), session.current)
+            self.publish("session.execution.started", session, located=False)
+            self._runner.run(self, session, session.current)
         self._worker(session)
 
     def _worker(self, session: Session) -> None:
@@ -434,299 +792,14 @@ class Engine:
             else:
                 self._turn(session, text)
 
-    def _wait(self, session: Session, seconds: float) -> bool:
-        """Sleep ``seconds`` unless the session is interrupted first; ``True`` when it was."""
-        return session.cancel.wait(seconds)
-
     def _turn(self, session: Session, text: str) -> None:
-        with self.lock:
-            session.current = text
-            session.cancel.clear()
-            session.messages.append({"id": records.new_id("msg"), "type": "user", "text": text, **_now()})
-            self.save()
-        self.publish("session.execution.started", session)
+        self.user_message(session, text)
+        self.publish("session.execution.started", session, located=False)
         error = records.route_error(session.effective_model())
         if error is not None:
-            self._idle(session, "failed", error)
+            self.idle(session, "failed", error)
             return
-        self._execute(session, script.plan(text), text)
-
-    def _execute(self, session: Session, plan: script.Plan, prompt: str) -> None:
-        model = session.effective_model()
-        assistant: Json = {
-            "id": records.new_id("msg"),
-            "type": "assistant",
-            "agent": session.agent or "build",
-            "model": model,
-            "content": [],
-            "time": {"created": records.now_ms()},
-            "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
-            "cost": 0,
-        }
-        with self.lock:
-            session.messages.append(assistant)
-            self.save()
-        self.publish("session.step.started", session, messageID=assistant["id"])
-        outputs: list[str] = []
-        refused = False
-        for step in plan.steps:
-            if self._wait(session, STEP_SECONDS):
-                self._interrupted(session, assistant)
-                return
-            outcome = self._tool(session, assistant, step)
-            if outcome is None:
-                self._interrupted(session, assistant)
-                return
-            output, was_refused = outcome
-            outputs.append(output)
-            refused = refused or was_refused
-            steer = self._take_steer(session)
-            if steer is not None:
-                self._finish(session, assistant, "", prompt)
-                with self.lock:
-                    session.current = steer
-                    session.messages.append({"id": records.new_id("msg"), "type": "user", "text": steer, **_now()})
-                self._execute(session, script.plan(steer), steer)
-                return
-        if self._wait(session, STEP_SECONDS):
-            self._interrupted(session, assistant)
-            return
-        reply = plan.reply(outputs, refused=refused)
-        self._finish(session, assistant, reply, prompt)
-        self._idle(session, "succeeded")
-
-    def _take_steer(self, session: Session) -> str | None:
-        with self.lock:
-            for index, (kind, text) in enumerate(session.pending):
-                if kind == "steer":
-                    del session.pending[index]
-                    return text
-        return None
-
-    def _finish(self, session: Session, assistant: Json, reply: str, prompt: str) -> None:
-        tokens, cost = records.usage(session.effective_model(), prompt, reply)
-        with self.lock:
-            if reply:
-                _content(assistant).append({"type": "text", "text": reply})
-            assistant.update({"tokens": tokens, "cost": cost, "finish": "stop"})
-            _time(assistant).update({"completed": records.now_ms()})
-            session.updated = records.now_ms()
-            self.save()
-        self.publish("session.text.ended", session, messageID=assistant["id"])
-        self.publish("session.usage.updated", session, messageID=assistant["id"])
-        self.publish("session.step.ended", session, messageID=assistant["id"])
-
-    def _interrupted(self, session: Session, assistant: Json) -> None:
-        with self.lock:
-            _abort_assistant(assistant, "Tool execution interrupted")
-            self.save()
-        self._idle(session, "interrupted")
-
-    def _idle(self, session: Session, outcome: str, error: Json | None = None) -> None:
-        with self.lock:
-            idle: Json = {"id": records.new_id("msg"), "type": "idle", "outcome": outcome, **_now()}
-            if error is not None:
-                idle["error"] = error
-            session.messages.append(idle)
-            session.outcome = outcome
-            session.idle_at = records.now_ms()
-            session.updated = session.idle_at
-            session.current = None
-            if outcome == "interrupted":
-                session.pending.clear()
-            self.save()
-        suffix = {"succeeded": "succeeded", "interrupted": "interrupted"}.get(outcome, "failed")
-        self.publish(f"session.execution.{suffix}", session)
-        if session.parent_id is not None:
-            self._child_settled(session)
-
-    # -- tools ------------------------------------------------------------------------------------------------------
-
-    def _tool(self, session: Session, assistant: Json, step: script.ToolStep) -> tuple[str, bool] | None:
-        """Run one tool call; ``(output, refused)``, or ``None`` when the session was interrupted during it."""
-        name = "shell" if isinstance(step, script.Shell) else "read" if isinstance(step, script.Read) else "subagent"
-        if rules.withheld(session.permissions, name):
-            return "", True
-        part: Json = {
-            "id": records.new_id("call"),
-            "type": "tool",
-            "name": name,
-            "executed": False,
-            "state": {"status": "running", "input": _input(step)},
-            "time": {"created": records.now_ms()},
-        }
-        with self.lock:
-            _content(assistant).append(part)
-            self.save()
-        self.publish("session.tool.called", session, callID=part["id"], tool=name)
-        if isinstance(step, script.Shell):
-            result = self._shell(session, part, step.command, str(assistant["id"]))
-        elif isinstance(step, script.Read):
-            result = self._read(session, part, step.path)
-        else:
-            result = self._subagent(session, part, step)
-        status = _state(part).get("status")
-        self.publish(
-            "session.tool.success" if status == "completed" else "session.tool.failed", session, callID=part["id"]
-        )
-        return result
-
-    def _complete(self, part: Json, output: str, metadata: Json | None = None) -> None:
-        with self.lock:
-            _state(part).update(
-                {
-                    "status": "completed",
-                    "content": [{"type": "text", "text": output}],
-                    "metadata": metadata or {"exit": 0, "status": "completed", "truncated": False},
-                }
-            )
-            _time(part).update({"ran": records.now_ms(), "completed": records.now_ms()})
-            self.save()
-
-    def _fail(self, part: Json, kind: str, message: str) -> None:
-        with self.lock:
-            state = _state(part)
-            state.update({"status": "error", "error": {"type": kind, "message": message}})
-            state.pop("content", None)
-            _time(part).update({"completed": records.now_ms()})
-            self.save()
-
-    def _shell(self, session: Session, part: Json, command: str, message_id: str) -> tuple[str, bool] | None:
-        effect = rules.evaluate(session.permissions, "shell", command)
-        if effect == "deny":
-            self._fail(part, "permission.rejected", "Permission denied: shell")
-            return "", True
-        if effect == "ask":
-            decision = self._ask(session, part, command, message_id)
-            if decision is None:
-                return None
-            if decision == "reject":
-                self._fail(part, "permission.rejected", "Permission rejected: shell")
-                return "", True
-            if decision == "always":
-                with self.lock:
-                    session.permissions.append(
-                        {"action": "shell", "resource": rules.save_pattern(command), "effect": "allow"}
-                    )
-        env = dict(os.environ) if session.environment is None else dict(session.environment)
-        holder = subprocess.Popen(["sleep", "3600"], start_new_session=True) if "sleep" in command else None
-        with self.lock:
-            session.holder = holder
-        try:
-            segments = shell.parse(command, env, holder.pid if holder else os.getpid())
-        except shell.UnsupportedCommandError as exc:
-            _kill(holder)
-            self._fail(part, "tool.failed", str(exc))
-            return str(exc), False
-        if self._restart_due() and self._wait(session, TOOL_SECONDS_CAP):
-            _kill(holder)
-            return None
-        output: list[str] = []
-        directory = Path(session.directory)
-        try:
-            for segment in segments:
-                if isinstance(segment, shell.Echo):
-                    if segment.target is None:
-                        output.append(segment.text + "\n")
-                    else:
-                        (directory / segment.target).write_text(segment.text + "\n")
-                elif isinstance(segment, shell.Touch):
-                    (directory / segment.path).touch()
-                elif self._wait(session, min(segment.seconds, TOOL_SECONDS_CAP)):
-                    return None
-        finally:
-            with self.lock:
-                session.holder = None
-            _kill(holder)
-        if session.cancel.is_set():
-            return None
-        text = "".join(output)
-        self._complete(part, text)
-        return text, False
-
-    def _restart_due(self) -> bool:
-        """Under ``RESTARTS_MID_TURN``, the first shell tool of the store's life asks for a restart and then holds,
-        so the restart ends this lifetime while the tool still runs."""
-        with self.lock:
-            if Lever.RESTARTS_MID_TURN not in self.levers or self._restarted_by_lever:
-                return False
-            self._restarted_by_lever = True
-            self.save()
-        self._restart()
-        return True
-
-    def _ask(self, session: Session, part: Json, command: str, message_id: str) -> str | None:
-        ask = _Ask(
-            {
-                "id": records.new_id("per"),
-                "sessionID": session.id,
-                "action": "shell",
-                "resources": [command],
-                "save": [rules.save_pattern(command)],
-                "source": {"type": "tool", "id": part["id"], "messageID": message_id},
-            }
-        )
-        with self.lock:
-            session.asks[str(ask.request["id"])] = ask
-            _state(part)["status"] = "pending"
-        self.publish("session.permission.asked", session, requestID=ask.request["id"])
-        ask.answered.wait()
-        with self.lock:
-            session.asks.pop(str(ask.request["id"]), None)
-            _state(part)["status"] = "running"
-        if session.cancel.is_set() or ask.decision is None:
-            return None
-        return ask.decision
-
-    def _read(self, session: Session, part: Json, path: str) -> tuple[str, bool]:
-        if rules.evaluate(session.permissions, "read", path) == "deny":
-            self._fail(part, "permission.rejected", "Permission denied: read")
-            return "", True
-        try:
-            text = (Path(session.directory) / path).read_text()
-        except OSError as exc:
-            self._fail(part, "tool.failed", str(exc))
-            return "", False
-        self._complete(part, text, {"truncated": False})
-        return text, False
-
-    def _subagent(self, session: Session, part: Json, step: script.Subagent) -> tuple[str, bool] | None:
-        child = self.create(
-            {
-                "id": records.new_id("ses"),
-                "parentID": session.id,
-                "location": {"directory": session.directory},
-                "model": session.model,
-                "title": step.instructions[:60],
-                "agent": "general",
-            }
-        )
-        with self.lock:
-            _state(part)["metadata"] = {"sessionID": child.id, "status": "running", "truncated": False}
-            _state(part)["input"] = {"agent": "general", "prompt": step.instructions, "background": step.background}
-        self.prompt(child.id, step.instructions, None)
-        if step.background:
-            self._complete(
-                part,
-                f'<subagent sessionID="{child.id}" state="running">\n</subagent>',
-                {"sessionID": child.id, "status": "running", "truncated": False},
-            )
-            return "", False
-        while child.running:
-            if self._wait(session, 0.1):
-                return None
-        if child.outcome != "succeeded":
-            self._fail(part, "aborted", "Subagent interrupted")
-            if self._wait(session, AFTER_CHILD_INTERRUPT_SECONDS):
-                return None
-            return "", False
-        reply = _final_text(child)
-        self._complete(
-            part,
-            f'<subagent sessionID="{child.id}" state="completed">\n{reply}\n</subagent>',
-            {"sessionID": child.id, "status": "completed", "truncated": False},
-        )
-        return reply, False
+        self._runner.run(self, session, text)
 
     def _child_settled(self, child: Session) -> None:
         """A finished background child wakes its parent through the parent's inbox."""
@@ -748,20 +821,22 @@ class Engine:
                 "id": records.new_id("msg"),
                 "type": "subagent",
                 "childID": child.id,
-                "text": _final_text(child),
+                "text": final_text(child),
                 "description": child.title,
             }
             parent.inbox.append(entry)
             self._start(parent)
-        self.publish("session.inbox.enqueued", parent, inboxID=entry["id"])
+        item = {key: value for key, value in entry.items() if key != "id"}
+        self.publish("session.inbox.enqueued", parent, inboxID=entry["id"], item=item)
 
     def _deliver_inbox(self, session: Session) -> None:
-        if self._wait(session, STEP_SECONDS):
+        if self.wait(session, STEP_SECONDS):
             return
         with self.lock:
             if not session.inbox:
                 return
             entry = session.inbox.pop(0)
+            child = self.sessions.get(str(entry["childID"]))
             text = f'<subagent sessionID="{entry["childID"]}" state="completed" description="{entry["description"]}">'
             session.messages.append(
                 {
@@ -775,11 +850,14 @@ class Engine:
             )
             self.save()
         self.publish("session.inbox.delivered", session, inboxID=entry["id"])
-        self._execute(session, script.Plan("", ()), "")
+        if child is None:
+            self.idle(session, "succeeded")
+            return
+        self._runner.wake(self, session, child)
 
     def _compact(self, session: Session) -> None:
-        if self._wait(session, STEP_SECONDS):
-            self._idle(session, "interrupted")
+        if self.wait(session, STEP_SECONDS):
+            self.idle(session, "interrupted")
             return
         tokens, cost = records.usage(session.effective_model(), "compact", "summary")
         with self.lock:
@@ -797,7 +875,11 @@ class Engine:
                 }
             )
             self.save()
-        self._idle(session, "succeeded")
+        self.idle(session, "succeeded")
+
+
+def _count(value: object) -> int:
+    return value if isinstance(value, int) else 0
 
 
 def _now() -> Json:
@@ -829,14 +911,6 @@ def _content(message: object) -> list[Json]:
     return content if isinstance(content, list) else []
 
 
-def _input(step: script.ToolStep) -> Json:
-    if isinstance(step, script.Shell):
-        return {"command": step.command}
-    if isinstance(step, script.Read):
-        return {"filePath": step.path}
-    return {"agent": "general", "prompt": step.instructions}
-
-
 def _abort_assistant(message: Json, tool_message: str) -> None:
     for part in _content(message):
         if part.get("type") == "tool" and _state(part).get("status") in {"running", "pending"}:
@@ -845,13 +919,15 @@ def _abort_assistant(message: Json, tool_message: str) -> None:
     _time(message).setdefault("completed", records.now_ms())
 
 
-def _final_text(session: Session) -> str:
+def final_text(session: Session) -> str:
+    """The text of ``session``'s last assistant step."""
     assistants = [m for m in session.messages if m.get("type") == "assistant"]
     parts = _content(assistants[-1]) if assistants else []
     return "\n".join(str(p.get("text")) for p in parts if p.get("type") == "text")
 
 
-def _kill(process: subprocess.Popen[bytes] | None) -> None:
+def kill(process: subprocess.Popen[bytes] | None) -> None:
+    """End ``process`` and its whole process group, if it still runs."""
     if process is None or process.poll() is not None:
         return
     with suppress(ProcessLookupError):
@@ -872,4 +948,13 @@ def restart_in_background(argv0: str, log: Path) -> None:
         )
 
 
-__all__ = ["ConflictError", "Engine", "NotFoundError", "Session", "restart_in_background"]
+__all__ = [
+    "ConflictError",
+    "Engine",
+    "NotFoundError",
+    "Session",
+    "TurnRunner",
+    "final_text",
+    "kill",
+    "restart_in_background",
+]
