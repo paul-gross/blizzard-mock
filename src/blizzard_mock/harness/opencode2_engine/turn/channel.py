@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import IO
+from typing import IO, cast
 
 type Json = dict[str, object]
 
@@ -35,10 +35,10 @@ class Channel:
         line = self._replies.readline()
         if not line:
             raise ServiceGoneError("the service closed the turn")
-        decoded = json.loads(line)
+        decoded: object = json.loads(line)
         if not isinstance(decoded, dict):
             raise ServiceGoneError(f"the service answered a non-object: {line!r}")
-        return decoded
+        return cast("dict[str, object]", decoded)
 
 
 __all__ = ["Channel", "ServiceGoneError"]

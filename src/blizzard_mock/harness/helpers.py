@@ -17,10 +17,10 @@ from typing import Protocol, cast
 from blizzard_mock.harness.engine import (
     CHOICE_CLOSE,
     CHOICE_OPEN,
+    AskExit,
     HarnessCrash,
     RunContext,
     RunResult,
-    _AskExit,
     current_context,
 )
 from blizzard_mock.harness.internal import git
@@ -43,7 +43,7 @@ def ask(question: str, options: Sequence[str] | None = None) -> None:
             args += ["--options", "|".join(opts)]
         subprocess.run(args, cwd=ctx.cwd, env=dict(ctx.env), check=False)
     ctx.result = RunResult(session_id=ctx.session.session_id, subtype="ask", ask=record, text=question)
-    raise _AskExit(record)
+    raise AskExit(record)
 
 
 def apply_diff(diff: str) -> None:

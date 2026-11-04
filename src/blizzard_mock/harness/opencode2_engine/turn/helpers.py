@@ -11,6 +11,7 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from ..domain import failures
 from .channel import Channel
@@ -67,7 +68,7 @@ def session_id() -> str:
 
 def model() -> Json:
     found = _turn().header.get("model")
-    return dict(found) if isinstance(found, dict) else {}
+    return dict(cast(Json, found)) if isinstance(found, dict) else {}
 
 
 def resumed() -> bool:
@@ -78,7 +79,7 @@ def resumed() -> bool:
 def wake_result() -> str | None:
     """On a turn a background child's finish woke, that child's final text; otherwise ``None``."""
     woke = _turn().header.get("wake")
-    return str(woke.get("text", "")) if isinstance(woke, dict) else None
+    return str(cast(Json, woke).get("text", "")) if isinstance(woke, dict) else None
 
 
 # -- message parts -----------------------------------------------------------------------------------------------------
@@ -203,7 +204,7 @@ def form(title: str, fields: Sequence[Mapping[str, object]] | None = None) -> Js
     raised = reply.get("form")
     if not isinstance(raised, dict):
         raise TurnEnded
-    return dict(raised)
+    return dict(cast(Json, raised))
 
 
 # -- the turn's end ----------------------------------------------------------------------------------------------------

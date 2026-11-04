@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import cast
 
 _METHOD_INITIALIZE = "initialize"
 _METHOD_ACCOUNT_READ = "account/read"
@@ -37,12 +38,12 @@ def run_app_server(*, auth_path: Path) -> int:
         if not line:
             continue
         try:
-            message = json.loads(line)
+            message: object = json.loads(line)
         except ValueError:
             continue
         if not isinstance(message, dict):
             continue
-        _handle(message, auth_path=auth_path, audit_log_path=audit_log_path)
+        _handle(cast("dict[str, object]", message), auth_path=auth_path, audit_log_path=audit_log_path)
     return 0
 
 
@@ -57,7 +58,7 @@ def _handle(message: dict[str, object], *, auth_path: Path, audit_log_path: Path
         return
     if method == _METHOD_ACCOUNT_READ:
         params = message.get("params")
-        refresh = isinstance(params, dict) and bool(params.get("refreshToken"))
+        refresh = isinstance(params, dict) and bool(cast("dict[str, object]", params).get("refreshToken"))
         account = _rotate(auth_path, audit_log_path) if refresh else _read_account(auth_path)
         # True for any ChatGPT-mode home, logged in or not (confirmed live): only account tells them apart.
         _reply(request_id, {"account": account, "requiresOpenaiAuth": True})
@@ -81,11 +82,11 @@ def _emit(message: dict[str, object]) -> None:
 
 def _read_account(auth_path: Path) -> dict[str, object] | None:
     try:
-        data = json.loads(auth_path.read_text())
+        data: object = json.loads(auth_path.read_text())
     except (OSError, ValueError):
         return None
-    tokens = data.get("tokens") if isinstance(data, dict) else None
-    account_id = tokens.get("account_id") if isinstance(tokens, dict) else None
+    tokens = cast("dict[str, object]", data).get("tokens") if isinstance(data, dict) else None
+    account_id = cast("dict[str, object]", tokens).get("account_id") if isinstance(tokens, dict) else None
     return {"account_id": account_id} if isinstance(account_id, str) and account_id else None
 
 
@@ -101,14 +102,16 @@ def _rotate(auth_path: Path, audit_log_path: Path) -> dict[str, object] | None:
 
 def _rotate_locked(auth_path: Path, audit_log_path: Path) -> dict[str, object] | None:
     try:
-        data = json.loads(auth_path.read_text())
+        loaded: object = json.loads(auth_path.read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict):
+    if not isinstance(loaded, dict):
         return None
-    tokens = data.get("tokens")
-    if not isinstance(tokens, dict):
+    data = cast("dict[str, object]", loaded)
+    raw_tokens = data.get("tokens")
+    if not isinstance(raw_tokens, dict):
         return None
+    tokens = cast("dict[str, object]", raw_tokens)
     account_id = tokens.get("account_id")
     new_refresh_token = secrets.token_hex(16)
     tokens["access_token"] = _issue_access_token(account_id if isinstance(account_id, str) else None)

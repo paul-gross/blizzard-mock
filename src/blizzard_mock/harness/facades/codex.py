@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 from blizzard_mock.harness.engine import RunResult
 from blizzard_mock.harness.facades import _common
@@ -72,7 +73,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def _resolve(args: argparse.Namespace) -> tuple[str | None, str | None, bool]:
     """Return (script, session_id, is_resume) from Codex's positional grammar."""
-    positionals = [p for p in (args.resume, *(args.rest or [])) if p is not None]
+    resume = cast("str | None", args.resume)
+    rest = cast("list[str]", args.rest or [])
+    positionals = [p for p in (resume, *rest) if p is not None]
     if positionals and positionals[0] == "resume":
         # exec resume <session-id> "<script>"
         session_id = positionals[1] if len(positionals) > 1 else None
