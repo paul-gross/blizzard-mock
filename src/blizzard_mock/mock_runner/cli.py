@@ -14,7 +14,7 @@ import click
 
 from blizzard_mock.mock_runner.app import create_app
 from blizzard_mock.mock_runner.config import MockRunnerConfig
-from blizzard_mock.serve import serve
+from blizzard_mock.serve import listening_file_option, serve
 
 
 @click.command()
@@ -28,12 +28,7 @@ from blizzard_mock.serve import serve
     help="The bearer token the driver presents; absent, it adds itself at the hub on start.",
 )
 @click.option("--name", envvar="BZ_MOCK_RUNNER_NAME", default=None, help="The name the driver registers under.")
-@click.option(
-    "--listening-file",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=None,
-    help="Once serving, write http://<host>:<bound-port> here (atomically); pairs with --port 0.",
-)
+@listening_file_option
 def main(
     host: str | None,
     port: int | None,

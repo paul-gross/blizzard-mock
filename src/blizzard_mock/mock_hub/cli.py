@@ -15,7 +15,7 @@ import click
 
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.config import MockHubConfig
-from blizzard_mock.serve import serve
+from blizzard_mock.serve import listening_file_option, serve
 
 
 @click.command()
@@ -33,12 +33,7 @@ from blizzard_mock.serve import serve
     default=None,
     help='Serve GET /api/auth/jwks.json as 200 {"keys": []} — a hub offering an IdP (env BZ_MOCK_HUB_OFFER_IDP=1).',
 )
-@click.option(
-    "--listening-file",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=None,
-    help="Once serving, write http://<host>:<bound-port> here (atomically); pairs with --port 0.",
-)
+@listening_file_option
 def main(
     host: str | None,
     port: int | None,
