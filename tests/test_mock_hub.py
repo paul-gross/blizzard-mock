@@ -1021,7 +1021,7 @@ async def test_lever_delay_transcripts_does_not_block_concurrent_requests() -> N
         started = time.monotonic()
         fast_finished_at = None
 
-        async def fast_call():  # type: ignore[no-untyped-def]
+        async def fast_call():
             nonlocal fast_finished_at
             resp = await ac.post("/api/fleet/events", json={"runner_id": "r1", "facts": []})
             fast_finished_at = time.monotonic() - started

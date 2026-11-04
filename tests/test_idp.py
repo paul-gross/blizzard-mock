@@ -23,7 +23,7 @@ def client() -> TestClient:
     return TestClient(create_app())
 
 
-def _redirect_query(resp) -> dict[str, str]:  # type: ignore[no-untyped-def]
+def _redirect_query(resp) -> dict[str, str]:
     location = resp.headers["location"]
     return {k: v[0] for k, v in parse_qs(urlparse(location).query).items()}
 

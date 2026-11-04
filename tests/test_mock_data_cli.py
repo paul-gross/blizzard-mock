@@ -698,7 +698,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
     return url, meta
 
 
-def _lease_select_rows(meta: MetaData, engine, chunk_id: str) -> list:  # type: ignore[no-untyped-def]
+def _lease_select_rows(meta: MetaData, engine, chunk_id: str) -> list:
     """Read a lease back the way the daemon does — ``_lease_select()``'s own inner
     join of ``leases`` to ``lease_context`` (``sqlalchemy_store.py`` lines 1789-1808)
     — never a bare ``leases`` row, which the drift guard alone cannot catch."""
@@ -2286,7 +2286,7 @@ def test_create_lease_hub_store_at_an_epoch_another_runner_owns_is_refused(tmp_p
         cli, ["create", "chunk", "--store", "hub", "--url", url, "--status", "ready"]
     ).output.strip()
 
-    def lease(runner_id: str):  # type: ignore[no-untyped-def]
+    def lease(runner_id: str):
         return runner.invoke(
             cli,
             [
