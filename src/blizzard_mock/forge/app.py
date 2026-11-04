@@ -11,6 +11,8 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from blizzard_mock.clock import ControlledClock, resolve_clock
+from blizzard_mock.clock_api import clock_router
 from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.graphql import router as graphql_router
 from blizzard_mock.forge.api.issues import router as issues_router
@@ -22,7 +24,7 @@ from blizzard_mock.forge.api.refs import router as refs_router
 from blizzard_mock.forge.api.repos import router as repos_router
 from blizzard_mock.forge.api.web import router as web_router
 from blizzard_mock.forge.config import ForgeConfig
-from blizzard_mock.forge.domain.clock import Clock, SystemClock
+from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import ForgeError
 from blizzard_mock.forge.domain.service import ForgeService
 from blizzard_mock.forge.internal.check_store import InMemoryCheckRunStore
@@ -36,7 +38,7 @@ from blizzard_mock.forge.internal.state_store import InMemoryForgeState
 def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     """Build a fully wired forge app from resolved config."""
     log = structlog.get_logger("blizzard_mock.forge")
-    the_clock = clock or SystemClock()
+    the_clock = clock if clock is not None else resolve_clock()
 
     git = GitBackend(config.repos_dir, GitErrorFactory(log))
     state = InMemoryForgeState()
@@ -46,6 +48,8 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     service = ForgeService(git, state, levers, the_clock, checks, rate)
 
     app = FastAPI(title="blizzard-mock forge", version="0.1.0")
+    if isinstance(the_clock, ControlledClock):
+        app.include_router(clock_router(the_clock))
     app.state.service = service
     app.state.levers = levers
     app.state.base_url = config.base_url

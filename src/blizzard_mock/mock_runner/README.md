@@ -14,6 +14,9 @@ It mirrors the real runner's outbound surface **without importing `blizzard`**.
 
 ## Binary & configuration
 
+Set `BLIZZARD_CLOCK=controlled` and `BLIZZARD_CLOCK_FENCE=1` together to freeze the
+clock at startup; otherwise it reads system time.
+
 `blizzard-mock-runner` → `blizzard_mock.mock_runner.cli:main` (a click command).
 
 | Setting | Flag | Env | Default |
@@ -31,6 +34,11 @@ driver adds itself at the hub (`POST {hub}/api/runners` under its name) before s
 then on. Its hub-minted id is learned from its first registration's reply.
 
 ## Surface
+
+With the controlled clock enabled, `GET /_clock` reads `now` and `POST /_clock`
+accepts either `{"to": "<offset datetime>"}` or `{"advance_seconds": 1.5}`.
+Moves cannot go backwards. Resets do not move the clock; these control routes are
+hidden from OpenAPI.
 
 - **Runner-mirror** (its own served surface): `GET /api/health`, `GET /api/ready`.
 - **Drive plane** — a test POSTs these and the driver performs the runner-role call
