@@ -76,7 +76,8 @@ class Service:
                 raw = response.read()
                 return response.status, json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
-            return exc.code, None
+            raw = exc.read()
+            return exc.code, json.loads(raw) if raw else None
 
     @contextmanager
     def events(self) -> Generator[list[Json]]:

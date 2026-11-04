@@ -149,7 +149,7 @@ def shell(command: str, *, timeout: float | None = None) -> ToolResult:
 
 def read(path: str) -> ToolResult:
     """Read ``path`` relative to the session's directory, once the rules allow it."""
-    verdict, call = _call("read", {"filePath": path}, path)
+    verdict, call = _call("read", {"path": path}, path)
     if (refused := _refused(verdict)) is not None:
         return refused
     try:

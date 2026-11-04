@@ -107,6 +107,12 @@ class _Kinds:
         if _is_object(state):
             self.add(f"state.{state.get('status')}", state)
 
+    def page(self, page: object) -> None:
+        if isinstance(page, dict):
+            self.add("page", {key: value for key, value in page.items() if key != "data"})
+            for message in objects(page.get("data")):
+                self.message(message)
+
     def event(self, event: Json) -> None:
         self.add(f"event.{event.get('type')}", event.get("data"))
         self.add("envelope", {key: value for key, value in event.items() if key != "data"})
@@ -134,6 +140,13 @@ def _corpus() -> _Kinds:
         kinds.add("model", model)
     kinds.add("permission", _load("permission_request.json"))
     kinds.add("form", _load("form_request.json"))
+    pages = _load("message_pages.json")
+    assert isinstance(pages, dict)
+    for page in pages.values():
+        kinds.page(page)
+    missing = _load("session_not_found.json")
+    assert isinstance(missing, dict)
+    kinds.add("not_found", missing["body"])
     return kinds
 
 
@@ -222,6 +235,17 @@ def _collect(service: Service, kinds: _Kinds, events: list[Json]) -> None:
         kinds.event(event)
     for model in objects(service.data("GET", "/api/model")):
         kinds.add("model", model)
+    _, first = service.call("GET", "/api/session/ses_conform/message?limit=1")
+    kinds.page(first)
+    _, whole = service.call("GET", "/api/session/ses_conform/message?limit=200")
+    assert isinstance(whole, dict)
+    cursor = whole["cursor"]
+    assert isinstance(cursor, dict)
+    _, tail = service.call("GET", f"/api/session/ses_conform/message?cursor={cursor['next']}")
+    kinds.page(tail)
+    status, missing = service.call("GET", "/api/session/ses_conform_missing/message")
+    assert status == 404
+    kinds.add("not_found", missing)
 
 
 _REQUIRED = (
@@ -249,6 +273,8 @@ _REQUIRED = (
     "model",
     "permission",
     "form",
+    "page",
+    "not_found",
 )
 
 
