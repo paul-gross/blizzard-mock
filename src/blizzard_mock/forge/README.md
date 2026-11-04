@@ -42,6 +42,7 @@ the FastAPI app via uvicorn. Config is resolved from flags with env fallbacks:
 | Bare-repo directory | `--repos-dir` | `BZ_FORGE_REPOS_DIR` | *(required)* |
 | Bind host | `--host` | `BZ_FORGE_HOST` | `127.0.0.1` |
 | Bind port | `--port` | `BZ_FORGE_PORT` | `8080` |
+| Listening file | `--listening-file` | — | *(none)* — once serving, `http://<host>:<bound-port>` is written there atomically; with `--port 0` the bound port is the one the OS picked, and every URL the daemon emits carries it |
 
 The winter service band injects `BZ_FORGE_PORT` (band +1). `base_url` is derived
 `http://{host}:{port}` and used to build vendor-native URLs in responses.

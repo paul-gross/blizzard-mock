@@ -23,6 +23,7 @@ clock at startup; otherwise it reads system time.
 |---------|------|-----|---------|
 | Control-API host | `--host` | `BZ_MOCK_RUNNER_HOST` | `127.0.0.1` |
 | Control-API port | `--port` | `BZ_MOCK_RUNNER_PORT` | `8431` |
+| Listening file | `--listening-file` | — | *(none)* — once serving, `http://<host>:<bound-port>` is written there atomically; with `--port 0` the bound port is the one the OS picked, and every URL the daemon emits carries it |
 | Hub to drive | `--hub-url` | `BZ_HUB_URL` | `http://127.0.0.1:8421` |
 | Bearer token | `--token` | `BZ_HUB_TOKEN` | none — added at the hub on start |
 | Runner name | `--name` | `BZ_MOCK_RUNNER_NAME` | `runner-mock` |

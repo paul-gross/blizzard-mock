@@ -47,6 +47,7 @@ FastAPI app via uvicorn.
 |---------|------|-----|---------|
 | Bind host | `--host` | `BZ_IDP_HOST` | `127.0.0.1` |
 | Bind port | `--port` | `BZ_IDP_PORT` | `8090` |
+| Listening file | `--listening-file` | — | *(none)* — once serving, `http://<host>:<bound-port>` is written there atomically; with `--port 0` the bound port is the one the OS picked, and every URL the daemon emits carries it |
 
 A hub pointed at this process sets `[[auth.oauth.provider]] issuer` (`oidc`) or
 `api_base` (`github`) to `http://{host}:{port}` — the `github` conformer's `web_base`/

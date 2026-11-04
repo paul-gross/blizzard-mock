@@ -7,6 +7,9 @@ and POSTs ``/_drive/*`` to exercise the real hub's API over the wire.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 import click
 
 from blizzard_mock.mock_runner.app import create_app
@@ -25,11 +28,28 @@ from blizzard_mock.serve import serve
     help="The bearer token the driver presents; absent, it adds itself at the hub on start.",
 )
 @click.option("--name", envvar="BZ_MOCK_RUNNER_NAME", default=None, help="The name the driver registers under.")
-def main(host: str | None, port: int | None, hub_url: str | None, token: str | None, name: str | None) -> None:
+@click.option(
+    "--listening-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Once serving, write http://<host>:<bound-port> here (atomically); pairs with --port 0.",
+)
+def main(
+    host: str | None,
+    port: int | None,
+    hub_url: str | None,
+    token: str | None,
+    name: str | None,
+    listening_file: Path | None,
+) -> None:
     """Serve the mock runner — a levered driver of the runner's outbound protocol."""
     config = MockRunnerConfig.from_env(host=host, port=port, hub_url=hub_url, token=token, name=name)
-    app = create_app(config)
-    serve(app, host=config.host, port=config.port)
+    serve(
+        lambda bound: create_app(replace(config, port=bound)),
+        host=config.host,
+        port=config.port,
+        listening_file=listening_file,
+    )
 
 
 if __name__ == "__main__":
