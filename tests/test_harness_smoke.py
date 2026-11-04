@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,7 +30,7 @@ from blizzard_mock.harness.facades._text import PlainTextWire
 # --------------------------------------------------------------------------- #
 
 
-def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int, engine.RunResult]:
+def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw: Any) -> tuple[int, engine.RunResult]:
     """Run a script through the engine with a capturing wire; return (code, result)."""
     cwd, env = repo_env
     captured: list[engine.RunResult] = []
@@ -62,12 +63,12 @@ def test_fence_refuses_without_marker(tmp_path: Path) -> None:
         engine.assert_fenced(tmp_path, engine.fenced_env({}))  # env var present, no marker
 
 
-def test_fence_passes_when_marked(fenced_repo) -> None:
+def test_fence_passes_when_marked(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     engine.assert_fenced(cwd, env)  # both factors present — does not raise
 
 
-def test_marker_found_in_ancestor(fenced_repo) -> None:
+def test_marker_found_in_ancestor(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     child = cwd / "envs" / "alpha"
     child.mkdir(parents=True)
@@ -84,7 +85,7 @@ def test_run_prompt_refuses_unfenced(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_verdict_is_emitted_in_tagged_form(fenced_repo) -> None:
+def test_verdict_is_emitted_in_tagged_form(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("verdict('approve', 'looks good')", fenced_repo)
     assert code == 0
     assert result.subtype == "success"
@@ -92,7 +93,7 @@ def test_verdict_is_emitted_in_tagged_form(fenced_repo) -> None:
     assert "looks good" in result.text
 
 
-def test_script_applies_diff_and_makes_real_commit(fenced_repo) -> None:
+def test_script_applies_diff_and_makes_real_commit(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, _ = fenced_repo
     diff = (
         "diff --git a/new.txt b/new.txt\n"
@@ -112,7 +113,7 @@ def test_script_applies_diff_and_makes_real_commit(fenced_repo) -> None:
     assert "<Choice>done</Choice>" in result.text
 
 
-def test_plain_script_completes_success(fenced_repo) -> None:
+def test_plain_script_completes_success(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("x = 1 + 1", fenced_repo)
     assert code == 0
     assert result.subtype == "success"
@@ -124,7 +125,7 @@ def test_plain_script_completes_success(fenced_repo) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_ask_records_state_and_exits_the_turn(fenced_repo) -> None:
+def test_ask_records_state_and_exits_the_turn(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("ask('proceed?', ['yes', 'no'])\nverdict('never reached')", fenced_repo)
     assert code == 0  # ask ends the turn normally; the ask fact is how parking is derived
     assert result.subtype == "ask"
@@ -134,7 +135,7 @@ def test_ask_records_state_and_exits_the_turn(fenced_repo) -> None:
     assert result.text == "proceed?"  # verdict after ask never ran
 
 
-def test_resume_reads_prior_ask_and_answers(fenced_repo) -> None:
+def test_resume_reads_prior_ask_and_answers(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     sid = "sess-fixed-1"
     # Turn 1: spawn with a pre-assigned id, ask, park.
     _run("ask('pick a color', ['red', 'blue'])", fenced_repo, session_id=sid)
@@ -149,7 +150,7 @@ def test_resume_reads_prior_ask_and_answers(fenced_repo) -> None:
     assert "answer delivered:" in result.text  # the resume message itself is the answer-as-code
 
 
-def test_ask_shells_out_when_runner_cmd_configured(fenced_repo, tmp_path: Path) -> None:
+def test_ask_shells_out_when_runner_cmd_configured(fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path) -> None:
     cwd, env = fenced_repo
     sentinel = tmp_path / "ask.log"
     # A trivial "runner ask" command: append its args to a file.
@@ -167,14 +168,16 @@ def test_ask_shells_out_when_runner_cmd_configured(fenced_repo, tmp_path: Path) 
 # --------------------------------------------------------------------------- #
 
 
-def test_crash_yields_error_run(fenced_repo) -> None:
+def test_crash_yields_error_run(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("crash()", fenced_repo)
     assert code == 1
     assert result.is_error is True
     assert result.subtype == "error_during_execution"
 
 
-def test_usage_limited_writes_the_synthetic_rate_limit_transcript_record(fenced_repo, tmp_path) -> None:
+def test_usage_limited_writes_the_synthetic_rate_limit_transcript_record(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     """``usage_limited()`` writes the verbatim 2026-09-05 shape — a
     synthetic assistant record with ``isApiErrorMessage: true``/``error: "rate_limit"``
     — and still ends the turn with an ordinary (non-error) envelope."""
@@ -205,21 +208,21 @@ def test_usage_limited_writes_the_synthetic_rate_limit_transcript_record(fenced_
     assert "resets 5:40pm (America/Chicago)" in text
 
 
-def test_usage_limited_refuses_without_a_claude_transcript_writer(fenced_repo) -> None:
+def test_usage_limited_refuses_without_a_claude_transcript_writer(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("usage_limited()", fenced_repo)
     assert code == 1
     assert result.is_error is True
     assert "Claude-Code-only" in result.text
 
 
-def test_uncaught_exception_is_an_error_run(fenced_repo) -> None:
+def test_uncaught_exception_is_an_error_run(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("raise ValueError('boom')", fenced_repo)
     assert code == 1
     assert result.is_error is True
     assert "boom" in result.text
 
 
-def test_hang_blocks_until_killed(fenced_repo) -> None:
+def test_hang_blocks_until_killed(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     # Drive the real binary as a subprocess so we can time it out — a hung worker
     # never returns and never emits.
@@ -236,7 +239,9 @@ def test_hang_blocks_until_killed(fenced_repo) -> None:
     proc.wait(timeout=5)
 
 
-def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usage(fenced_repo) -> None:
+def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usage(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """A SIGINT inside ``hang()`` reaches the engine's tail the way real Claude Code's
     does: the crash envelope lands on stdout, carrying a synthesized envelope —
     never a bare ``KeyboardInterrupt`` traceback with no envelope at all."""
@@ -291,7 +296,9 @@ def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usag
 # --------------------------------------------------------------------------- #
 
 
-def test_claude_facade_json_envelope(fenced_repo, capsys) -> None:
+def test_claude_facade_json_envelope(
+    fenced_repo: tuple[Path, dict[str, str]], capsys: pytest.CaptureFixture[str]
+) -> None:
     cwd, env = fenced_repo
     proc = subprocess.run(
         [
@@ -318,7 +325,7 @@ def test_claude_facade_json_envelope(fenced_repo, capsys) -> None:
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
-def test_claude_facade_accepts_the_runner_permission_flags(fenced_repo) -> None:
+def test_claude_facade_accepts_the_runner_permission_flags(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The runner appends ``--permission-mode`` and ``--permission-prompts`` to every
     unattended invocation; the facade accepts both and acts on neither."""
     cwd, env = fenced_repo
@@ -345,7 +352,7 @@ def test_claude_facade_accepts_the_runner_permission_flags(fenced_repo) -> None:
     assert "<Choice>approve</Choice>" in json.loads(proc.stdout)["result"]
 
 
-def test_claude_facade_error_envelope_carries_no_result_key(fenced_repo) -> None:
+def test_claude_facade_error_envelope_carries_no_result_key(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A real Claude Code ``error_during_execution`` envelope has no ``result`` key at
     all — a captured crash sample confirmed it — unlike every other subtype's envelope,
     which always carries one. The mock used to write ``"result": text`` regardless of
@@ -375,7 +382,7 @@ def test_claude_facade_error_envelope_carries_no_result_key(fenced_repo) -> None
     assert "result" not in envelope
 
 
-def test_claude_facade_json_envelope_carries_usage_and_cost(fenced_repo) -> None:
+def test_claude_facade_json_envelope_carries_usage_and_cost(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The result envelope must carry a realistic ``usage`` object + ``total_cost_usd``
     (blizzard epic #57) — what the runner adapter's ``parse_usage`` reads back."""
     cwd, env = fenced_repo
@@ -408,7 +415,7 @@ def test_claude_facade_json_envelope_carries_usage_and_cost(fenced_repo) -> None
     assert envelope["total_cost_usd"] > 0
 
 
-def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo) -> None:
+def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A resume invocation with ``--output-format json`` renders the same result
     envelope (``usage`` + ``total_cost_usd``) as a spawn (blizzard runner adapter
     ``resume_with_message``, epic #57) — the mock's resume path must not degrade
@@ -461,7 +468,7 @@ def test_claude_facade_resume_json_envelope_carries_usage_and_cost(fenced_repo) 
     assert envelope["total_cost_usd"] > 0
 
 
-def test_claude_facade_node_entry_resume_continues_in_place(fenced_repo) -> None:
+def test_claude_facade_node_entry_resume_continues_in_place(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A **spawn-shaped** node-entry resume — the
     extended real adapter's ``--resume <sid> <preamble+script>`` form, carrying the
     *same* full node preamble + node script a fresh spawn gets, not a bare
@@ -483,7 +490,7 @@ def test_claude_facade_node_entry_resume_continues_in_place(fenced_repo) -> None
     cwd, env = fenced_repo
     preamble = f"| Field | Value |\n|-------|-------|\n| environment workdir | `{cwd}` |\n\n"
 
-    def run(*extra_args: str, script: str) -> dict:
+    def run(*extra_args: str, script: str) -> dict[str, Any]:
         proc = subprocess.run(
             [
                 sys.executable,
@@ -541,14 +548,14 @@ def test_claude_facade_fence_refusal_exit_code(tmp_path: Path) -> None:
     assert "refused to run" in proc.stderr
 
 
-def test_claude_facade_bare_invocation_prints_usage(capsys) -> None:
+def test_claude_facade_bare_invocation_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         claude_code.main([])
     assert exc.value.code == 0
     assert "mock-claude-code" in capsys.readouterr().out
 
 
-def test_claude_facade_version_is_intercepted_before_argparse_and_exits_0(capsys) -> None:
+def test_claude_facade_version_is_intercepted_before_argparse_and_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     """The runner's health probe shells out with only
     `--version` — answered before any fence check or argparse validation runs, mirroring
     `opencode.py`'s own `--version` interception, unlike the real CLI's argparse-error exit
@@ -612,7 +619,7 @@ def test_split_worker_preamble_passes_a_bare_script_through() -> None:
     assert engine.split_worker_preamble("verdict('pass')\n") == ("", "verdict('pass')\n")
 
 
-def test_preamble_prefixed_prompt_still_runs_its_script(fenced_repo) -> None:
+def test_preamble_prefixed_prompt_still_runs_its_script(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The runner prepends a facts table to every spawn prompt; exec'ing it is a
     SyntaxError, which would fail the turn before the script ever runs."""
     cwd, _ = fenced_repo
@@ -683,7 +690,9 @@ def test_prose_that_only_mentions_the_tag_carries_no_block(mention: str) -> None
     ],
     ids=["unbalanced-inline", "balanced-inline"],
 )
-def test_preamble_prose_about_the_tag_leaves_a_legacy_script_alone(mention: str, fenced_repo) -> None:
+def test_preamble_prose_about_the_tag_leaves_a_legacy_script_alone(
+    mention: str, fenced_repo: tuple[Path, dict[str, str]]
+) -> None:
     """The runner composes the preamble, not the script author: operator prose that
     merely talks about the tag must neither hijack the run (its snippet becoming the
     program while the node's real script is silently reclassified as prose) nor, when
@@ -707,7 +716,7 @@ def test_split_behavior_script_separates_the_program_from_the_prose() -> None:
     assert "You are a fleet worker." in tagged.prose
 
 
-def test_tagged_prompt_execs_only_the_block(fenced_repo) -> None:
+def test_tagged_prompt_execs_only_the_block(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run(_tagged("verdict('pass', 'ran')"), fenced_repo)
 
     assert code == 0
@@ -715,7 +724,7 @@ def test_tagged_prompt_execs_only_the_block(fenced_repo) -> None:
     assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
 
 
-def test_multiple_blocks_are_concatenated_in_order(fenced_repo) -> None:
+def test_multiple_blocks_are_concatenated_in_order(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     prompt = _tagged("marks = ['first']", "marks.append('second')", "verdict('pass', ','.join(marks))")
 
     code, result = _run(prompt, fenced_repo)
@@ -724,7 +733,7 @@ def test_multiple_blocks_are_concatenated_in_order(fenced_repo) -> None:
     assert "first,second" in (result.text or "")
 
 
-def test_tagged_prompt_does_not_consult_the_preamble_split(fenced_repo) -> None:
+def test_tagged_prompt_does_not_consult_the_preamble_split(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A tagged prompt's prose may sit *after* the facts table — the positional split
     would feed that prose to the interpreter, the tag never does."""
     cwd, _ = fenced_repo
@@ -739,7 +748,7 @@ def test_tagged_prompt_does_not_consult_the_preamble_split(fenced_repo) -> None:
     assert result.subtype == "success"
 
 
-def test_a_tagged_block_still_runs_in_the_acquired_worktree(fenced_repo) -> None:
+def test_a_tagged_block_still_runs_in_the_acquired_worktree(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, _ = fenced_repo
     code, _ = _run(_tagged("import pathlib; pathlib.Path('tagged.txt').write_text('x')"), fenced_repo)
 
@@ -760,7 +769,9 @@ def test_a_tagged_block_still_runs_in_the_acquired_worktree(fenced_repo) -> None
     ],
     ids=["unclosed", "stray-close", "nested"],
 )
-def test_a_malformed_tag_fails_the_turn_loudly(prompt: str, expected: str, fenced_repo) -> None:
+def test_a_malformed_tag_fails_the_turn_loudly(
+    prompt: str, expected: str, fenced_repo: tuple[Path, dict[str, str]]
+) -> None:
     """Never a silent fall-through to legacy exec or a no-op turn: a typo'd tag that
     quietly succeeds with no verdict and no side effects makes tests rot invisibly."""
     with pytest.raises(engine.BehaviorScriptTagError):
@@ -783,7 +794,9 @@ def test_a_malformed_tag_fails_the_turn_loudly(prompt: str, expected: str, fence
     ],
     ids=["empty", "whitespace-only"],
 )
-def test_a_block_enclosing_nothing_fails_rather_than_succeeding_with_no_verdict(block: str, fenced_repo) -> None:
+def test_a_block_enclosing_nothing_fails_rather_than_succeeding_with_no_verdict(
+    block: str, fenced_repo: tuple[Path, dict[str, str]]
+) -> None:
     """Well-formed but empty is the same rot as malformed: exit 0 with no verdict and no
     side effects is exactly what a test cannot notice."""
     code, result = _run(f"{_PROSE}\n{block}\n", fenced_repo)
@@ -793,7 +806,7 @@ def test_a_block_enclosing_nothing_fails_rather_than_succeeding_with_no_verdict(
     assert "empty behavior-script block" in result.text
 
 
-def test_an_indented_block_is_dedented(fenced_repo) -> None:
+def test_an_indented_block_is_dedented(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A tag nested in a markdown list or blockquote — a natural shape once prompts read
     like prose — must yield runnable source, not an IndentationError."""
     prompt = (
@@ -811,7 +824,7 @@ def test_an_indented_block_is_dedented(fenced_repo) -> None:
     assert "indented" in (result.text or "")
 
 
-def test_a_tagged_resume_message_execs_its_block(fenced_repo) -> None:
+def test_a_tagged_resume_message_execs_its_block(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     _run(_tagged("ask('proceed?', ['yes', 'no'])"), fenced_repo, session_id="sess-tagged-resume")
 
     code, result = _run(
@@ -829,7 +842,7 @@ def test_a_tagged_resume_message_execs_its_block(fenced_repo) -> None:
     assert engine.BEHAVIOR_SCRIPT_OPEN not in (result.text or "")
 
 
-def test_an_untagged_resume_message_still_execs_in_full(fenced_repo) -> None:
+def test_an_untagged_resume_message_still_execs_in_full(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     _run("ask('proceed?')", fenced_repo, session_id="sess-untagged-resume")
 
     code, result = _run("verdict('pass', answer())", fenced_repo, session_id="sess-untagged-resume", is_resume=True)
@@ -840,7 +853,9 @@ def test_an_untagged_resume_message_still_execs_in_full(fenced_repo) -> None:
     assert "verdict('pass', answer())" in (result.text or "")
 
 
-def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_repo) -> None:
+def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """Genuine prose with the script blocks elided, replacing the synthetic placeholder."""
     recorded: list[str] = []
 
@@ -850,7 +865,7 @@ def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_re
 
         def record_result(self, result: engine.RunResult) -> None: ...
 
-        def record_tool_call(self, name: str, tool_input: dict) -> str:
+        def record_tool_call(self, name: str, tool_input: dict[str, Any]) -> str:
             return "toolu_x"
 
         def record_tool_result(self, tool_use_id: str, output: str) -> None: ...
@@ -871,7 +886,7 @@ def test_a_tagged_prompt_records_its_prose_as_the_transcript_user_turn(fenced_re
 # --------------------------------------------------------------------------- #
 
 
-def test_whole_message_execs_the_entire_body_with_no_tag(fenced_repo) -> None:
+def test_whole_message_execs_the_entire_body_with_no_tag(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("verdict('pass', 'ran')", fenced_repo, whole_message=True)
 
     assert code == 0
@@ -879,7 +894,9 @@ def test_whole_message_execs_the_entire_body_with_no_tag(fenced_repo) -> None:
     assert engine.CHOICE_OPEN + "pass" + engine.CHOICE_CLOSE in (result.text or "")
 
 
-def test_whole_message_ignores_a_behavior_script_tag_mention_on_its_own_line(fenced_repo) -> None:
+def test_whole_message_ignores_a_behavior_script_tag_mention_on_its_own_line(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """Whole-message mode does no sentinel scanning at all: a `<behavior-script>`
     mention alone on a line — the exact shape that ends a *tagged* block early — is
     just more script text here, even though it is itself invalid as a standalone
@@ -905,7 +922,7 @@ def test_whole_message_ignores_a_behavior_script_tag_mention_on_its_own_line(fen
     assert "should not run as code" not in (result.text or "")
 
 
-def test_whole_message_does_not_consult_the_preamble_split(fenced_repo) -> None:
+def test_whole_message_does_not_consult_the_preamble_split(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """A message that happens to contain a preamble-shaped facts table is still
     exec'd wholesale — whole-message mode never calls `split_worker_preamble`."""
     cwd, _ = fenced_repo
@@ -920,7 +937,7 @@ def test_whole_message_does_not_consult_the_preamble_split(fenced_repo) -> None:
     assert "ran despite the table-shaped string" in (result.text or "")
 
 
-def test_whole_message_resume_execs_the_entire_body_wholesale(fenced_repo) -> None:
+def test_whole_message_resume_execs_the_entire_body_wholesale(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     _run("ask('proceed?')", fenced_repo, session_id="sess-whole-resume", whole_message=True)
 
     code, result = _run(
@@ -942,7 +959,9 @@ def test_whole_message_resume_execs_the_entire_body_wholesale(fenced_repo) -> No
     ["", "   \n\n", "# just a comment\n# nothing to run\n"],
     ids=["empty", "whitespace-only", "comments-only"],
 )
-def test_a_whole_message_script_with_an_empty_module_body_fails_loudly(script: str, fenced_repo) -> None:
+def test_a_whole_message_script_with_an_empty_module_body_fails_loudly(
+    script: str, fenced_repo: tuple[Path, dict[str, str]]
+) -> None:
     """Well-formed-but-empty is the same rot as malformed: exit 0 with no verdict and
     no side effects is exactly what a test cannot notice."""
     code, result = _run(script, fenced_repo, whole_message=True)
@@ -953,7 +972,9 @@ def test_a_whole_message_script_with_an_empty_module_body_fails_loudly(script: s
     assert "empty whole-message behavior script" in result.text
 
 
-def test_whole_message_defaults_to_off_and_leaves_tagged_prompts_alone(fenced_repo) -> None:
+def test_whole_message_defaults_to_off_and_leaves_tagged_prompts_alone(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     # Without whole_message=True, a <behavior-script>-tagged prompt still splits.
     code, result = _run(_tagged("verdict('pass', 'ran')"), fenced_repo)
 
@@ -991,7 +1012,9 @@ def test_acquired_worktree_falls_back_to_cwd(tmp_path: Path) -> None:
     assert engine.acquired_worktree({engine.ENV_WORKDIRS_ENV_VAR: "/nonexistent/e9"}, tmp_path) == tmp_path
 
 
-def test_run_prompt_works_in_the_named_env_not_the_process_cwd(fenced_repo, tmp_path: Path) -> None:
+def test_run_prompt_works_in_the_named_env_not_the_process_cwd(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     """A spawned worker's cwd is the workspace root; the script must still touch its env."""
     repo, env = fenced_repo
     workspace = tmp_path / "workspace"
@@ -1054,7 +1077,9 @@ def _real_home_claude_projects_mtime() -> float | None:
     return path.stat().st_mtime if path.exists() else None
 
 
-def test_claude_facade_mints_a_transcript_with_matched_tool_turns(fenced_repo, tmp_path: Path) -> None:
+def test_claude_facade_mints_a_transcript_with_matched_tool_turns(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     """A real spawn + apply_diff + commit + verdict, driven through the actual
     ``mock-claude-code`` binary, mints Claude-shaped JSONL: one spawn ``user``
     record, a matched ``tool_use``/``tool_result`` pair per ``apply_diff``/
@@ -1146,7 +1171,9 @@ def test_claude_facade_mints_a_transcript_with_matched_tool_turns(fenced_repo, t
         assert usage["cache_creation_input_tokens"] > 0
 
 
-def test_claude_facade_resume_mints_another_user_and_assistant_turn(fenced_repo, tmp_path: Path) -> None:
+def test_claude_facade_resume_mints_another_user_and_assistant_turn(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     cwd, env = fenced_repo
     transcripts_dir = tmp_path / "transcripts"
     env = {**env, "BZ_TRANSCRIPTS_ROOT": str(transcripts_dir)}
@@ -1196,7 +1223,9 @@ def test_claude_facade_resume_mints_another_user_and_assistant_turn(fenced_repo,
     assert len(assistant_text_records) == 2  # the ask + the resumed verdict
 
 
-def test_claude_facade_without_session_id_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
+def test_claude_facade_without_session_id_writes_no_transcript(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     """No ``--session-id``/``--resume`` means no session id is known up front, so
     the facade skips transcript writing rather than guessing at a file name."""
     cwd, env = fenced_repo
@@ -1214,7 +1243,7 @@ def test_claude_facade_without_session_id_writes_no_transcript(fenced_repo, tmp_
     assert not transcripts_dir.exists()
 
 
-def test_codex_facade_writes_no_transcript(fenced_repo, tmp_path: Path) -> None:
+def test_codex_facade_writes_no_transcript(fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path) -> None:
     """Only claude_code constructs a transcript writer; codex/opencode are a no-op."""
     cwd, env = fenced_repo
     transcripts_dir = tmp_path / "transcripts"
@@ -1283,7 +1312,9 @@ def test_synthesize_cost_usd_grows_with_token_counts() -> None:
 # --- recorded model/effort flags --------------------------------
 
 
-def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool = False, **flags) -> None:
+def _run_claude(
+    cwd: Path, env: dict[str, str], session: str, script: str, *, resume: bool = False, **flags: Any
+) -> None:
     """One `mock-claude-code` turn, with whichever session flags were given."""
     session_flag = ["--resume", session] if resume else ["--session-id", session]
     extra = [arg for name, value in flags.items() if value for arg in (f"--{name.replace('_', '-')}", value)]
@@ -1307,12 +1338,14 @@ def _run_claude(cwd: Path, env: dict, session: str, script: str, *, resume: bool
     assert proc.returncode == 0, proc.stderr
 
 
-def _session_state(cwd: Path, session: str) -> dict:
+def _session_state(cwd: Path, session: str) -> dict[str, Any]:
     path = engine.fence_base_dir(cwd) / ".blizzard-mock-harness" / "sessions" / f"{session}.json"
     return json.loads(path.read_text())
 
 
-def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(fenced_repo) -> None:
+def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """The observable behind blizzard's mint-only model contract: a mint carries the
     resolved model, and a resume carries none — the harness restores the session's own.
 
@@ -1331,7 +1364,7 @@ def test_claude_facade_records_the_model_and_effort_flags_each_turn_received(fen
     ]
 
 
-def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -> None:
+def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     _run_claude(cwd, env, "sess-2", "verdict('pass')")
 
@@ -1340,7 +1373,9 @@ def test_a_turn_launched_with_neither_flag_records_both_as_absent(fenced_repo) -
     ]
 
 
-def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_repo) -> None:
+def test_claude_facade_records_the_autocompact_flag_each_turn_received(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """`--autocompact` is recorded the same way as `--model`/`--effort` —
     reasserted on a resume, never acted on: the mock only ever sees argv."""
     cwd, env = fenced_repo
@@ -1355,14 +1390,18 @@ def test_claude_facade_records_the_autocompact_flag_each_turn_received(fenced_re
     ]
 
 
-def test_claude_facade_accepts_runner_permission_mode_on_spawn_and_resume(fenced_repo) -> None:
+def test_claude_facade_accepts_runner_permission_mode_on_spawn_and_resume(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     cwd, env = fenced_repo
     _run_claude(cwd, env, "sess-permissions", "verdict('pass')", permission_mode="bypassPermissions")
     _run_claude(cwd, env, "sess-permissions", "verdict('pass')", resume=True, permission_mode="bypassPermissions")
     assert [turn["kind"] for turn in _session_state(cwd, "sess-permissions")["invocations"]] == ["spawn", "resume"]
 
 
-def test_claude_facade_accepts_the_bundle_companion_flags_before_the_prompt(fenced_repo) -> None:
+def test_claude_facade_accepts_the_bundle_companion_flags_before_the_prompt(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """The runner passes ``--mcp-config=<path>`` in its ``=`` form so the trailing prompt stays
     positional; the mock parses the same argv and runs the prompt as its script."""
     cwd, env = fenced_repo
@@ -1399,7 +1438,7 @@ def test_claude_facade_accepts_the_bundle_companion_flags_before_the_prompt(fenc
 # --------------------------------------------------------------------------- #
 
 
-def _run_opencode(cwd: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
+def _run_opencode(cwd: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "blizzard_mock.harness.facades.opencode", *args],
         cwd=cwd,
@@ -1409,7 +1448,7 @@ def _run_opencode(cwd: Path, env: dict, *args: str) -> subprocess.CompletedProce
     )
 
 
-def test_opencode_facade_mints_a_server_assigned_session_id(fenced_repo) -> None:
+def test_opencode_facade_mints_a_server_assigned_session_id(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """No ``--session`` at all on a fresh mint: the id in the first event is one the
     caller never supplied, exactly as OpenCode's own fresh-session handshake works."""
     cwd, env = fenced_repo
@@ -1423,7 +1462,7 @@ def test_opencode_facade_mints_a_server_assigned_session_id(fenced_repo) -> None
     assert all(event["sessionID"] == session_id for event in lines)
 
 
-def test_opencode_facade_emits_text_and_step_finish_events(fenced_repo) -> None:
+def test_opencode_facade_emits_text_and_step_finish_events(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     proc = _run_opencode(cwd, env, "run", "verdict('approve', 'looks good')")
     assert proc.returncode == 0, proc.stderr
@@ -1438,7 +1477,7 @@ def test_opencode_facade_emits_text_and_step_finish_events(fenced_repo) -> None:
     assert finish["tokens"]["output"] > 0
 
 
-def test_opencode_facade_resume_keeps_the_same_session_id(fenced_repo) -> None:
+def test_opencode_facade_resume_keeps_the_same_session_id(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     first = _run_opencode(cwd, env, "run", "ask('proceed?', ['yes', 'no'])")
     assert first.returncode == 0, first.stderr
@@ -1449,7 +1488,9 @@ def test_opencode_facade_resume_keeps_the_same_session_id(fenced_repo) -> None:
     assert json.loads(second.stdout.splitlines()[0])["sessionID"] == session_id
 
 
-def test_opencode_facade_error_turn_emits_an_error_event_and_exits_nonzero(fenced_repo) -> None:
+def test_opencode_facade_error_turn_emits_an_error_event_and_exits_nonzero(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     cwd, env = fenced_repo
     proc = _run_opencode(cwd, env, "run", "crash()")
     assert proc.returncode == 1
@@ -1460,7 +1501,7 @@ def test_opencode_facade_error_turn_emits_an_error_event_and_exits_nonzero(fence
     assert "crash" in error_events[0]["error"]["data"]["message"]
 
 
-def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo) -> None:
+def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The identity-bearing ``step_start`` record must be readable off the child's own
     stdout well before the process exits — not just first in a buffered final capture.
 
@@ -1517,7 +1558,7 @@ def test_opencode_facade_streams_identity_before_the_turn_finishes(fenced_repo) 
     assert all(e["sessionID"] == event["sessionID"] for e in remaining_lines)
 
 
-def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo) -> None:
+def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The model/variant/permission flags an OpenCode turn was launched with land on the
     same shared ``Invocation`` record every other facade uses."""
     cwd, env = fenced_repo
@@ -1543,7 +1584,7 @@ def test_opencode_facade_records_model_variant_and_permission_flags(fenced_repo)
     ]
 
 
-def test_opencode_facade_takeover_shape_does_not_crash(fenced_repo) -> None:
+def test_opencode_facade_takeover_shape_does_not_crash(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The interactive TUI shape (``opencode --session <id>``, no ``run``, no script) must
     be answered sanely rather than crashing — there is no automated turn to drive here."""
     cwd, env = fenced_repo
@@ -1552,7 +1593,9 @@ def test_opencode_facade_takeover_shape_does_not_crash(fenced_repo) -> None:
     assert "sess-takeover" in proc.stdout
 
 
-def test_opencode_facade_mints_an_export_document_with_matched_tool_turns(fenced_repo, tmp_path: Path) -> None:
+def test_opencode_facade_mints_an_export_document_with_matched_tool_turns(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     """A real spawn + tool_call + verdict, driven through the actual ``mock-opencode``
     binary, mints an OpenCode-shaped export document: a user text part, a completed
     tool part, and a closing assistant text + step-finish pair — and ``export``
@@ -1591,7 +1634,9 @@ def test_opencode_facade_mints_an_export_document_with_matched_tool_turns(fenced
     assert json.loads(export_proc.stdout) == doc
 
 
-def test_opencode_export_of_a_missing_session_fails_loudly(fenced_repo, tmp_path: Path) -> None:
+def test_opencode_export_of_a_missing_session_fails_loudly(
+    fenced_repo: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
     cwd, env = fenced_repo
     env = {**env, "BZ_TRANSCRIPTS_ROOT": str(tmp_path / "transcripts")}
 
@@ -1637,7 +1682,7 @@ def _commits(cwd: Path) -> int:
     return int(out.stdout)
 
 
-def test_selftest_spawn_commits_the_canary_file(fenced_repo) -> None:
+def test_selftest_spawn_commits_the_canary_file(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = _selftest_env(fenced_repo)
     before = _commits(cwd)
     code, _ = _run("Create SELFTEST.txt and commit it.", (cwd, env), session_id="selftest-a")
@@ -1646,14 +1691,14 @@ def test_selftest_spawn_commits_the_canary_file(fenced_repo) -> None:
     assert _commits(cwd) == before + 1
 
 
-def test_selftest_resume_judges_from_repo_state(fenced_repo) -> None:
+def test_selftest_resume_judges_from_repo_state(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = _selftest_env(fenced_repo)
     _run("Create SELFTEST.txt and commit it.", (cwd, env), session_id="selftest-a")
     _, result = _run("Assess the task.", (cwd, env), session_id="selftest-a", is_resume=True)
     assert "<Choice>pass</Choice>" in result.text
 
 
-def test_selftest_judges_fail_without_the_commit(fenced_repo) -> None:
+def test_selftest_judges_fail_without_the_commit(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = _selftest_env(fenced_repo)
     # The session is a selftest one, but the work never landed.
     store = engine.SessionStore(engine._state_root(env, cwd))
@@ -1669,13 +1714,13 @@ def test_selftest_responder_never_weakens_the_fence(tmp_path: Path) -> None:
         engine.run_prompt("Create SELFTEST.txt.", cwd=tmp_path, env={"BLIZZARD_LEASE_ID": "selftest"})
 
 
-def test_non_selftest_prose_is_still_a_script_error(fenced_repo) -> None:
+def test_non_selftest_prose_is_still_a_script_error(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     code, result = _run("Create SELFTEST.txt and commit it.", fenced_repo)
     assert code == 1
     assert result.is_error
 
 
-def test_spawn_records_the_runner_exported_credential(fenced_repo) -> None:
+def test_spawn_records_the_runner_exported_credential(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     spawn_env = {
         **env,
@@ -1699,7 +1744,7 @@ def test_spawn_records_the_runner_exported_credential(fenced_repo) -> None:
     }
 
 
-def test_resume_with_a_resupplied_token_supersedes_the_recorded_one(fenced_repo) -> None:
+def test_resume_with_a_resupplied_token_supersedes_the_recorded_one(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     _run(
         "verdict('ok')",
@@ -1718,7 +1763,7 @@ def test_resume_with_a_resupplied_token_supersedes_the_recorded_one(fenced_repo)
     assert state.spawn_credential.lease_token == "tok-2"
 
 
-def test_spawn_without_credential_records_absent_vars_as_null(fenced_repo) -> None:
+def test_spawn_without_credential_records_absent_vars_as_null(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = fenced_repo
     env = {k: v for k, v in env.items() if not k.startswith("BLIZZARD_") or k == engine.FENCE_ENV_VAR}
     _run("verdict('ok')", (cwd, env), session_id="cred-b")
