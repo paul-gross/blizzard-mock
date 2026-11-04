@@ -74,7 +74,7 @@ class FleetClient(TestClient):
         service: MockHubService = self.app.state.service  # type: ignore[attr-defined]
         return service
 
-    def request(self, method: str, url: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+    def request(self, method: str, url: Any, **kwargs: Any) -> Any:
         path = urlsplit(str(url)).path
         headers = dict(kwargs.pop("headers", None) or {})
         if path.startswith(_FLEET) and not any(key.lower() == "authorization" for key in headers):

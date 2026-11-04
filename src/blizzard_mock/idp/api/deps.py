@@ -7,8 +7,8 @@ from blizzard_mock.idp.domain.state import IdpState
 
 
 def get_state(request: Request) -> IdpState:
-    return request.app.state.idp_state  # type: ignore[no-any-return]
+    return request.app.state.idp_state
 
 
 def get_signer(request: Request) -> IdTokenSigner:
-    return request.app.state.signer  # type: ignore[no-any-return]
+    return request.app.state.signer
