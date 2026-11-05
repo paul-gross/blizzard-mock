@@ -564,6 +564,19 @@ class WorkItemsView(BaseModel):
     items: list[WorkItemEntry] = Field(default_factory=list[WorkItemEntry])
 
 
+class ArtifactCheckRequest(BaseModel):
+    """Mirrors ``blizzard.wire.attachments.ArtifactCheckRequest`` — content a worker is about to stage."""
+
+    name: str
+    content: str
+
+
+class ArtifactCheckResponse(BaseModel):
+    """Mirrors ``blizzard.wire.attachments.ArtifactCheckResponse`` — the hub's verdict on a staging offer."""
+
+    refusal: str | None = None
+
+
 class FindingView(BaseModel):
     """One garden finding — mirrors ``blizzard.wire.finding.FindingView``."""
 

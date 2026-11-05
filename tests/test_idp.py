@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import httpx2 as httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
 
 from blizzard_mock.idp.app import create_app
+from blizzard_mock.idp.domain.state import IdpState
 
 
 @pytest.fixture
@@ -23,7 +27,7 @@ def client() -> TestClient:
     return TestClient(create_app())
 
 
-def _redirect_query(resp) -> dict[str, str]:
+def _redirect_query(resp: httpx.Response) -> dict[str, str]:
     location = resp.headers["location"]
     return {k: v[0] for k, v in parse_qs(urlparse(location).query).items()}
 
@@ -67,7 +71,8 @@ def test_oidc_full_dance_mints_a_verifiable_id_token(client: TestClient) -> None
 
     jwks = client.get("/oidc/jwks").json()
     key = RSAAlgorithm.from_jwk(jwks["keys"][0])
-    claims = jwt.decode(id_token, key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert isinstance(key, RSAPublicKey)
+    claims = jwt.decode(id_token, key=key, algorithms=["RS256"], audience="cid")
     assert claims["sub"] == "1001"
     assert claims["preferred_username"] == "octocat"
     assert claims["email"] == "octocat@example.com"
@@ -129,7 +134,8 @@ def test_oidc_unverified_email_profile_lever(client: TestClient) -> None:
     )
     jwks = client.get("/oidc/jwks").json()
     key = RSAAlgorithm.from_jwk(jwks["keys"][0])
-    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert isinstance(key, RSAPublicKey)
+    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")
     assert claims["email_verified"] is False
 
 
@@ -290,7 +296,8 @@ def test_oidc_id_token_carries_the_primary_address_alone(client: TestClient) -> 
     )
     jwks = client.get("/oidc/jwks").json()
     key = RSAAlgorithm.from_jwk(jwks["keys"][0])
-    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert isinstance(key, RSAPublicKey)
+    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")
     assert claims["email"] == "ada@example.com"
     assert "a@x.example" not in str(claims)
 
@@ -367,15 +374,18 @@ def test_levers_profile_role_round_trips_through_a_subsequent_authorize_dance(cl
     )
     access_token = token_resp.json()["access_token"]
 
-    idp_state = client.app.state.idp_state  # type: ignore[attr-defined]
+    assert isinstance(client.app, FastAPI)
+    idp_state: IdpState = client.app.state.idp_state
     resolved_profile = idp_state.profile_for_access_token(access_token)
+    assert resolved_profile is not None
     assert resolved_profile.role == "contributor"
 
     # additive only — the role never surfaces in the signed id_token, which stays
     # provider-shaped
     jwks = client.get("/oidc/jwks").json()
     key = RSAAlgorithm.from_jwk(jwks["keys"][0])
-    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert isinstance(key, RSAPublicKey)
+    claims = jwt.decode(token_resp.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")
     assert "role" not in claims
 
 

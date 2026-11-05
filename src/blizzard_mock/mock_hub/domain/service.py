@@ -76,6 +76,7 @@ from blizzard_mock.mock_hub.domain.wire import (
     AnalyticsSpendResponse,
     AnalyticsSpendView,
     ApplyResponse,
+    ArtifactCheckResponse,
     BlockedView,
     ChunkDetail,
     ChunkEscalationView,
@@ -821,6 +822,14 @@ class MockHubService:
                 )
             )
         return views
+
+    def artifact_check(self, chunk_id: str) -> ArtifactCheckResponse:
+        """Mirrors ``POST /api/fleet/chunks/{id}/artifact-check`` — no refusal unless the ``artifact_refusal``
+        lever is armed, then its payload's ``refusal``. The mock holds no graph wiring, so it judges no content."""
+        self._require(chunk_id)
+        lever = self._levers.find(HubLever.ARTIFACT_REFUSAL.value, chunk_id)
+        refusal = lever.payload.get("refusal") if lever is not None else None
+        return ArtifactCheckResponse(refusal=str(refusal) if refusal is not None else None)
 
     def work_items(self, chunk_id: str) -> WorkItemsView:
         """A chunk's pass-through work items — one canned entry per pointer.

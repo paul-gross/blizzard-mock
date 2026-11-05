@@ -75,6 +75,7 @@ from blizzard_mock.mock_hub.domain.state import (
     RunnerCapability,
     RunnerDecliningView,
 )
+from blizzard_mock.mock_hub.domain.wire import ArtifactCheckRequest
 
 #: Unauthenticated liveness — unaffected by the fleet partition, exactly as on the real
 #: hub.
@@ -289,6 +290,18 @@ def get_envelope(chunk_id: str, service: Annotated[MockHubService, Depends(get_s
 def get_work_items(chunk_id: str, service: Annotated[MockHubService, Depends(get_service)]) -> object:
     try:
         return service.work_items(chunk_id)
+    except ChunkNotFound as exc:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@fleet_router.post("/chunks/{chunk_id}/artifact-check")
+def post_artifact_check(
+    chunk_id: str, body: ArtifactCheckRequest, service: Annotated[MockHubService, Depends(get_service)]
+) -> object:
+    """The verdict on content a worker is about to stage — mirrors the real hub's
+    ``POST /api/fleet/chunks/{id}/artifact-check``; refuses only under the ``artifact_refusal`` lever."""
+    try:
+        return service.artifact_check(chunk_id)
     except ChunkNotFound as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 

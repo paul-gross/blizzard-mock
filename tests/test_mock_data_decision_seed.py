@@ -76,7 +76,9 @@ def test_resolution_lands_a_decision_resolutions_row() -> None:
     assert values["decision_id"] == seed.decision_id
     assert values["choice"] == "reject"
     assert values["resolved_by"] == "operator-1"
-    assert values["resolved_at"] > _NOW  # type: ignore[operator]
+    resolved_at = values["resolved_at"]
+    assert isinstance(resolved_at, datetime)
+    assert resolved_at > _NOW
 
 
 def test_two_calls_mint_independent_decision_ids() -> None:

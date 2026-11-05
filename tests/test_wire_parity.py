@@ -460,6 +460,8 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "WorkItemAuthorView": ("WorkItemAuthorView", frozenset()),
     "WorkItemEntry": ("WorkItemEntry", frozenset()),
     "WorkItemsView": ("WorkItemsView", frozenset()),
+    "ArtifactCheckRequest": ("ArtifactCheckRequest", frozenset()),
+    "ArtifactCheckResponse": ("ArtifactCheckResponse", frozenset()),
 }
 
 #: Mirrors with no schema to compare against, and why. ``RouteClaimConflict`` is the real

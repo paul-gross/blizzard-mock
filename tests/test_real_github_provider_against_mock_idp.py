@@ -14,7 +14,7 @@ import socket
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -63,7 +63,7 @@ def _free_port() -> int:
 
 
 @contextmanager
-def _served_idp() -> Iterator[str]:
+def _served_idp() -> Generator[str]:
     port = _free_port()
     server = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)

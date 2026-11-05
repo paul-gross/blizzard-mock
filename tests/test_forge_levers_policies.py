@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,8 +18,20 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         yield c
 
 
-def _runs(client: TestClient, ref: str) -> dict[str, object]:
-    return client.get(f"/repos/{REPO}/commits/{ref}/check-runs").json()
+class _CheckRun(TypedDict):
+    name: str
+    status: str
+    conclusion: str | None
+
+
+class _CheckRuns(TypedDict):
+    total_count: int
+    check_runs: list[_CheckRun]
+
+
+def _runs(client: TestClient, ref: str) -> _CheckRuns:
+    body: _CheckRuns = client.get(f"/repos/{REPO}/commits/{ref}/check-runs").json()
+    return body
 
 
 def _arm(client: TestClient, ref: str, *checks: tuple[str, str]) -> None:
@@ -30,16 +43,16 @@ def test_named_runs_are_armed_added_replaced_and_emptied(client: TestClient) -> 
     _arm(client, "feature", ("build", "pending"))
     body = _runs(client, "feature")
     assert body["total_count"] == 1
-    run = body["check_runs"][0]  # type: ignore[index]
+    run = body["check_runs"][0]
     assert (run["name"], run["status"], run["conclusion"]) == ("build", "in_progress", None)
 
     _arm(client, "feature", ("lint", "success"))
-    names = {r["name"]: r for r in _runs(client, "feature")["check_runs"]}  # type: ignore[attr-defined]
+    names = {r["name"]: r for r in _runs(client, "feature")["check_runs"]}
     assert set(names) == {"build", "lint"}
     assert names["lint"]["conclusion"] == "success"
 
     _arm(client, "feature", ("build", "failed"))
-    names = {r["name"]: r for r in _runs(client, "feature")["check_runs"]}  # type: ignore[attr-defined]
+    names = {r["name"]: r for r in _runs(client, "feature")["check_runs"]}
     assert set(names) == {"build", "lint"}
     assert (names["build"]["status"], names["build"]["conclusion"]) == ("completed", "failure")
 
@@ -52,7 +65,7 @@ def test_runs_attach_to_the_revision_not_the_spelling(client: TestClient) -> Non
     by_sha = _runs(client, sha_of(client, "feature"))
     assert by_sha["total_count"] == 1
     # A revision nothing was armed against keeps the derived single run.
-    assert _runs(client, "ahead")["check_runs"][0]["name"] == "ci"  # type: ignore[index]
+    assert _runs(client, "ahead")["check_runs"][0]["name"] == "ci"
 
 
 def test_invalid_status_is_422(client: TestClient) -> None:
@@ -62,15 +75,15 @@ def test_invalid_status_is_422(client: TestClient) -> None:
 
 def test_base_checks_failed_reads_red_for_the_base_tip_by_sha(client: TestClient) -> None:
     client.post("/_levers/base_checks_failed", json={"repo": REPO})
-    assert _runs(client, "main")["check_runs"][0]["conclusion"] == "failure"  # type: ignore[index]
-    assert _runs(client, sha_of(client, "main"))["check_runs"][0]["conclusion"] == "failure"  # type: ignore[index]
-    assert _runs(client, "ahead")["check_runs"][0]["conclusion"] == "success"  # type: ignore[index]
+    assert _runs(client, "main")["check_runs"][0]["conclusion"] == "failure"
+    assert _runs(client, sha_of(client, "main"))["check_runs"][0]["conclusion"] == "failure"
+    assert _runs(client, "ahead")["check_runs"][0]["conclusion"] == "success"
 
 
 def test_reset_clears_armed_runs(client: TestClient) -> None:
     _arm(client, "feature", ("build", "failed"))
     client.post("/_levers/reset")
-    assert _runs(client, "feature")["check_runs"][0]["name"] == "ci"  # type: ignore[index]
+    assert _runs(client, "feature")["check_runs"][0]["name"] == "ci"
 
 
 def test_protected_branch_refuses_ref_update(client: TestClient) -> None:

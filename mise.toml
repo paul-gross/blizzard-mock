@@ -29,7 +29,3 @@ run = "vale --output=line ."
 [tasks.gate]
 description = "Local reproduction of gate.yml's checks"
 run = "./scripts/ci-gate.sh"
-
-[tasks.typecheck-strict]
-description = "Report pyright strict errors over src and tests (gates nothing; pass --outputjson for counts)"
-run = "./scripts/typecheck-strict.sh"

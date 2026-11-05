@@ -10,6 +10,7 @@ import json
 import re
 import sys
 import types
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     MetaData,
+    Row,
     String,
     Table,
     Text,
@@ -362,8 +364,8 @@ def _full_hub_store(tmp_path: Path, *, tenant_ids: tuple[str, ...] | None = None
         Column("output_tokens", Integer, nullable=False),
         Column("cache_read_tokens", Integer, nullable=False),
         Column("cache_create_tokens", Integer, nullable=False),
-        Column("cost_usd", Float, nullable=True),
-        Column("estimated_cost_usd", Float, nullable=True),
+        Column("cost_usd", Float(), nullable=True),
+        Column("estimated_cost_usd", Float(), nullable=True),
         Column("recorded_at", DateTime, nullable=False),
     )
     Table(
@@ -572,8 +574,8 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("output_tokens", Integer, nullable=False),
         Column("cache_read_tokens", Integer, nullable=False),
         Column("cache_create_tokens", Integer, nullable=False),
-        Column("cost_usd", Float, nullable=True),
-        Column("estimated_cost_usd", Float, nullable=True),
+        Column("cost_usd", Float(), nullable=True),
+        Column("estimated_cost_usd", Float(), nullable=True),
         Column("recorded_at", DateTime, nullable=False),
     )
     Table(
@@ -698,7 +700,7 @@ def _full_runner_store(tmp_path: Path) -> tuple[str, MetaData]:
     return url, meta
 
 
-def _lease_select_rows(meta: MetaData, engine, chunk_id: str) -> list:
+def _lease_select_rows(meta: MetaData, engine: Engine, chunk_id: str) -> Sequence[Row[tuple[object, ...]]]:
     """Read a lease back the way the daemon does — ``_lease_select()``'s own inner
     join of ``leases`` to ``lease_context`` (``sqlalchemy_store.py`` lines 1789-1808)
     — never a bare ``leases`` row, which the drift guard alone cannot catch."""
@@ -4506,7 +4508,7 @@ def test_reset_hub_keeps_the_global_tables_the_hub_schema_declares(
 ) -> None:
     """Installed alongside, the hub's own schema module names the global tables."""
     schema = types.ModuleType("blizzard.hub.store.schema")
-    schema.GLOBAL_TABLES = frozenset({"runner_external_usage"})  # type: ignore[attr-defined]
+    monkeypatch.setattr(schema, "GLOBAL_TABLES", frozenset({"runner_external_usage"}), raising=False)
     monkeypatch.setitem(sys.modules, "blizzard.hub.store.schema", schema)
     url, meta, registrations, _pause = _hub_store(tmp_path)
     usage = meta.tables["runner_external_usage"]

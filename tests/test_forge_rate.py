@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx2 import Response
 
 from blizzard_mock.forge.domain.clock import FixedClock
 from blizzard_mock.forge.domain.rate import DEFAULT_RATE_LIMIT
@@ -22,8 +23,8 @@ def world(tmp_path: Path) -> Iterator[tuple[TestClient, FixedClock]]:
         yield client, clock
 
 
-def _remaining(resp: object, header: str = "X-RateLimit-Remaining") -> int:
-    return int(resp.headers[header])  # type: ignore[attr-defined]
+def _remaining(resp: Response, header: str = "X-RateLimit-Remaining") -> int:
+    return int(resp.headers[header])
 
 
 def _as(token: str) -> dict[str, str]:

@@ -213,8 +213,8 @@ def test_a_host_pushes_usage_facts_against_a_mark_of_its_own(client: FleetClient
 def test_a_host_lane_rejects_other_kinds_and_holds_the_mark_behind_them(client: FleetClient) -> None:
     added = _add(client)
     headers = _bearer(added["token"])
-    other = {"seq": 2, "kind": "lease.minted", "payload": {}}
-    no_slug = {"seq": 3, "kind": "external_subscription_usage.sampled", "payload": {}}
+    other: dict[str, object] = {"seq": 2, "kind": "lease.minted", "payload": {}}
+    no_slug: dict[str, object] = {"seq": 3, "kind": "external_subscription_usage.sampled", "payload": {}}
 
     ack = client.post("/api/fleet/host/events", json={"facts": [_sample(1), other, no_slug]}, headers=headers).json()
 
