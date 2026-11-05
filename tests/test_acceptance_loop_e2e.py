@@ -43,7 +43,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 import httpx2 as httpx
@@ -97,7 +97,7 @@ def _is_ancestor(bare: Path, ancestor: str, branch: str) -> bool:
 
 
 @contextlib.contextmanager
-def _forge(repos_dir: Path, port: int) -> Iterator[httpx.Client]:
+def _forge(repos_dir: Path, port: int) -> Generator[httpx.Client]:
     """Start the real ``blizzard-mock-forge`` uvicorn entrypoint over ``repos_dir``."""
     proc = subprocess.Popen(
         [

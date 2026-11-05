@@ -8,11 +8,13 @@ from a store, just handed straight through.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
 
 from blizzard_mock.clock import FixedClock
+from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.scenario_seed import compose_board_scenario
 from blizzard_mock.mock_data.domain.runner.scenario_seed import RunnerFleetCompositionError, compose_runner_fleet
 
@@ -36,7 +38,7 @@ def _fleet(chunks: int = 6, *, seed: int = 1, escalation_reason: str = "escalate
     return census, fleet
 
 
-def _rows_for(rows, table: str):
+def _rows_for(rows: Sequence[FactRow], table: str) -> list[FactRow]:
     return [row for row in rows if row.table == table]
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 import pytest
 
@@ -18,17 +19,61 @@ from blizzard_mock.harness.facades._opencode_transcript import (
 from blizzard_mock.harness.facades.opencode import OpenCodeRunWire
 
 
-def _step_finish(wire: OpenCodeRunWire) -> dict:
-    lines = [json.loads(line) for line in wire.render(RunResult(session_id="ses_1", text="done here")).splitlines()]
+class _Tokens(TypedDict):
+    input: int
+    output: int
+
+
+class _Costed(TypedDict):
+    cost: float
+    tokens: _Tokens
+
+
+class _Part(TypedDict):
+    type: str
+    cost: NotRequired[float]
+    tokens: NotRequired[_Tokens]
+
+
+class _Info(TypedDict):
+    role: str
+    cost: NotRequired[float]
+    tokens: NotRequired[_Tokens]
+
+
+class _Message(TypedDict):
+    info: _Info
+    parts: list[_Part]
+
+
+class _Transcript(TypedDict):
+    messages: list[_Message]
+
+
+class _RunLine(TypedDict):
+    type: str
+    part: NotRequired[_Part]
+
+
+def _costed(record: _Part | _Info) -> _Costed:
+    assert "cost" in record and "tokens" in record
+    return {"cost": record["cost"], "tokens": record["tokens"]}
+
+
+def _step_finish(wire: OpenCodeRunWire) -> _Costed:
+    lines: list[_RunLine] = [
+        json.loads(line) for line in wire.render(RunResult(session_id="ses_1", text="done here")).splitlines()
+    ]
     (finish,) = [line for line in lines if line["type"] == "step_finish"]
-    return finish["part"]
+    assert "part" in finish
+    return _costed(finish["part"])
 
 
-def _assistant(tmp_path: Path, *, billed_zero: bool) -> dict:
+def _assistant(tmp_path: Path, *, billed_zero: bool) -> _Message:
     writer = OpenCodeTranscriptWriter(session_id="sess-bz", root=tmp_path, cwd=tmp_path, billed_zero=billed_zero)
     writer.record_user("go")
     writer.record_result(RunResult(session_id="sess-bz", text="done here"))
-    doc = json.loads(document_path(tmp_path, "sess-bz").read_text())
+    doc: _Transcript = json.loads(document_path(tmp_path, "sess-bz").read_text())
     return next(m for m in doc["messages"] if m["info"]["role"] == "assistant")
 
 
@@ -45,18 +90,20 @@ def test_the_run_stream_reports_zero_cost_and_keeps_tokens_when_billed_zero() ->
 
 def test_the_transcript_reports_a_synthesized_cost_by_default(tmp_path: Path) -> None:
     assistant = _assistant(tmp_path, billed_zero=False)
-    finish = next(p for p in assistant["parts"] if p["type"] == "step-finish")
+    finish = _costed(next(p for p in assistant["parts"] if p["type"] == "step-finish"))
+    info = _costed(assistant["info"])
     assert finish["cost"] > 0
-    assert assistant["info"]["cost"] > 0
+    assert info["cost"] > 0
 
 
 def test_the_transcript_reports_zero_cost_and_keeps_tokens_when_billed_zero(tmp_path: Path) -> None:
     assistant = _assistant(tmp_path, billed_zero=True)
-    finish = next(p for p in assistant["parts"] if p["type"] == "step-finish")
+    finish = _costed(next(p for p in assistant["parts"] if p["type"] == "step-finish"))
+    info = _costed(assistant["info"])
     assert finish["cost"] == 0
-    assert assistant["info"]["cost"] == 0
+    assert info["cost"] == 0
     assert finish["tokens"]["output"] > 0
-    assert assistant["info"]["tokens"] == finish["tokens"]
+    assert info["tokens"] == finish["tokens"]
 
 
 @pytest.mark.parametrize(("value", "expected"), [(None, False), ("0", False), ("true", False), ("1", True)])

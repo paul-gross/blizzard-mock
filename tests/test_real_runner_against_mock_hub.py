@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -244,7 +244,7 @@ _SQLITE_SIBLINGS = ("-wal", "-shm", "-journal")
 
 
 @contextmanager
-def _serving_mock_hub() -> Iterator[tuple[str, MockHubService]]:
+def _serving_mock_hub() -> Generator[tuple[str, MockHubService]]:
     """A mock hub bound on a free local port for the block's duration: its URL and its service."""
     hub_port = _free_port()
     app = create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC)))

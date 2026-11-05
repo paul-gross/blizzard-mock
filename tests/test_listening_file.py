@@ -11,7 +11,7 @@ import contextlib
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -21,7 +21,7 @@ from tests.forge_world import REPO, build_repos
 
 
 @contextlib.contextmanager
-def _daemon(module: str, tmp_path: Path, name: str, *args: str, host: str = "127.0.0.1") -> Iterator[str]:
+def _daemon(module: str, tmp_path: Path, name: str, *args: str, host: str = "127.0.0.1") -> Generator[str]:
     """Spawn ``module`` on ``--port 0`` and yield the URL its listening file publishes."""
     listening = tmp_path / f"{name}.url"
     log_path = tmp_path / f"{name}.log"
@@ -71,10 +71,12 @@ def test_forge_publishes_its_bound_url_and_emits_it(tmp_path: Path) -> None:
     with _daemon("blizzard_mock.forge.cli", tmp_path, "forge", "--repos-dir", str(repos)) as url:
         port = _bound_port(url)
         assert httpx.get(f"{url}/healthz").status_code == 200
-        body = httpx.get(f"{url}/repos/{REPO}").json()
+        body: dict[str, object] = httpx.get(f"{url}/repos/{REPO}").json()
         for key in ("url", "html_url"):
-            assert urlparse(body[key]).port == port, body[key]
-            assert ":0/" not in body[key]
+            value = body[key]
+            assert isinstance(value, str)
+            assert urlparse(value).port == port, value
+            assert ":0/" not in value
 
 
 def test_idp_publishes_its_bound_url_and_its_discovery_carries_it(tmp_path: Path) -> None:

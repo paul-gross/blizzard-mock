@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import TypedDict
 
 _INITIALIZE = '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "x"}}}\n'
 
@@ -34,8 +35,24 @@ def _run_app_server(codex_home: Path, stdin: str, *, timeout: float = 5.0) -> su
     )
 
 
-def _messages(stdout: str) -> list[dict]:
+class _AccountResult(TypedDict):
+    requiresOpenaiAuth: bool
+    account: dict[str, object] | None
+
+
+class _AccountResponse(TypedDict):
+    id: int
+    result: _AccountResult
+
+
+def _messages(stdout: str) -> list[dict[str, object]]:
     return [json.loads(line) for line in stdout.splitlines() if line.strip()]
+
+
+def _account_response(stdout: str) -> _AccountResponse:
+    lines = (line for line in stdout.splitlines() if line.strip())
+    response: _AccountResponse = next(m for m in map(json.loads, lines) if m.get("id") == 2)
+    return response
 
 
 def _write_auth(path: Path, *, access_token: str = "old-access", refresh_token: str = "old-refresh") -> None:
@@ -65,7 +82,7 @@ def test_account_read_without_refresh_token_reports_the_account_and_writes_nothi
     proc = _run_app_server(tmp_path, _INITIALIZE + _account_read(refresh_token=False))
 
     assert proc.returncode == 0
-    response = next(m for m in _messages(proc.stdout) if m.get("id") == 2)
+    response = _account_response(proc.stdout)
     assert response["result"]["requiresOpenaiAuth"] is True
     assert response["result"]["account"] == {"account_id": "acct-1"}
     assert auth_path.read_text() == before  # no rotation on a plain read
@@ -79,7 +96,7 @@ def test_account_read_with_refresh_token_rotates_both_tokens_atomically(tmp_path
     proc = _run_app_server(tmp_path, _INITIALIZE + _account_read(refresh_token=True))
 
     assert proc.returncode == 0
-    response = next(m for m in _messages(proc.stdout) if m.get("id") == 2)
+    response = _account_response(proc.stdout)
     assert response["result"]["requiresOpenaiAuth"] is True
 
     rotated = json.loads(auth_path.read_text())
@@ -102,7 +119,7 @@ def test_a_missing_auth_file_reports_a_null_account_without_crashing(tmp_path: P
     proc = _run_app_server(tmp_path, _INITIALIZE + _account_read(refresh_token=True))
 
     assert proc.returncode == 0
-    response = next(m for m in _messages(proc.stdout) if m.get("id") == 2)
+    response = _account_response(proc.stdout)
     assert response["result"]["requiresOpenaiAuth"] is True
     assert response["result"]["account"] is None
 

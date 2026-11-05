@@ -41,7 +41,7 @@ def seed_project(client: FleetClient, slug: str, *, tenant_id: str | None = None
 
 
 def seed_chunk(client: FleetClient, project_id: str | None = None) -> str:
-    spec: dict = {
+    spec: dict[str, object] = {
         "entry": "build",
         "nodes": {
             "build": {
@@ -81,12 +81,13 @@ def _register_added(client: FleetClient, added: httpx.Response) -> httpx.Respons
     return resp
 
 
-def _peek(client: FleetClient, runner_id: str = "r1", *, policy: str = "pass_over") -> list[dict]:
+def _peek(client: FleetClient, runner_id: str = "r1", *, policy: str = "pass_over") -> list[dict[str, object]]:
     resp = client.post(
         "/api/fleet/queue/peek", params={"runner_id": runner_id}, json={"capabilities": _CAPABILITIES, "policy": policy}
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()["entries"]
+    entries: list[dict[str, object]] = resp.json()["entries"]
+    return entries
 
 
 # --- the registry ------------------------------------------------------------

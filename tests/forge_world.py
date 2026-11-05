@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,7 +60,7 @@ def build_repos(root: Path) -> Path:
 
 
 @contextmanager
-def forge(root: Path, clock: FixedClock | None = None) -> Iterator[TestClient]:
+def forge(root: Path, clock: FixedClock | None = None) -> Generator[TestClient]:
     config = ForgeConfig(repos_dir=build_repos(root / "repos"), host="127.0.0.1", port=4421)
     with TestClient(create_app(config, clock=clock or FixedClock(START))) as client:
         yield client

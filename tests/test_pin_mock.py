@@ -39,7 +39,9 @@ from tests.fleet_client import FleetClient
 # --------------------------------------------------------------------------- #
 
 
-def test_session_end_fires_after_the_wire_render_and_before_run_prompt_returns(fenced_repo) -> None:
+def test_session_end_fires_after_the_wire_render_and_before_run_prompt_returns(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
     """The hook is ``run_prompt``'s tail: the render lands first, and the fire has
     already happened by the time the call returns."""
     cwd, env = fenced_repo

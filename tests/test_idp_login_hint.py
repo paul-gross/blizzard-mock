@@ -4,10 +4,13 @@ from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
 
 from blizzard_mock.idp.app import create_app
+from blizzard_mock.idp.domain.state import IdpState
 
 
 @pytest.fixture
@@ -28,7 +31,8 @@ def _oidc_claims(client: TestClient, code: str) -> tuple[dict[str, object], str]
     response = client.post("/oidc/token", data={"code": code, "client_id": "cid"})
     assert response.status_code == 200
     key = RSAAlgorithm.from_jwk(client.get("/oidc/jwks").json()["keys"][0])
-    claims = jwt.decode(response.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")  # type: ignore[arg-type]
+    assert isinstance(key, RSAPublicKey)
+    claims = jwt.decode(response.json()["id_token"], key=key, algorithms=["RS256"], audience="cid")
     return claims, response.json()["access_token"]
 
 
@@ -50,7 +54,11 @@ def test_hinted_oidc_binds_two_outstanding_codes_to_their_own_identities(client:
     ada_claims, ada_token = _oidc_claims(client, ada_code)
     assert (bob_claims["sub"], bob_claims["email"]) == ("7", "bob@example.com")
     assert (ada_claims["sub"], ada_claims["email"], ada_claims["email_verified"]) == ("42", "Ada@Example.com", False)
-    assert client.app.state.idp_state.profile_for_access_token(ada_token).subject == "42"  # type: ignore[attr-defined]
+    assert isinstance(client.app, FastAPI)
+    idp_state: IdpState = client.app.state.idp_state
+    ada_profile = idp_state.profile_for_access_token(ada_token)
+    assert ada_profile is not None
+    assert ada_profile.subject == "42"
 
 
 def test_hinted_github_binds_user_and_emails_to_each_code(client: TestClient) -> None:

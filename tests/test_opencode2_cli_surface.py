@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ from tests.opencode2_service import (
     artifact,
     bare_env,
     emit_cli,
+    is_list,
     objects,
     output,
     tool_parts,
@@ -153,9 +155,9 @@ def test_a_turn_runs_the_fixed_shell_against_the_session_environment_and_spawns_
     shell_part, spawn = tool_parts(messages)
     assert output(shell_part) == "ROOT=x1\n"
     children = service.data("GET", "/api/session?parentID=ses_root")
-    assert isinstance(children, list) and len(children) == 1
-    child = children[0]
-    assert isinstance(child, dict) and child["parentID"] == "ses_root"
+    assert is_list(children) and len(children) == 1
+    (child,) = objects(children)
+    assert child["parentID"] == "ses_root"
     assert isinstance(spawn["state"], dict) and spawn["state"]["metadata"]["sessionID"] == child["id"]
     child_parts = tool_parts(service.settle(str(child["id"])))
     assert output(child_parts[0]) == "CHILD=\n"
@@ -209,16 +211,16 @@ def test_no_prices_empties_every_listed_price(tmp_path: Path, start_service: Sta
     assert all(m["cost"] == [] for m in objects(listed[bare]))
 
 
-@pytest.mark.parametrize(
-    ("lever", "observed"),
-    [
-        ("DISTORTED_SHAPES", lambda data: isinstance(data, dict)),
-        (
-            "UNKNOWN_PART_TYPES",
-            lambda data: "tool-call" in json.dumps(data) and '"type": "tool"' not in json.dumps(data),
-        ),
-    ],
-)
+_SHAPE_LEVERS: list[tuple[str, Callable[[object], bool]]] = [
+    ("DISTORTED_SHAPES", lambda data: isinstance(data, dict)),
+    (
+        "UNKNOWN_PART_TYPES",
+        lambda data: "tool-call" in json.dumps(data) and '"type": "tool"' not in json.dumps(data),
+    ),
+]
+
+
+@pytest.mark.parametrize(("lever", "observed"), _SHAPE_LEVERS)
 def test_shape_levers_distort_the_message_list(
     tmp_path: Path, start_service: Starter, lever: str, observed: object
 ) -> None:
