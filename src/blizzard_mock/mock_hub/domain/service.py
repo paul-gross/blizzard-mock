@@ -619,7 +619,6 @@ class MockHubService:
         *,
         capabilities: Sequence[RunnerCapability],
         policy: str,
-        project: str | None = None,
         projects: Sequence[str] | None = None,
     ) -> QueuePeekResponse:
         """The mock's own mirror of ``blizzard.hub.domain.operations.queue.select_matched_entry``, over its
@@ -628,14 +627,13 @@ class MockHubService:
         selection. The ready order is first narrowed to the projects ``runner_id`` serves, read
         from its stored declaration, so another project's chunk is never its head and ``hold``
         cannot stall it on one. A project reached only through a binding the host's report withholds is not served
-        (:meth:`_offered_project_ids`), and ``project`` keeps only the declaration entry it names,
-        ``projects`` the union of those it names, with
+        (:meth:`_offered_project_ids`), and ``projects`` keeps the union of the declaration entries it names, with
         ``hold`` then stopping only the project of an unusable entry. Narrowing selects
         from the ready order without renumbering it: a position is the chunk's index in the whole ready order, as
         :meth:`peek` reports it. Like the real verb it answers any resolved principal, registered or not — the fleet
         router has already refused a call whose token names no runner."""
         match_policy = matching.QueueMatchPolicy.of(policy)
-        served = self._offered_project_ids(self._added(runner_id), project, projects)
+        served = self._offered_project_ids(self._added(runner_id), projects)
         stopped: set[str | None] = set()
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
         for position, chunk in enumerate(ready):
@@ -1511,7 +1509,7 @@ class MockHubService:
                 RunnerBindingView(
                     project=b.project,
                     workspace_id=b.workspace_id,
-                    agents=b.agents,
+                    agents=row.agents or 0,
                     workspace_unreported=host is not None and self._workspace_unreported(host, b),
                 )
                 for b in row.bindings
@@ -1519,18 +1517,16 @@ class MockHubService:
         )
         return views, host is not None and self._subscription_unrostered(host, row.subscription)
 
-    def _offered_project_ids(
-        self, row: RunnerRow, project: str | None, projects: Sequence[str] | None = None
-    ) -> set[str]:
+    def _offered_project_ids(self, row: RunnerRow, projects: Sequence[str] | None = None) -> set[str]:
         """The projects the matched peek may offer ``row`` work from: its served ones, less those reached only
-        through withheld bindings when it declared bindings, narrowed to the entry ``project`` names — by the entry as
-        declared or the id it resolved to; ``projects`` keeps the union of those it names."""
+        through withheld bindings when it declared bindings, narrowed to the union of the entries ``projects`` names,
+        each by the entry as declared or the id it resolved to."""
         entries = row.projects
         if row.bindings is not None:
             reachable = {b.project for b in row.bindings if not self._withheld(row, b)}
             entries = tuple(e for e in entries if e.entry in reachable)
-        if project is not None or projects is not None:
-            wanted = {project} if project is not None else set(projects or ())
+        if projects is not None:
+            wanted = set(projects)
             named = {e.project_id for e in row.projects if wanted & {e.entry, e.project_id}}
             return {e.project_id for e in entries if e.project_id is not None and e.project_id in named}
         return {e.project_id for e in entries if e.project_id is not None}

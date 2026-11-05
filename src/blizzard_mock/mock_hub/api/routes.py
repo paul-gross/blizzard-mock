@@ -142,7 +142,6 @@ def peek_matched_queue(
             for c in body.capabilities
         ),
         policy=body.policy,
-        project=body.project,
         projects=body.projects,
     )
 
@@ -566,10 +565,7 @@ def register_runner(
             bindings=(
                 None
                 if body.bindings is None
-                else tuple(
-                    RunnerBinding(project=b.project, workspace_id=b.workspace_id, agents=b.agents)
-                    for b in body.bindings
-                )
+                else tuple(RunnerBinding(project=b.project, workspace_id=b.workspace_id) for b in body.bindings)
             ),
             subscription=body.subscription,
             agents=body.agents,

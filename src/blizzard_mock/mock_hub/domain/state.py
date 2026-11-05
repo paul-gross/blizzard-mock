@@ -129,11 +129,10 @@ class ServedEntry:
 @dataclass(frozen=True, kw_only=True)
 class RunnerBinding:
     """One project a runner serves through one workspace of its host — mirrors one element of the real hub's
-    ``runner_registrations.bindings``: the project by id or slug, the host workspace it works in, and its agents."""
+    ``runner_registrations.bindings``: the project by id or slug, and the host workspace it works in."""
 
     project: str
     workspace_id: str
-    agents: int
 
 
 class RunnerRow:
