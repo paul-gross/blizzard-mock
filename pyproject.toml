@@ -82,9 +82,10 @@ markers = [
 ]
 
 [tool.pyright]
-include = ["src", "tests"]
+exclude = ["**/__pycache__", "**/.*"]
 pythonVersion = "3.12"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
 reportMissingTypeStubs = false
 
 [tool.ruff]

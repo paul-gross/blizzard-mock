@@ -40,7 +40,9 @@ uv + ruff + pyright + pytest, per `blizzard-context:/standards/python.md`
 (`bzh:python-toolchain`), plus a process-reference prose lint
 (`blizzard-context:/standards/comments.md`, `bzh:comment-locality`). The gates a change
 must pass — also wrapped as mise tasks `install` / `lint` / `format` / `typecheck` /
-`test` / `process-ref-lint`, plus `gate` for all of them together:
+`test` / `process-ref-lint`, plus `gate` for all of them together. Pyright runs strict
+over every Python file in the repo, and `# type: ignore` is rejected
+(`bzh:strict-types`):
 
 ```shell
 uv sync
