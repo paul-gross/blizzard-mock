@@ -54,7 +54,16 @@ class _RecordingHookRunner:
         self.calls.append("session_end")
 
 
-def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int, engine.RunResult]:
+type RepoEnv = tuple[Path, dict[str, str]]
+
+
+def _run(
+    script: str,
+    repo_env: RepoEnv,
+    *,
+    hooks: engine.IHookRunner | None = None,
+    transcript: engine.ITranscriptWriter | None = None,
+) -> tuple[int, engine.RunResult]:
     """Run a script through the engine with a capturing wire; return (code, result)."""
     cwd, env = repo_env
     captured: list[engine.RunResult] = []
@@ -67,7 +76,9 @@ def _run(script: str, repo_env: tuple[Path, dict[str, str]], **kw) -> tuple[int,
             captured.append(result)
             return ""
 
-    code = engine.run_prompt(script, wire=_CapturingWire(), cwd=cwd, env=env, out=sys.stdout, **kw)
+    code = engine.run_prompt(
+        script, wire=_CapturingWire(), cwd=cwd, env=env, out=sys.stdout, hooks=hooks, transcript=transcript
+    )
     return code, captured[-1]
 
 
@@ -185,7 +196,9 @@ def log_entries(log: Path) -> list[str]:
     ],
     ids=["plain", "verdict", "ask-park", "raised-exception", "soft-crash"],
 )
-def test_session_end_fires_exactly_once_on_every_soft_termination_path(fenced_repo, script: str, subtype: str) -> None:
+def test_session_end_fires_exactly_once_on_every_soft_termination_path(
+    fenced_repo: RepoEnv, script: str, subtype: str
+) -> None:
     """All five exits that unwind normally converge on ``run_prompt``'s tail."""
     hooks = _RecordingHookRunner()
     _run(script, fenced_repo, hooks=hooks)
@@ -193,7 +206,7 @@ def test_session_end_fires_exactly_once_on_every_soft_termination_path(fenced_re
     assert hooks.session_ends[0].subtype == subtype
 
 
-def test_a_script_raising_system_exit_fires_no_session_end(fenced_repo) -> None:
+def test_a_script_raising_system_exit_fires_no_session_end(fenced_repo: RepoEnv) -> None:
     """``sys.exit()`` skips the tail — ``SystemExit`` is not an ``Exception``.
 
     Pre-existing engine behavior (the ``except Exception`` boundary already skips
@@ -214,7 +227,7 @@ def test_a_fence_refusal_fires_no_hook(tmp_path: Path) -> None:
     assert hooks.calls == []
 
 
-def test_hooks_default_to_none_and_change_nothing(fenced_repo) -> None:
+def test_hooks_default_to_none_and_change_nothing(fenced_repo: RepoEnv) -> None:
     """The seam is opt-in: a caller that passes no runner gets today's behavior."""
     code, result = _run("verdict('approve')", fenced_repo)
     assert code == 0
@@ -226,7 +239,7 @@ def test_hooks_default_to_none_and_change_nothing(fenced_repo) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_hard_crash_fires_no_session_end(fenced_repo) -> None:
+def test_a_hard_crash_fires_no_session_end(fenced_repo: RepoEnv) -> None:
     """``crash(hard=True)`` is ``os._exit`` — the same no-signal a SIGKILL'd real
     Claude Code leaves, which is precisely the case crash recovery exists to tell
     apart from a clean exit."""
@@ -236,7 +249,7 @@ def test_a_hard_crash_fires_no_session_end(fenced_repo) -> None:
     assert log_entries(log) == []
 
 
-def test_the_hard_crash_negative_is_meaningful(fenced_repo) -> None:
+def test_the_hard_crash_negative_is_meaningful(fenced_repo: RepoEnv) -> None:
     """The positive control for the test above: the same driver, a clean exit, one
     durable entry. Without it, an empty log would prove nothing."""
     cwd, env = fenced_repo
@@ -286,13 +299,13 @@ class _RecordingTranscript:
 
 
 @pytest.fixture
-def fenced_dir(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+def fenced_dir(tmp_path: Path) -> RepoEnv:
     """A fenced directory that is deliberately **not** a git repo."""
     engine.write_fence_marker(tmp_path)
     return tmp_path, engine.fenced_env({"PATH": os.environ.get("PATH", "")})
 
 
-def test_apply_diff_and_commit_each_fire_post_tool_use_and_still_mint_their_pair(fenced_repo) -> None:
+def test_apply_diff_and_commit_each_fire_post_tool_use_and_still_mint_their_pair(fenced_repo: RepoEnv) -> None:
     """The two real tool calls fire once each, with Claude's own tool names, and the
     transcript pair the existing tests assert is unaffected by the split."""
     hooks = _RecordingHookRunner()
@@ -310,7 +323,7 @@ def test_apply_diff_and_commit_each_fire_post_tool_use_and_still_mint_their_pair
     assert len(transcript.tool_results) == 2
 
 
-def test_the_hook_fires_with_no_transcript_wired(fenced_repo) -> None:
+def test_the_hook_fires_with_no_transcript_wired(fenced_repo: RepoEnv) -> None:
     """The two seams are independent: the early return that used to skip everything
     when no writer was bound must not skip the hooks."""
     hooks = _RecordingHookRunner()
@@ -318,7 +331,7 @@ def test_the_hook_fires_with_no_transcript_wired(fenced_repo) -> None:
     assert [name for name, _, _ in hooks.tool_uses] == ["Edit", "Bash"]
 
 
-def test_tool_call_fires_once_mints_one_pair_and_touches_no_git(fenced_dir) -> None:
+def test_tool_call_fires_once_mints_one_pair_and_touches_no_git(fenced_dir: RepoEnv) -> None:
     """Run in a directory that is not a git repo: any git call would fail the turn,
     so a clean success is itself the proof that nothing was committed."""
     hooks = _RecordingHookRunner()
@@ -332,7 +345,7 @@ def test_tool_call_fires_once_mints_one_pair_and_touches_no_git(fenced_dir) -> N
     assert len(transcript.tool_results) == 1
 
 
-def test_a_scripted_tool_timeline_beats_before_it_stalls(fenced_repo) -> None:
+def test_a_scripted_tool_timeline_beats_before_it_stalls(fenced_repo: RepoEnv) -> None:
     """Three beats, then ``hang()``: the choreography the helper exists for, observed
     from outside the process that never returns."""
     cwd, env = fenced_repo
@@ -354,7 +367,7 @@ def test_tool_call_is_bound_into_the_script_namespace(tmp_path: Path) -> None:
         store=SessionStore(tmp_path),
         is_resume=False,
     )
-    ns = engine._script_globals(ctx)
+    ns = engine._script_globals(ctx)  # pyright: ignore[reportPrivateUsage]
     assert ns["tool_call"] is helpers.tool_call
 
 
@@ -385,8 +398,10 @@ def settings_document(*, post_tool_use: str | None = None, session_end: str | No
     return {"hooks": hooks}
 
 
-def write_settings(path: Path, **kw: str | None) -> Path:
-    path.write_text(json.dumps(settings_document(**kw), indent=2) + "\n")
+def write_settings(path: Path, *, post_tool_use: str | None = None, session_end: str | None = None) -> Path:
+    path.write_text(
+        json.dumps(settings_document(post_tool_use=post_tool_use, session_end=session_end), indent=2) + "\n"
+    )
     return path
 
 
@@ -414,7 +429,7 @@ def _lines(path: Path) -> list[str]:
     return [line for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
-def test_post_tool_use_runs_once_per_tool_call(fenced_repo, scratch: Path) -> None:
+def test_post_tool_use_runs_once_per_tool_call(fenced_repo: RepoEnv, scratch: Path) -> None:
     """One beat per ``apply_diff`` / ``commit`` / ``tool_call`` in the script."""
     cwd, env = fenced_repo
     beats = scratch / "beats.log"
@@ -427,7 +442,7 @@ def test_post_tool_use_runs_once_per_tool_call(fenced_repo, scratch: Path) -> No
     assert _lines(beats) == ["beat", "beat", "beat"]
 
 
-def test_the_post_tool_use_payload_and_environment_reach_the_command(fenced_repo, scratch: Path) -> None:
+def test_the_post_tool_use_payload_and_environment_reach_the_command(fenced_repo: RepoEnv, scratch: Path) -> None:
     """The stdin payload in full, the inherited spawn environment, and a
     ``transcript_path`` that is the file the transcript writer actually wrote."""
     cwd, env = fenced_repo
@@ -467,7 +482,7 @@ def test_the_post_tool_use_payload_and_environment_reach_the_command(fenced_repo
     ["verdict('approve')", "pass", "ask('which way?')", "raise ValueError('boom')", "crash()"],
     ids=["verdict", "plain", "ask-park", "raised-exception", "soft-crash"],
 )
-def test_session_end_runs_exactly_once_on_each_soft_exit(fenced_repo, scratch: Path, script: str) -> None:
+def test_session_end_runs_exactly_once_on_each_soft_exit(fenced_repo: RepoEnv, scratch: Path, script: str) -> None:
     cwd, env = fenced_repo
     ends = scratch / "ends.log"
     settings = write_settings(scratch / "settings.json", session_end=f"sh -c 'cat >> {ends}; echo >> {ends}'")
@@ -481,7 +496,7 @@ def test_session_end_runs_exactly_once_on_each_soft_exit(fenced_repo, scratch: P
     assert payloads[0]["session_id"] == "sess-end"
 
 
-def test_session_end_does_not_run_on_a_hard_crash(fenced_repo, scratch: Path) -> None:
+def test_session_end_does_not_run_on_a_hard_crash(fenced_repo: RepoEnv, scratch: Path) -> None:
     """``crash(hard=True)`` is ``os._exit`` — driven here as a real subprocess
     through the facade, the shape the runner actually spawns."""
     cwd, env = fenced_repo
@@ -496,7 +511,7 @@ def test_session_end_does_not_run_on_a_hard_crash(fenced_repo, scratch: Path) ->
     assert _lines(ends) == []
 
 
-def test_a_failing_hook_does_not_change_the_turn(fenced_repo, scratch: Path) -> None:
+def test_a_failing_hook_does_not_change_the_turn(fenced_repo: RepoEnv, scratch: Path) -> None:
     """A nonzero exit is logged and ignored: same exit code, same wire output."""
     cwd, env = fenced_repo
     settings = write_settings(scratch / "settings.json", post_tool_use="sh -c 'exit 3'", session_end="sh -c 'exit 4'")
@@ -510,7 +525,7 @@ def test_a_failing_hook_does_not_change_the_turn(fenced_repo, scratch: Path) -> 
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
-def test_a_wedged_hook_is_abandoned_at_the_timeout(fenced_repo, scratch: Path) -> None:
+def test_a_wedged_hook_is_abandoned_at_the_timeout(fenced_repo: RepoEnv, scratch: Path) -> None:
     """A command that outruns its budget is killed and the turn still completes.
 
     The runner is constructed directly so the timeout can be sub-second — the
@@ -535,7 +550,9 @@ def test_a_wedged_hook_is_abandoned_at_the_timeout(fenced_repo, scratch: Path) -
     [None, "{not json", "{}", '{"hooks": {}}', '{"hooks": {"PostToolUse": []}}'],
     ids=["missing-file", "unparseable", "empty-object", "no-events", "no-commands"],
 )
-def test_an_unusable_settings_document_degrades_to_no_hooks(fenced_repo, scratch: Path, content: str | None) -> None:
+def test_an_unusable_settings_document_degrades_to_no_hooks(
+    fenced_repo: RepoEnv, scratch: Path, content: str | None
+) -> None:
     cwd, env = fenced_repo
     settings = scratch / "settings.json"
     if content is not None:
@@ -550,13 +567,13 @@ def test_an_unusable_settings_document_degrades_to_no_hooks(fenced_repo, scratch
     assert proc.returncode == 0, proc.stderr
 
 
-def test_no_settings_flag_builds_no_runner(fenced_repo) -> None:
+def test_no_settings_flag_builds_no_runner(fenced_repo: RepoEnv) -> None:
     """The ``judge`` invocation's deliberate omission, at the seam."""
     cwd, env = fenced_repo
     assert build_hook_runner(None, cwd=cwd, env=env, session_id="s") is None
 
 
-def test_hook_output_never_reaches_the_rendered_envelope(fenced_repo, scratch: Path) -> None:
+def test_hook_output_never_reaches_the_rendered_envelope(fenced_repo: RepoEnv, scratch: Path) -> None:
     """A chatty hook must not interleave with the JSON envelope the adapter parses."""
     cwd, env = fenced_repo
     chatty = "sh -c 'echo CHATTY-STDOUT; echo CHATTY-STDERR >&2'"
@@ -579,7 +596,9 @@ def test_hook_output_never_reaches_the_rendered_envelope(fenced_repo, scratch: P
     ],
     ids=["codex", "opencode"],
 )
-def test_the_other_facades_construct_no_hook_runner(fenced_repo, scratch: Path, module: str, argv: list[str]) -> None:
+def test_the_other_facades_construct_no_hook_runner(
+    fenced_repo: RepoEnv, scratch: Path, module: str, argv: list[str]
+) -> None:
     """Neither accepts ``--settings`` nor builds a runner, so nothing can fire."""
     cwd, env = fenced_repo
     beats = scratch / "beats.log"
@@ -596,7 +615,7 @@ def test_the_other_facades_construct_no_hook_runner(fenced_repo, scratch: Path, 
     assert _lines(beats) == []
 
 
-def test_a_resume_with_settings_fires_for_its_own_turn(fenced_repo, scratch: Path) -> None:
+def test_a_resume_with_settings_fires_for_its_own_turn(fenced_repo: RepoEnv, scratch: Path) -> None:
     """``--resume`` inherits nothing from the spawn, so the flag rides again — and
     each turn is its own process, so each fires its own ``SessionEnd``."""
     cwd, env = fenced_repo
@@ -623,7 +642,7 @@ def test_a_resume_with_settings_fires_for_its_own_turn(fenced_repo, scratch: Pat
     assert [p["session_id"] for p in payloads] == ["sess-resume", "sess-resume"]
 
 
-def test_a_resume_without_settings_fires_nothing(fenced_repo, scratch: Path) -> None:
+def test_a_resume_without_settings_fires_nothing(fenced_repo: RepoEnv, scratch: Path) -> None:
     """The ``judge`` shape: the session was spawned *with* settings, but this turn
     carries none, so no ``SessionEnd`` can record a done-signal for a synchronous
     verdict elicitation."""
@@ -647,7 +666,7 @@ def test_a_resume_without_settings_fires_nothing(fenced_repo, scratch: Path) -> 
     assert _lines(ends) == ["end"]  # unchanged by the judge turn
 
 
-def test_the_usage_text_names_tool_call_and_the_settings_flag(capsys) -> None:
+def test_the_usage_text_names_tool_call_and_the_settings_flag(capsys: pytest.CaptureFixture[str]) -> None:
     """What a bare ``mock-claude-code`` prints is the most visible enumeration in
     the package; it goes stale by one every time the bound surface grows."""
     from blizzard_mock.harness.facades import claude_code
