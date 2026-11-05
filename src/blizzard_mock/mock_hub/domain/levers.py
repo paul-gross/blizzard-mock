@@ -49,6 +49,9 @@ class HubLever(StrEnum):
     #: ``GET /api/fleet/identity`` answers ``payload`` as its ``fleet_flags`` — the hub's ``fleet`` flags a runner
     #: applies on a matched answer. Global and sticky; arming again replaces the map.
     FLEET_FLAGS = "fleet_flags"
+    #: ``POST /api/fleet/chunks/{id}/artifact-check`` answers ``payload.refusal`` as its ``refusal`` — the hub
+    #: refusing every staging offer with a fixed message. Sticky until cleared; unarmed, no offer is refused.
+    ARTIFACT_REFUSAL = "artifact_refusal"
     IDP_OFFERED = "idp_offered"
     VERSION_REFUSED = "version_refused"
 
@@ -75,6 +78,9 @@ CATALOG: dict[str, str] = {
     ),
     HubLever.IDP_OFFERED.value: 'GET /api/auth/jwks.json answers 200 {"keys": []}; absent (404) while unarmed (sticky)',
     HubLever.FLEET_FLAGS.value: "GET /api/fleet/identity answers payload as its fleet_flags map (sticky, global)",
+    HubLever.ARTIFACT_REFUSAL.value: (
+        "POST /api/fleet/chunks/{id}/artifact-check answers payload.refusal as its refusal (sticky)"
+    ),
     HubLever.VERSION_REFUSED.value: (
         "POST /api/fleet/runners from payload.runner_id answers 409 RunnerVersionRefusal from the payload (sticky)"
     ),
