@@ -44,6 +44,7 @@ class HttpxHubGateway:
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
         declining: list[dict[str, Any]] | None = None,
+        version: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
         body: dict[str, Any] = {
             "name": name,
@@ -56,6 +57,8 @@ class HttpxHubGateway:
             body["subscriptions"] = subscriptions
         if declining is not None:
             body["declining"] = declining
+        if version is not None:
+            body["version"] = version
         return self._post(f"{_API}/runners", body)
 
     def peek(self) -> tuple[int, dict[str, Any]]:

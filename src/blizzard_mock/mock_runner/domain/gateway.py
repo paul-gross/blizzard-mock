@@ -24,9 +24,10 @@ class IHubGateway(Protocol):
         capabilities: list[dict[str, Any]] | None = None,
         subscriptions: list[dict[str, Any]] | None = None,
         declining: list[dict[str, Any]] | None = None,
+        version: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        """Register the runner the bearer token names, under ``name``. ``subscriptions`` is
-        forwarded only when supplied — ``None`` omits the key entirely, driving the hub's
+        """Register the runner the bearer token names, under ``name``, reporting ``version`` when given.
+        ``subscriptions`` is forwarded only when supplied — ``None`` omits the key entirely, driving the hub's
         rosterless fallback; ``declining`` likewise, driving a runner that predates the report."""
         ...
 
