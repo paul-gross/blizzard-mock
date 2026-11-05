@@ -11,10 +11,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 type Json = dict[str, object]
 
@@ -79,7 +79,7 @@ class Service:
             return exc.code, None
 
     @contextmanager
-    def events(self) -> Iterator[list[Json]]:
+    def events(self) -> Generator[list[Json]]:
         """Subscribe to the event stream for the block's duration; the list fills with each event as it arrives."""
         record = self.registration()
         request = urllib.request.Request(f"{record['url']}/api/event")
@@ -109,7 +109,7 @@ class Service:
     def data(self, method: str, path: str, body: object | None = None) -> object:
         status, answer = self.call(method, path, body)
         assert 200 <= status < 300, (method, path, status)
-        assert isinstance(answer, dict)
+        assert is_json(answer)
         return answer["data"]
 
     def open_session(
@@ -129,8 +129,10 @@ class Service:
             assert isinstance(active, dict)
             if session_id not in active:
                 messages = self.data("GET", f"/api/session/{session_id}/message")
-                assert isinstance(messages, list)
-                return messages
+                assert is_list(messages)
+                rows = objects(messages)
+                assert len(rows) == len(messages)
+                return rows
             time.sleep(0.2)
         raise AssertionError(f"{session_id} did not settle")
 
@@ -141,8 +143,16 @@ class Starter(Protocol):
     ) -> Service: ...
 
 
+def is_json(value: object) -> TypeGuard[Json]:
+    return isinstance(value, dict)
+
+
+def is_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def objects(value: object) -> list[Json]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+    return [item for item in value if is_json(item)] if is_list(value) else []
 
 
 def tool_parts(messages: list[Json]) -> list[Json]:
@@ -151,7 +161,7 @@ def tool_parts(messages: list[Json]) -> list[Json]:
 
 def output(part: Json) -> str:
     state = part["state"]
-    assert isinstance(state, dict)
-    content = state.get("content") or []
-    assert isinstance(content, list)
-    return "".join(str(item["text"]) for item in content if isinstance(item, dict))
+    assert is_json(state)
+    content = state.get("content")
+    assert content is None or is_list(content)
+    return "".join(str(item["text"]) for item in objects(content))

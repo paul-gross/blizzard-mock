@@ -20,7 +20,7 @@ from blizzard_mock.harness import engine as exec_engine
 from blizzard_mock.harness.opencode2_core import emit as core_emit
 from blizzard_mock.harness.opencode2_engine import emit as engine_emit
 from blizzard_mock.harness.opencode2_engine.domain import failures, fence
-from tests.opencode2_service import Json, Service, Starter, artifact, emit_cli, objects, output, tool_parts
+from tests.opencode2_service import Json, Service, Starter, artifact, emit_cli, is_json, objects, output, tool_parts
 
 _PACKAGE = Path(engine_emit.__file__).resolve().parent
 _CORE = Path(core_emit.__file__).resolve().parent
@@ -144,7 +144,7 @@ def test_a_turn_outside_the_fence_fails_without_running_its_script(
     idle = _idle(_turn(service, "ses_fence", "open('ran', 'w').close()"))
     assert idle["outcome"] == "failed"
     error = idle["error"]
-    assert isinstance(error, dict) and "refused to run a script" in str(error["message"])
+    assert is_json(error) and "refused to run a script" in str(error["message"])
     assert not (repo / "ran").exists()
 
 
@@ -282,7 +282,7 @@ def test_an_always_reply_saves_the_pattern_so_the_next_matching_call_runs_unaske
     service.settle("ses_always")
     assert (repo / "one").exists() and (repo / "two").exists()
     record = service.data("GET", "/api/session/ses_always")
-    assert isinstance(record, dict)
+    assert is_json(record)
     assert {"action": "shell", "resource": "touch *", "effect": "allow"} in objects(record["permissions"])
 
 
@@ -587,7 +587,11 @@ def test_a_steer_taken_at_a_step_boundary_ends_that_step_once(tmp_path: Path, st
         _wait_for(lambda: (repo / "tick").exists())
         service.data("POST", "/api/session/ses_steer_step/prompt", {"text": "text('STEERED')", "delivery": "steer"})
         messages = service.settle("ses_steer_step")
-    ended = [e["data"]["assistantMessageID"] for e in events if e.get("type") == "session.step.ended"]  # type: ignore[index]
+    ended = [
+        str(data["assistantMessageID"])
+        for e in events
+        if e.get("type") == "session.step.ended" and is_json(data := e["data"])
+    ]
     assert len(ended) == len(set(ended))
     steps = _assistants(messages)
     assert all(step["finish"] == "tool-calls" for step in steps[:-1])

@@ -7,8 +7,9 @@ import yaml
 _WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
 
 
-def _yaml11_true_key_triggers(name: str) -> dict:
-    return yaml.safe_load((_WORKFLOWS / name).read_text())[True]
+def _yaml11_true_key_triggers(name: str) -> object:
+    workflow: dict[object, object] = yaml.safe_load((_WORKFLOWS / name).read_text())
+    return workflow[True]
 
 
 def test_pull_requests_into_master_and_release_lines_run_the_gate() -> None:

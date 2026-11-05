@@ -18,12 +18,26 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
 from blizzard_mock.harness.opencode_surface import _baked
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
 from blizzard_mock.harness.opencode_surface import levers as surface_levers
+
+
+class _ToolState(TypedDict):
+    error: str
+
+
+class _ToolPart(TypedDict):
+    state: _ToolState
+
+
+class _ToolEvent(TypedDict):
+    part: _ToolPart
+
 
 # --------------------------------------------------------------------------- #
 # A bare system python3, with nothing from this repo's venv reachable.
@@ -195,7 +209,7 @@ def test_permission_request_only_lever_changes_the_permission_turn_error(tmp_pat
     surface_emit.emit(default_out, levers=frozenset())
     surface_emit.emit(lever_out, levers=surface_levers.parse(["PERMISSION_REQUEST_ONLY"]))
 
-    def run(binary: Path) -> dict:
+    def run(binary: Path) -> _ToolEvent:
         proc = subprocess.run(
             [str(binary), "run a permission"], cwd=tmp_path, env=_BARE_SYSTEM_ENV, capture_output=True, text=True
         )
@@ -253,7 +267,7 @@ def test_drop_config_shell_lever_changes_debug_config_pure(tmp_path: Path) -> No
     surface_emit.emit(lever_out, levers=surface_levers.parse(["DROP_CONFIG_SHELL"]))
     env = {**_BARE_SYSTEM_ENV, "OPENCODE_CONFIG_CONTENT": json.dumps({"shell": "bash", "compaction": True})}
 
-    def effective_config(binary: Path) -> dict:
+    def effective_config(binary: Path) -> dict[str, object]:
         proc = subprocess.run(
             [str(binary), "debug", "config", "--pure"], cwd=tmp_path, env=env, capture_output=True, text=True
         )
@@ -270,7 +284,7 @@ def test_process_control_no_live_state_lever_suppresses_the_live_state_write(tmp
     surface_emit.emit(default_out, levers=frozenset())
     surface_emit.emit(lever_out, levers=surface_levers.parse(["PROCESS_CONTROL_NO_LIVE_STATE"]))
 
-    def state_after_process_control_turn(binary: Path, state_home: Path) -> dict | None:
+    def state_after_process_control_turn(binary: Path, state_home: Path) -> dict[str, object] | None:
         state_home.mkdir()
         env = {**_BARE_SYSTEM_ENV, "XDG_STATE_HOME": str(state_home)}
         proc = subprocess.Popen(
