@@ -10,10 +10,13 @@ import: the mock stands alone.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import TypedDict
 
 import httpx2 as httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
@@ -35,13 +38,17 @@ from blizzard_mock.mock_hub.domain.models import (
     RekeyDeniedTerminal,
     ships_from_lease_holder,
 )
-from blizzard_mock.mock_hub.domain.service import _TRANSCRIPT_RECORD_MAX_BYTES, MockHubService
+from blizzard_mock.mock_hub.domain.service import (
+    _TRANSCRIPT_RECORD_MAX_BYTES,  # pyright: ignore[reportPrivateUsage]  # boundary under test
+    MockHubService,
+)
 from blizzard_mock.mock_hub.domain.state import (
     FIRST_TENANT_ID,
     FIRST_TENANT_NAME,
     ClaimDeniedPaused,
     ClaimDeniedUnregistered,
     DeclaredSubscription,
+    RunnerCapability,
     RunnerRow,
     refuse_braked_runner,
 )
@@ -76,23 +83,177 @@ _DEFAULT_PROJECT_FIELDS = {
 }
 
 
+class _SeedResponse(TypedDict):
+    chunk_id: str
+
+
+class _RunnerAdded(TypedDict):
+    runner_id: str
+    runner_name: str
+    token: str
+
+
+class _QueueEntry(TypedDict):
+    chunk_id: str
+    position: int
+    blocked: object
+
+
+class _Queue(TypedDict):
+    entries: list[_QueueEntry]
+
+
+class _Node(TypedDict):
+    node_name: str
+
+
+class _Envelope(TypedDict):
+    node: _Node
+
+
+class _ClaimResponse(TypedDict):
+    envelope: _Envelope
+
+
+class _RouteTokenResponse(TypedDict):
+    chunk_id: str
+    route_token: str
+
+
+class _EpochResponse(TypedDict):
+    epoch: int
+
+
+class _FailureResponse(TypedDict):
+    outcome: str
+    detail: str
+
+
+class _FactAck(TypedDict):
+    applied: list[int]
+    rejected: list[int]
+    already_applied: list[int]
+    high_water: int
+
+
+class _RoutedChunk(TypedDict):
+    route: dict[str, object]
+
+
+class _ChunkQuestions(TypedDict):
+    questions: list[dict[str, object]]
+
+
+class _ChunkEscalation(TypedDict):
+    escalation: dict[str, object]
+
+
+class _TranscriptAck(TypedDict):
+    applied: list[int]
+    already_applied: list[int]
+    capped: list[int]
+    high_water: int
+
+
+class _LeaseTranscript(TypedDict):
+    chunk_id: str
+    node_id: str
+    epoch: int
+    turns: list[dict[str, object]]
+    truncated: bool
+
+
+class _FlexibleEnvelope(TypedDict):
+    node: dict[str, object]
+    graph_artifacts: list[dict[str, object]]
+
+
+class _FlexibleClaim(TypedDict):
+    envelope: _FlexibleEnvelope
+
+
+class _FlexibleCompletion(TypedDict):
+    next_envelope: _FlexibleEnvelope
+
+
+class _CompletionResponse(TypedDict):
+    outcome: str
+    next_envelope: _Envelope
+
+
+class _ChunkStatusResponse(TypedDict):
+    chunk_id: str
+    route_runner_id: str | None
+    cost: dict[str, int | float | bool | None]
+
+
+class _Declining(TypedDict):
+    lever: str
+    subscription: str | None
+    until: str | None
+
+
+class _RunnerView(TypedDict):
+    gates: list[str]
+    declining: list[_Declining]
+    capabilities: list[dict[str, object]]
+    subscriptions: list[dict[str, object]]
+
+
+class _Subscription(TypedDict):
+    slug: str
+    name: str
+    sampled_at: str | None
+    windows: list[dict[str, object]]
+    condition: str | None
+
+
+class _UsageView(TypedDict):
+    subscriptions: list[_Subscription]
+
+
+class _ProposalPage(TypedDict):
+    proposals: list[dict[str, object]]
+    next_cursor: str | None
+
+
+class _CapturedRequest(TypedDict):
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: object
+
+
+class _CapturedResponse(TypedDict):
+    requests: list[_CapturedRequest]
+
+
 @pytest.fixture
 def client() -> TestClient:
     return FleetClient(create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
 
 
+def _service(client: TestClient) -> MockHubService:
+    assert isinstance(client.app, FastAPI)
+    service: MockHubService = client.app.state.service
+    return service
+
+
 def _seed(client: TestClient) -> str:
     resp = client.post("/_seed/chunk", json=_SPEC)
     assert resp.status_code == 201, resp.text
-    return resp.json()["chunk_id"]
+    body: _SeedResponse = resp.json()
+    return body["chunk_id"]
 
 
-def _claim(client: TestClient, body: dict) -> httpx.Response:
+def _claim(client: TestClient, body: dict[str, object]) -> httpx.Response:
     """Claim as a live runner does: registered first, since the hub refuses an unregistered
     claimant. Registers through the service rather than the wire, so a capability snapshot a
     test registered stays put and no extra request lands in ``/_captured``."""
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
-    register_runner(service, body["runner_id"])
+    assert isinstance(client, FleetClient)
+    runner_id = body["runner_id"]
+    assert isinstance(runner_id, str)
+    register_runner(client.service, runner_id)
     return client.post("/api/fleet/routes", json=body)
 
 
@@ -106,7 +267,9 @@ def _claim_and_fence(client: TestClient, chunk_id: str, *, epoch: int = 1) -> No
             "facts": [{"seq": epoch, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": epoch}}],
         },
     )
-    assert ack.status_code == 200 and epoch in ack.json()["applied"]
+    assert ack.status_code == 200
+    body: _FactAck = ack.json()
+    assert epoch in body["applied"]
 
 
 # --- happy path -------------------------------------------------------------
@@ -114,13 +277,16 @@ def _claim_and_fence(client: TestClient, chunk_id: str, *, epoch: int = 1) -> No
 
 def test_happy_path_ingest_to_done(client: TestClient) -> None:
     chunk_id = _seed(client)
-    assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [chunk_id]
+    queue: _Queue = client.get("/api/fleet/queue/peek").json()
+    assert [e["chunk_id"] for e in queue["entries"]] == [chunk_id]
 
     claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1", "environment_ids": ["e1"]})
     assert claim.status_code == 201
-    assert claim.json()["envelope"]["node"]["node_name"] == "build"
+    claimed: _ClaimResponse = claim.json()
+    assert claimed["envelope"]["node"]["node_name"] == "build"
     # claimed chunks leave the ready queue.
-    assert client.get("/api/fleet/queue/peek").json()["entries"] == []
+    claimed_queue: _Queue = client.get("/api/fleet/queue/peek").json()
+    assert claimed_queue["entries"] == []
 
     client.post(
         "/api/fleet/events",
@@ -133,8 +299,9 @@ def test_happy_path_ingest_to_done(client: TestClient) -> None:
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
-    assert step1.json()["outcome"] == "next"
-    assert step1.json()["next_envelope"]["node"]["node_name"] == "review"
+    first: _CompletionResponse = step1.json()
+    assert first["outcome"] == "next"
+    assert first["next_envelope"]["node"]["node_name"] == "review"
 
     client.post(
         "/api/fleet/events",
@@ -147,8 +314,10 @@ def test_happy_path_ingest_to_done(client: TestClient) -> None:
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": 2, "runner_id": "r1", "from_node_id": "review"},
     )
-    assert step2.json()["outcome"] == "hub_node_taken"  # the deliver hub node took over
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
+    second: dict[str, object] = step2.json()
+    assert second["outcome"] == "hub_node_taken"  # the deliver hub node took over
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["status"] == "done"
 
 
 def test_second_claim_conflicts(client: TestClient) -> None:
@@ -156,7 +325,8 @@ def test_second_claim_conflicts(client: TestClient) -> None:
     assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
     conflict = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
     assert conflict.status_code == 409
-    assert conflict.json()["held_by_runner_id"] == "r1"
+    body: dict[str, object] = conflict.json()
+    assert body["held_by_runner_id"] == "r1"
 
 
 def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: TestClient) -> None:
@@ -176,7 +346,7 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
         ],
     )
     assert resp.status_code == 200
-    statuses = resp.json()
+    statuses: list[_ChunkStatusResponse] = resp.json()
     assert [s["chunk_id"] for s in statuses] == [claimed_id, unclaimed_id]  # deduped, unknown omitted, order preserved
     assert statuses[0]["route_runner_id"] == "r1"
     assert statuses[1]["route_runner_id"] is None
@@ -184,7 +354,8 @@ def test_chunk_statuses_batches_reads_deduping_and_omitting_unknown_ids(client: 
 
 def test_chunk_statuses_serve_the_zero_cost_total_when_none_was_seeded(client: TestClient) -> None:
     chunk_id = _seed(client)
-    (status,) = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    statuses: list[_ChunkStatusResponse] = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    (status,) = statuses
     assert status["cost"] == {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -201,8 +372,10 @@ def test_chunk_statuses_serve_the_seeded_cost_total(client: TestClient) -> None:
     cost = {"cost_usd": 0.0, "estimated_cost_usd": 7.5, "billed_partial": True, "output_tokens": 900}
     resp = client.post("/_seed/chunk", json={**_SPEC, "cost": cost})
     assert resp.status_code == 201
-    chunk_id = resp.json()["chunk_id"]
-    (status,) = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
+    statuses: list[_ChunkStatusResponse] = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
+    (status,) = statuses
     assert status["cost"]["estimated_cost_usd"] == 7.5
     assert status["cost"]["cost_usd"] == 0.0
     assert status["cost"]["billed_partial"] is True
@@ -221,26 +394,27 @@ def test_chunk_statuses_conflicting_fact_reports_a_foreign_holder(client: TestCl
         "/_levers/conflicting_fact",
         json={"chunk_id": chunk_id, "remaining": 1, "payload": {"runner_id": "ghost-runner"}},
     )
-    first = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
+    first: list[_ChunkStatusResponse] = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
     assert first[0]["route_runner_id"] == "ghost-runner"
-    second = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
+    second: list[_ChunkStatusResponse] = client.get("/api/fleet/chunk-statuses", params=[("chunk_id", chunk_id)]).json()
     assert second[0]["route_runner_id"] == "r1"
 
 
 def test_rekey_route_token_returns_a_different_deterministic_token_than_the_claim(client: TestClient) -> None:
     chunk_id = _seed(client)
     claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
-    claimed_token = claim.json()["route_token"]
+    claimed: _RouteTokenResponse = claim.json()
+    claimed_token = claimed["route_token"]
 
     rekey = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
     assert rekey.status_code == 200
-    body = rekey.json()
+    body: _RouteTokenResponse = rekey.json()
     assert body["chunk_id"] == chunk_id
     assert body["route_token"] != claimed_token
     assert body["route_token"].startswith("mock-route-token-")
 
     # Deterministic, and a second rekey differs from the first.
-    rekey_again = client.post(f"/api/fleet/chunks/{chunk_id}/route-token").json()
+    rekey_again: _RouteTokenResponse = client.post(f"/api/fleet/chunks/{chunk_id}/route-token").json()
     assert rekey_again["route_token"] != body["route_token"]
 
 
@@ -259,22 +433,27 @@ def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(cli
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
     assert advanced.status_code == 200
-    assert advanced.json()["next_envelope"]["node"]["node_name"] == "review"
-    node_before = client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"]
+    advance_body: _CompletionResponse = advanced.json()
+    assert advance_body["next_envelope"]["node"]["node_name"] == "review"
+    before: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    node_before = before["current_node_id"]
     assert node_before == "review"
 
     released = _release(client, chunk_id)
 
     assert released.status_code == 200, released.text
-    assert released.json() == {"chunk_id": chunk_id, "released_id": 1}
-    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    release_body: dict[str, object] = released.json()
+    assert release_body == {"chunk_id": chunk_id, "released_id": 1}
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert (detail["status"], detail["route"], detail["current_node_id"]) == ("ready", None, node_before)
     reclaimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
     assert reclaimed.status_code == 201
-    assert reclaimed.json()["envelope"]["node"]["node_name"] == "review"
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == node_before
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
-    chunk = service._state.get_chunk(chunk_id)  # the recorded write has no wire read
+    reclaimed_body: _ClaimResponse = reclaimed.json()
+    assert reclaimed_body["envelope"]["node"]["node_name"] == "review"
+    after: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert after["current_node_id"] == node_before
+    service = _service(client)
+    chunk = service._state.get_chunk(chunk_id)  # pyright: ignore[reportPrivateUsage]  # no wire read
     assert chunk is not None
     assert [(r.runner_id, r.epoch, r.reason) for r in chunk.releases] == [("r1", 1, "throttled")]
 
@@ -286,21 +465,23 @@ def test_a_release_at_a_stale_epoch_answers_409_stale(client: TestClient) -> Non
     refused = _release(client, chunk_id, epoch=1)
 
     assert refused.status_code == 409
-    assert refused.json()["reason"] == "stale"
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
+    refused_body: dict[str, object] = refused.json()
+    assert refused_body["reason"] == "stale"
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["status"] == "running"
 
 
 def test_a_release_by_a_runner_not_holding_the_route_answers_403(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service = _service(client)
     register_runner(service, "r2")
 
     assert _release(client, chunk_id, runner_id="r2").status_code == 403
 
 
 def test_a_release_of_an_unknown_chunk_answers_404(client: TestClient) -> None:
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service = _service(client)
     register_runner(service, "r1")
 
     assert _release(client, "ch_nope").status_code == 404
@@ -313,12 +494,12 @@ def test_rekey_route_token_404s_on_an_unclaimed_chunk(client: TestClient) -> Non
 
 def test_registry_register_and_pause_readback(client: TestClient) -> None:
     reg = client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"})
-    assert reg.status_code == 201 and reg.json()["first_registration"] is True
-    assert (
-        client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"}).json()["first_registration"]
-        is False
-    )
-    readback = client.get("/api/fleet/runners/r1").json()
+    assert reg.status_code == 201
+    registration: dict[str, object] = reg.json()
+    assert registration["first_registration"] is True
+    again: dict[str, object] = client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"}).json()
+    assert again["first_registration"] is False
+    readback: dict[str, object] = client.get("/api/fleet/runners/r1").json()
     assert readback["hub_paused"] is False
     assert readback["locally_paused"] is False
 
@@ -338,11 +519,11 @@ def test_registration_accepts_optional_federation_identity(client: TestClient) -
     assert reg.status_code == 201, reg.text
 
 
-def _registered_capabilities(client: TestClient, runner_id: str) -> tuple:
+def _registered_capabilities(client: TestClient, runner_id: str) -> tuple[RunnerCapability, ...]:
     """A registered runner's stored capability snapshot, read from the composition root's
     own service directly — the domain-core dataclass shape, not the wire view."""
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
-    row = service._state.get_runner(runner_id)
+    service = _service(client)
+    row = service._state.get_runner(runner_id)  # pyright: ignore[reportPrivateUsage]  # inspect domain snapshot
     assert row is not None
     return row.capabilities
 
@@ -376,10 +557,12 @@ def test_registration_stores_gates_and_the_runner_view_echoes_them(client: TestC
     replaced whole on re-registration, and empty when omitted."""
     body = {"runner_id": "r-gates", "workspace_id": "ws", "gates": ["build", "review"]}
     assert client.post("/api/fleet/runners", json=body).status_code == 201
-    assert client.get("/api/fleet/runners/r-gates").json()["gates"] == ["build", "review"]
+    first: _RunnerView = client.get("/api/fleet/runners/r-gates").json()
+    assert first["gates"] == ["build", "review"]
 
     assert client.post("/api/fleet/runners", json={"runner_id": "r-gates", "workspace_id": "ws"}).status_code == 201
-    assert client.get("/api/fleet/runners/r-gates").json()["gates"] == []
+    second: _RunnerView = client.get("/api/fleet/runners/r-gates").json()
+    assert second["gates"] == []
 
 
 def test_registration_stores_declining_and_the_runner_view_serves_it_superseded_whole(client: TestClient) -> None:
@@ -390,17 +573,20 @@ def test_registration_stores_declining_and_the_runner_view_serves_it_superseded_
     body = {"runner_id": "r-declining", "workspace_id": "ws"}
     assert client.post("/api/fleet/runners", json={**body, "declining": [floor, pace]}).status_code == 201
 
-    view = client.get("/api/fleet/runners/r-declining").json()["declining"]
+    first: _RunnerView = client.get("/api/fleet/runners/r-declining").json()
+    view = first["declining"]
     assert [(d["lever"], d["subscription"], d["until"]) for d in view] == [
         ("floor", "anthropic", "2026-10-22T14:00:00+00:00"),
         ("pace", None, None),
     ]
 
     assert client.post("/api/fleet/runners", json={**body, "declining": [pace]}).status_code == 201
-    assert [d["lever"] for d in client.get("/api/fleet/runners/r-declining").json()["declining"]] == ["pace"]
+    second: _RunnerView = client.get("/api/fleet/runners/r-declining").json()
+    assert [d["lever"] for d in second["declining"]] == ["pace"]
 
     assert client.post("/api/fleet/runners", json=body).status_code == 201
-    assert client.get("/api/fleet/runners/r-declining").json()["declining"] == []
+    third: _RunnerView = client.get("/api/fleet/runners/r-declining").json()
+    assert third["declining"] == []
 
 
 def test_runner_view_carries_the_registered_capability_snapshot(client: TestClient) -> None:
@@ -419,7 +605,8 @@ def test_runner_view_carries_the_registered_capability_snapshot(client: TestClie
 
     resp = client.get("/api/fleet/runners/r-cap-view")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["capabilities"] == [
+    view: _RunnerView = resp.json()
+    assert view["capabilities"] == [
         {
             "harness_id": "claude_code",
             "version": "1.2.3",
@@ -435,7 +622,8 @@ def test_runner_view_has_no_capabilities_when_none_were_registered(client: TestC
     client.post("/api/fleet/runners", json={"runner_id": "r-no-cap-view", "workspace_id": "ws"})
     resp = client.get("/api/fleet/runners/r-no-cap-view")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["capabilities"] == []
+    view: _RunnerView = resp.json()
+    assert view["capabilities"] == []
 
 
 def test_registration_without_capabilities_leaves_it_empty(client: TestClient) -> None:
@@ -468,8 +656,8 @@ def test_reregistration_replaces_the_capability_snapshot_whole(client: TestClien
 def _declared_subscriptions(client: TestClient, runner_id: str) -> tuple[DeclaredSubscription, ...] | None:
     """A registered runner's stored declared roster, read from the composition root's own
     service directly — mirrors ``_registered_capabilities``."""
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
-    row = service._state.get_runner(runner_id)
+    service = _service(client)
+    row = service._state.get_runner(runner_id)  # pyright: ignore[reportPrivateUsage]  # inspect domain snapshot
     assert row is not None
     return row.declared_subscriptions
 
@@ -545,7 +733,7 @@ def test_runner_view_lists_a_never_sampled_declared_slug_as_a_member(client: Tes
             "subscriptions": [{"slug": "probe", "name": "Probe", "provider": "none-such"}],
         },
     )
-    view = client.get("/api/fleet/runners/r-never").json()
+    view: _RunnerView = client.get("/api/fleet/runners/r-never").json()
     assert view["subscriptions"] == [
         {
             "slug": "probe",
@@ -588,10 +776,12 @@ def test_runner_view_drops_a_slug_no_longer_declared_while_its_sample_persists(c
             ],
         },
     )
-    assert len(client.get("/api/fleet/runners/r-drop").json()["subscriptions"]) == 1
+    before: _RunnerView = client.get("/api/fleet/runners/r-drop").json()
+    assert len(before["subscriptions"]) == 1
 
     client.post("/api/fleet/runners", json={"runner_id": "r-drop", "workspace_id": "ws", "subscriptions": []})
-    assert client.get("/api/fleet/runners/r-drop").json()["subscriptions"] == []
+    removed: _RunnerView = client.get("/api/fleet/runners/r-drop").json()
+    assert removed["subscriptions"] == []
 
     client.post(
         "/api/fleet/runners",
@@ -601,7 +791,8 @@ def test_runner_view_drops_a_slug_no_longer_declared_while_its_sample_persists(c
             "subscriptions": [{"slug": "anthropic", "name": "Anthropic", "provider": "anthropic"}],
         },
     )
-    redeclared = client.get("/api/fleet/runners/r-drop").json()["subscriptions"]
+    after: _RunnerView = client.get("/api/fleet/runners/r-drop").json()
+    redeclared = after["subscriptions"]
     assert len(redeclared) == 1
     assert redeclared[0]["sampled_at"] == "2026-08-01T12:00:00+00:00"
 
@@ -635,7 +826,8 @@ def test_runner_view_a_reported_slug_never_declared_is_absent_with_a_roster(clie
             ],
         },
     )
-    view = client.get("/api/fleet/runners/r-undeclared").json()["subscriptions"]
+    body: _RunnerView = client.get("/api/fleet/runners/r-undeclared").json()
+    view = body["subscriptions"]
     assert [s["slug"] for s in view] == ["anthropic"]
 
 
@@ -652,7 +844,8 @@ def test_runner_view_a_duplicate_declared_slug_collapses_first_wins(client: Test
             ],
         },
     )
-    view = client.get("/api/fleet/runners/r-dup").json()["subscriptions"]
+    body: _RunnerView = client.get("/api/fleet/runners/r-dup").json()
+    view = body["subscriptions"]
     assert [s["name"] for s in view] == ["First"]
 
 
@@ -685,7 +878,8 @@ def test_runner_view_a_declared_lapsed_miss_has_no_age_gate(client: TestClient) 
             ],
         },
     )
-    view = client.get("/api/fleet/runners/r-roster-lapsed").json()["subscriptions"]
+    body: _RunnerView = client.get("/api/fleet/runners/r-roster-lapsed").json()
+    view = body["subscriptions"]
     assert view == [
         {
             "slug": "anthropic",
@@ -721,7 +915,8 @@ def _seed_harness_chunk(client: TestClient, harness_id: str) -> str:
         },
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()["chunk_id"]
+    body: _SeedResponse = resp.json()
+    return body["chunk_id"]
 
 
 def _register(client: TestClient, runner_id: str = "r1") -> None:
@@ -740,13 +935,15 @@ def test_matched_peek_pass_over_skips_an_ineligible_head_and_returns_the_first_w
 
     resp = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY})
     assert resp.status_code == 200, resp.text
-    entries = resp.json()["entries"]
+    body: _Queue = resp.json()
+    entries = body["entries"]
     assert [e["chunk_id"] for e in entries] == [workable]
     assert entries[0]["position"] == 1  # the skipped head keeps its own position
     assert entries[0]["blocked"] is None
 
     # neither chunk moved — the order itself is never reshaped.
-    assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [ineligible, workable]
+    unfiltered: _Queue = client.get("/api/fleet/queue/peek").json()
+    assert [e["chunk_id"] for e in unfiltered["entries"]] == [ineligible, workable]
 
 
 def test_matched_peek_hold_yields_nothing_when_the_head_is_unusable(client: TestClient) -> None:
@@ -760,7 +957,8 @@ def test_matched_peek_hold_yields_nothing_when_the_head_is_unusable(client: Test
         json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["entries"] == []
+    body: _Queue = resp.json()
+    assert body["entries"] == []
 
 
 def test_matched_peek_hold_returns_a_usable_head_normally(client: TestClient) -> None:
@@ -773,7 +971,8 @@ def test_matched_peek_hold_returns_a_usable_head_normally(client: TestClient) ->
         json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
     )
     assert resp.status_code == 200, resp.text
-    entries = resp.json()["entries"]
+    body: _Queue = resp.json()
+    entries = body["entries"]
     assert [e["chunk_id"] for e in entries] == [workable]
     assert entries[0]["position"] == 0
 
@@ -787,7 +986,8 @@ def test_matched_peek_no_capabilities_asserted_matches_no_entry(client: TestClie
 
     resp = client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["entries"] == []
+    body: _Queue = resp.json()
+    assert body["entries"] == []
 
 
 def test_matched_peek_an_unrecognized_policy_value_round_trips_as_pass_over(client: TestClient) -> None:
@@ -801,7 +1001,8 @@ def test_matched_peek_an_unrecognized_policy_value_round_trips_as_pass_over(clie
         json={"capabilities": _DEFAULT_CAPABILITY, "policy": "not-a-real-policy"},
     )
     assert resp.status_code == 200, resp.text
-    assert [e["chunk_id"] for e in resp.json()["entries"]] == [workable]
+    body: _Queue = resp.json()
+    assert [e["chunk_id"] for e in body["entries"]] == [workable]
 
 
 def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capability_one(client: TestClient) -> None:
@@ -813,14 +1014,16 @@ def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capabil
     pass_over = client.post(
         "/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY}
     )
-    assert [e["chunk_id"] for e in pass_over.json()["entries"]] == [workable]
+    passed: _Queue = pass_over.json()
+    assert [e["chunk_id"] for e in passed["entries"]] == [workable]
 
     hold = client.post(
         "/api/fleet/queue/peek",
         params={"runner_id": "r1"},
         json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
     )
-    assert hold.json()["entries"] == []
+    held: _Queue = hold.json()
+    assert held["entries"] == []
 
     # the peek's own read never consumes the lever (mirrors GET /queue/peek).
     still_blocked = client.post(
@@ -828,7 +1031,8 @@ def test_matched_peek_the_blocked_dimension_takes_the_same_policy_as_the_capabil
         params={"runner_id": "r1"},
         json={"capabilities": _DEFAULT_CAPABILITY, "policy": "hold"},
     )
-    assert still_blocked.json()["entries"] == []
+    blocked_body: _Queue = still_blocked.json()
+    assert blocked_body["entries"] == []
 
 
 def test_matched_peek_refuses_401_without_a_token(client: TestClient) -> None:
@@ -850,7 +1054,8 @@ def test_matched_peek_answers_an_added_runner_that_has_never_registered(client: 
     chunk_id = _seed(client)
     resp = client.post("/api/fleet/queue/peek", params={"runner_id": "fresh"}, json={"capabilities": []})
     assert resp.status_code == 200, resp.text
-    assert [e["chunk_id"] for e in resp.json()["entries"]] in ([], [chunk_id])
+    body: _Queue = resp.json()
+    assert [e["chunk_id"] for e in body["entries"]] in ([], [chunk_id])
 
 
 def test_matched_peek_leaves_the_legacy_verb_unfiltered(client: TestClient) -> None:
@@ -862,14 +1067,17 @@ def test_matched_peek_leaves_the_legacy_verb_unfiltered(client: TestClient) -> N
     _register(client)
     client.post("/api/fleet/queue/peek", params={"runner_id": "r1"}, json={"capabilities": _DEFAULT_CAPABILITY})
 
-    legacy = client.get("/api/fleet/queue/peek").json()["entries"]
+    body: _Queue = client.get("/api/fleet/queue/peek").json()
+    legacy = body["entries"]
     assert [e["chunk_id"] for e in legacy] == [ineligible, workable]
 
 
 # --- claim revalidation -------------------------------
 
 
-def _register_with_capabilities(client: TestClient, capabilities: list[dict], *, runner_id: str = "r1") -> None:
+def _register_with_capabilities(
+    client: TestClient, capabilities: Sequence[Mapping[str, object]], *, runner_id: str = "r1"
+) -> None:
     resp = client.post(
         "/api/fleet/runners", json={"runner_id": runner_id, "workspace_id": "ws", "capabilities": capabilities}
     )
@@ -886,12 +1094,13 @@ def test_claim_denied_when_stored_capabilities_no_longer_satisfy_the_chunk(clien
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
-    body = denied.json()
+    body: dict[str, object] = denied.json()
     assert body["chunk_id"] == chunk_id
     assert body["incompatible_runner_id"] == "r1"
     assert "held_by_runner_id" not in body
     assert "prerequisite_chunk_id" not in body
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"] is None
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["route"] is None
 
 
 def test_claim_allowed_when_stored_capabilities_satisfy_the_chunk(client: TestClient) -> None:
@@ -901,7 +1110,8 @@ def test_claim_allowed_when_stored_capabilities_satisfy_the_chunk(client: TestCl
     claimed = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert claimed.status_code == 201, claimed.text
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "r1"
+    detail: _RoutedChunk = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["route"]["runner_id"] == "r1"
 
 
 def test_claim_with_no_registered_capabilities_is_refused(client: TestClient) -> None:
@@ -913,7 +1123,8 @@ def test_claim_with_no_registered_capabilities_is_refused(client: TestClient) ->
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
-    assert denied.json()["incompatible_runner_id"] == "r1"
+    body: dict[str, object] = denied.json()
+    assert body["incompatible_runner_id"] == "r1"
 
 
 def test_claim_denied_once_capabilities_regress_between_registration_and_claim(client: TestClient) -> None:
@@ -926,14 +1137,16 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
-    assert denied.json()["incompatible_runner_id"] == "r1"
+    body: dict[str, object] = denied.json()
+    assert body["incompatible_runner_id"] == "r1"
 
 
 # --- levers -----------------------------------------------------------------
 
 
 def test_lever_catalog_lists_all_fourteen(client: TestClient) -> None:
-    catalog = client.get("/_levers").json()["catalog"]
+    body: dict[str, dict[str, object]] = client.get("/_levers").json()
+    catalog = body["catalog"]
     assert set(catalog) == {
         "delay",
         "delay_transcripts",
@@ -1043,21 +1256,22 @@ def test_lever_stale_envelope_fences_out_the_completion(client: TestClient) -> N
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
     client.post("/_levers/stale_envelope", json={"chunk_id": chunk_id})
-    env = client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
+    env: _EpochResponse = client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
     assert env["epoch"] == 0  # stale: latest_epoch (1) - 1
     rejected = client.post(
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": env["epoch"], "runner_id": "r1", "from_node_id": "build"},
     )
-    assert rejected.json()["outcome"] == "failure"
-    assert "stale" in rejected.json()["detail"]
+    body: _FailureResponse = rejected.json()
+    assert body["outcome"] == "failure"
+    assert "stale" in body["detail"]
 
 
 # --- request capture ------------------------------------------------------
 
 
 def test_captured_records_the_authorization_header_on_an_api_call(client: TestClient) -> None:
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service = _service(client)
     service.add_runner(name="r1", runner_id="r1", token="tok-123")
     resp = client.post(
         "/api/fleet/runners",
@@ -1066,7 +1280,8 @@ def test_captured_records_the_authorization_header_on_an_api_call(client: TestCl
     )
     assert resp.status_code == 201
 
-    captured = client.get("/_captured").json()["requests"]
+    body: _CapturedResponse = client.get("/_captured").json()
+    captured = body["requests"]
     assert len(captured) == 1
     entry = captured[0]
     assert entry["method"] == "POST"
@@ -1076,32 +1291,38 @@ def test_captured_records_the_authorization_header_on_an_api_call(client: TestCl
 
 def test_captured_records_a_json_body_parsed(client: TestClient) -> None:
     client.post("/api/fleet/runners", json={"workspace_id": "ws"})
-    assert client.get("/_captured").json()["requests"][0]["body"] == {"workspace_id": "ws"}
+    body: _CapturedResponse = client.get("/_captured").json()
+    assert body["requests"][0]["body"] == {"workspace_id": "ws"}
 
 
 def test_captured_records_a_non_json_or_empty_body_as_null(client: TestClient) -> None:
     client.post("/api/fleet/runners", content=b"not json", headers={"Content-Type": "text/plain"})
     client.get("/api/fleet/queue/peek")
-    assert [r["body"] for r in client.get("/_captured").json()["requests"]] == [None, None]
+    body: _CapturedResponse = client.get("/_captured").json()
+    assert [r["body"] for r in body["requests"]] == [None, None]
 
 
 def test_captured_omits_a_request_with_no_authorization_header(client: TestClient) -> None:
     TestClient(client.app).get("/api/fleet/queue/peek")
-    entry = client.get("/_captured").json()["requests"][0]
+    body: _CapturedResponse = client.get("/_captured").json()
+    entry = body["requests"][0]
     assert "authorization" not in entry["headers"]
 
 
 def test_captured_ignores_control_plane_calls(client: TestClient) -> None:
     _seed(client)  # POST /_seed/chunk
     client.get("/_levers")
-    assert client.get("/_captured").json()["requests"] == []
+    body: _CapturedResponse = client.get("/_captured").json()
+    assert body["requests"] == []
 
 
 def test_captured_reset_clears_the_log(client: TestClient) -> None:
     client.get("/api/fleet/queue/peek")
-    assert len(client.get("/_captured").json()["requests"]) == 1
+    before: _CapturedResponse = client.get("/_captured").json()
+    assert len(before["requests"]) == 1
     assert client.post("/_captured/reset").status_code == 200
-    assert client.get("/_captured").json()["requests"] == []
+    after: _CapturedResponse = client.get("/_captured").json()
+    assert after["requests"] == []
 
 
 def test_captured_is_readable_even_while_unreachable_is_armed(client: TestClient) -> None:
@@ -1111,7 +1332,8 @@ def test_captured_is_readable_even_while_unreachable_is_armed(client: TestClient
     # 503'd call it recorded on the way in is still readable.
     captured = client.get("/_captured")
     assert captured.status_code == 200
-    assert captured.json()["requests"][0]["path"] == "/api/fleet/queue/peek"
+    body: _CapturedResponse = captured.json()
+    assert body["requests"][0]["path"] == "/api/fleet/queue/peek"
 
 
 def test_lever_drop_ack_advances_but_502s_and_reapply_is_idempotent(client: TestClient) -> None:
@@ -1123,13 +1345,17 @@ def test_lever_drop_ack_advances_but_502s_and_reapply_is_idempotent(client: Test
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
     assert dropped.status_code == 503  # the ack is dropped
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == "review"  # but the write landed
+    after_drop: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert after_drop["current_node_id"] == "review"  # the write landed
     reflush = client.post(
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
-    assert reflush.status_code == 200 and reflush.json()["outcome"] == "next"  # idempotent re-apply (D-090)
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == "review"  # no double advance
+    assert reflush.status_code == 200
+    replay: dict[str, object] = reflush.json()
+    assert replay["outcome"] == "next"
+    after_reflush: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert after_reflush["current_node_id"] == "review"
 
 
 def test_lever_replay_re_emits_the_previous_response(client: TestClient) -> None:
@@ -1139,15 +1365,19 @@ def test_lever_replay_re_emits_the_previous_response(client: TestClient) -> None
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
-    assert first.json()["outcome"] == "next"
-    node_after_first = client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"]
+    first_body: dict[str, object] = first.json()
+    assert first_body["outcome"] == "next"
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    node_after_first = detail["current_node_id"]
     client.post("/_levers/replay", json={"chunk_id": chunk_id})
     replayed = client.post(
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "review"},
     )
-    assert replayed.json()["outcome"] == "next"  # the previous response, duplicated
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == node_after_first  # no advance
+    replay_body: dict[str, object] = replayed.json()
+    assert replay_body["outcome"] == "next"
+    after: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert after["current_node_id"] == node_after_first
 
 
 def test_lever_conflicting_fact_reports_a_foreign_holder(client: TestClient) -> None:
@@ -1158,8 +1388,10 @@ def test_lever_conflicting_fact_reports_a_foreign_holder(client: TestClient) -> 
         "/_levers/conflicting_fact",
         json={"chunk_id": chunk_id, "remaining": 1, "payload": {"runner_id": "ghost-runner"}},
     )
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "ghost-runner"
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"]["runner_id"] == "r1"
+    first: _RoutedChunk = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert first["route"]["runner_id"] == "ghost-runner"
+    second: _RoutedChunk = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert second["route"]["runner_id"] == "r1"
 
 
 def test_lever_delay_slows_the_response(client: TestClient) -> None:
@@ -1182,7 +1414,8 @@ def test_lever_chunk_unknown_404s_mid_lease_then_self_expires(client: TestClient
     # healed after 2 affected calls — the chunk's actual state was never deleted.
     healed = client.get(f"/api/fleet/chunks/{chunk_id}")
     assert healed.status_code == 200
-    assert healed.json()["chunk_id"] == chunk_id
+    body: _SeedResponse = healed.json()
+    assert body["chunk_id"] == chunk_id
 
 
 def test_lever_dependency_unmet_denies_the_claim_naming_the_prerequisite(client: TestClient) -> None:
@@ -1198,11 +1431,12 @@ def test_lever_dependency_unmet_denies_the_claim_naming_the_prerequisite(client:
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409, denied.text
-    body = denied.json()
+    body: dict[str, object] = denied.json()
     assert body["chunk_id"] == chunk_id
     assert body["prerequisite_chunk_id"] == "ch_prereq"
     assert "held_by_runner_id" not in body
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"] is None
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["route"] is None
 
 
 def test_lever_dependency_unmet_is_sticky_until_cleared(client: TestClient) -> None:
@@ -1249,7 +1483,7 @@ def test_get_question_returns_the_question_view(client: TestClient) -> None:
     )
     view = client.get("/api/fleet/questions/q1")
     assert view.status_code == 200
-    body = view.json()
+    body: dict[str, object] = view.json()
     assert body["question_id"] == "q1"
     assert body["chunk_id"] == chunk_id
     assert body["runner_id"] == "r1"
@@ -1257,7 +1491,8 @@ def test_get_question_returns_the_question_view(client: TestClient) -> None:
     assert body["options"] == ["yes", "no"]
     assert body["answered"] is False
     # ... and it shows up on the chunk's own detail read too.
-    detail_questions = client.get(f"/api/fleet/chunks/{chunk_id}").json()["questions"]
+    detail: _ChunkQuestions = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    detail_questions = detail["questions"]
     assert [q["question_id"] for q in detail_questions] == ["q1"]
 
 
@@ -1285,19 +1520,23 @@ def test_events_escalation_recorded_carries_an_unrecognized_cause_verbatim(clien
         {"chunk_id": batched, "epoch": 1, "cause": "some-future-cause", "detail": "kept verbatim"},
         seq=2,
     )
-    escalation = client.get(f"/api/fleet/chunks/{batched}").json()["escalation"]
+    detail: _ChunkEscalation = client.get(f"/api/fleet/chunks/{batched}").json()
+    escalation = detail["escalation"]
     assert (escalation["cause"], escalation["detail"]) == ("some-future-cause", "kept verbatim")
 
 
 def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: TestClient) -> None:
     resp = client.post("/_seed/chunk", json={"entry": "deliver", "nodes": {"deliver": {"executor": "hub"}}})
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
     _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
+    before: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert before["status"] == "running"
 
     advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
     assert advance.status_code == 200
-    assert advance.json() == {
+    result: dict[str, object] = advance.json()
+    assert result == {
         "chunk_id": chunk_id,
         "status": "done",
         "ran": True,
@@ -1305,7 +1544,8 @@ def test_hub_advance_completes_a_chunk_parked_at_the_entry_hub_node(client: Test
         "to_node_name": None,
         "detail": "hub node advanced to done",
     }
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "done"
+    after: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert after["status"] == "done"
 
 
 def test_hub_advance_is_a_noop_when_not_parked_at_a_hub_node(client: TestClient) -> None:
@@ -1313,20 +1553,22 @@ def test_hub_advance_is_a_noop_when_not_parked_at_a_hub_node(client: TestClient)
     _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
     advance = client.post(f"/api/fleet/chunks/{chunk_id}/hub-advance")
     assert advance.status_code == 200
-    assert advance.json()["ran"] is False
-    assert advance.json()["detail"] == "not parked at a hub command node"
+    body: dict[str, object] = advance.json()
+    assert body["ran"] is False
+    assert body["detail"] == "not parked at a hub command node"
 
 
 def test_hub_advance_404s_on_unknown_chunk(client: TestClient) -> None:
     assert client.post("/api/fleet/chunks/unknown/hub-advance").status_code == 404
 
 
-def _push_fact(client: TestClient, kind: str, payload: dict, *, seq: int) -> dict:
+def _push_fact(client: TestClient, kind: str, payload: dict[str, object], *, seq: int) -> dict[str, object]:
     resp = client.post(
         "/api/fleet/events", json={"runner_id": "r1", "facts": [{"seq": seq, "kind": kind, "payload": payload}]}
     )
     assert resp.status_code == 200
-    return resp.json()
+    body: dict[str, object] = resp.json()
+    return body
 
 
 def test_a_stale_escalation_and_question_are_fenced_out(client: TestClient) -> None:
@@ -1338,7 +1580,8 @@ def test_a_stale_escalation_and_question_are_fenced_out(client: TestClient) -> N
     assert escalated["rejected"] == [3]
     asked = _push_fact(client, "question.asked", {"chunk_id": chunk_id, "question_id": "q_1", "epoch": 1}, seq=4)
     assert asked["rejected"] == [4]
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["escalation"] is None
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] is None
     assert client.get("/api/fleet/questions/q_1").status_code == 404
 
 
@@ -1378,8 +1621,10 @@ def test_events_escalation_recorded_sets_chunk_detail_escalation(client: TestCli
             ],
         },
     )
-    assert ack.json()["applied"] == [2]
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["escalation"] == {
+    body: _FactAck = ack.json()
+    assert body["applied"] == [2]
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["escalation"] == {
         "epoch": 1,
         "takeover_command": "take it over",
         "wrapped_takeover_command": f"blizzard runner takeover {chunk_id} --dir /runner",
@@ -1418,8 +1663,9 @@ def test_events_answer_delivered_marks_the_answered_question_delivered(client: T
             "facts": [{"seq": 3, "kind": "answer.delivered", "payload": {"question_id": "q1", "chunk_id": chunk_id}}],
         },
     )
-    assert ack.json()["applied"] == [3]
-    polled = client.get("/api/fleet/questions/q1").json()
+    body: _FactAck = ack.json()
+    assert body["applied"] == [3]
+    polled: dict[str, object] = client.get("/api/fleet/questions/q1").json()
     assert polled["answered"] is True
     # The delivery is readable in its own right, not folded into
     # `answered` — the real hub's view carries the same pair off `answer_deliveries`.
@@ -1436,8 +1682,9 @@ def test_events_runner_locally_paused_and_resumed_are_runner_scoped(client: Test
             "facts": [{"seq": 1, "kind": "runner.locally_paused", "payload": {"by": "op", "reason": "maintenance"}}],
         },
     )
-    assert paused.json()["applied"] == [1]
-    view = client.get("/api/fleet/runners/r1").json()
+    paused_body: _FactAck = paused.json()
+    assert paused_body["applied"] == [1]
+    view: dict[str, object] = client.get("/api/fleet/runners/r1").json()
     assert view["locally_paused"] is True
     assert view["locally_paused_by"] == "op"
     assert view["locally_paused_reason"] == "maintenance"
@@ -1446,7 +1693,8 @@ def test_events_runner_locally_paused_and_resumed_are_runner_scoped(client: Test
         "/api/fleet/events",
         json={"runner_id": "r1", "facts": [{"seq": 2, "kind": "runner.locally_resumed", "payload": {}}]},
     )
-    assert resumed.json()["applied"] == [2]
+    resumed_body: _FactAck = resumed.json()
+    assert resumed_body["applied"] == [2]
     view = client.get("/api/fleet/runners/r1").json()
     assert view["locally_paused"] is False
     assert view["locally_paused_by"] is None
@@ -1478,31 +1726,34 @@ def test_events_usage_recorded_is_accepted(client: TestClient) -> None:
             ],
         },
     )
-    assert ack.json()["applied"] == [2]
-    assert ack.json()["rejected"] == []
+    body: dict[str, object] = ack.json()
+    assert body["applied"] == [2]
+    assert body["rejected"] == []
 
 
 def test_a_report_that_outruns_its_registration_is_readable_once_it_lands(client: TestClient) -> None:
     """The outbound buffer replays an outage in FIFO order, so a self-report can legitimately
     reach the hub before the registration that follows it. The real hub persists both kinds
     without a known runner; acking and discarding would make that ordering untestable."""
-    for seq, kind, payload in (
+    reports: tuple[tuple[int, str, dict[str, object]], ...] = (
         (1, "runner.locally_paused", {"by": "op", "reason": "maintenance"}),
         (
             2,
             "external_subscription_usage.sampled",
             {"slug": "anthropic", "sampled_at": "2026-08-01T12:00:00+00:00", "windows": []},
         ),
-    ):
+    )
+    for seq, kind, payload in reports:
         ack = client.post(
             "/api/fleet/events",
             json={"runner_id": "late", "facts": [{"seq": seq, "kind": kind, "payload": payload}]},
         )
-        assert ack.json()["applied"] == [seq]
+        body: _FactAck = ack.json()
+        assert body["applied"] == [seq]
 
     client.post("/api/fleet/runners", json={"runner_id": "late", "workspace_id": "ws"})
 
-    view = client.get("/api/fleet/runners/late").json()
+    view: dict[str, object] = client.get("/api/fleet/runners/late").json()
     assert view["locally_paused"] is True
     assert view["locally_paused_by"] == "op"
     assert view["subscriptions"] == [
@@ -1566,11 +1817,13 @@ def test_malformed_usage_windows_are_omitted_and_a_later_valid_empty_sample_rend
             ],
         },
     )
-    assert malformed.json()["applied"] == [1]
+    malformed_body: _FactAck = malformed.json()
+    assert malformed_body["applied"] == [1]
 
     first_read = client.get("/api/fleet/runners/r1")
     assert first_read.status_code == 200
-    assert first_read.json()["subscriptions"][0]["windows"] == [valid_window]
+    first_body: _UsageView = first_read.json()
+    assert first_body["subscriptions"][0]["windows"] == [valid_window]
 
     healthy = client.post(
         "/api/fleet/events",
@@ -1590,9 +1843,11 @@ def test_malformed_usage_windows_are_omitted_and_a_later_valid_empty_sample_rend
             ],
         },
     )
-    assert healthy.json()["applied"] == [2]
+    healthy_body: _FactAck = healthy.json()
+    assert healthy_body["applied"] == [2]
 
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == [
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == [
         {
             "slug": "anthropic",
             "name": "Anthropic",
@@ -1631,8 +1886,10 @@ def test_sampled_at_matches_the_real_hubs_utc_and_fallback_semantics(
         },
     )
 
-    assert response.json()["applied"] == [1]
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"][0]["sampled_at"] == expected
+    body: _FactAck = response.json()
+    assert body["applied"] == [1]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"][0]["sampled_at"] == expected
 
 
 @pytest.mark.parametrize(
@@ -1643,7 +1900,7 @@ def test_sampled_at_matches_the_real_hubs_utc_and_fallback_semantics(
 def test_non_finite_or_out_of_range_utilization_windows_are_omitted_at_ingest(
     client: TestClient, invalid_pct: float
 ) -> None:
-    service = client.app.state.service  # type: ignore[attr-defined]
+    service = _service(client)
     valid_window = {
         "window": "5h",
         "utilization_pct": 42.5,
@@ -1676,7 +1933,8 @@ def test_non_finite_or_out_of_range_utilization_windows_are_omitted_at_ingest(
 
     assert ack.applied == [1]
     assert client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws"}).status_code == 201
-    windows = client.get("/api/fleet/runners/r1").json()["subscriptions"][0]["windows"]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    windows = view["subscriptions"][0]["windows"]
     assert windows == [valid_window]
     json.dumps(windows, allow_nan=False)
 
@@ -1697,8 +1955,9 @@ def test_events_event_recorded_is_accepted(client: TestClient) -> None:
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
-    assert ack.json()["rejected"] == []
+    body: dict[str, object] = ack.json()
+    assert body["applied"] == [1]
+    assert body["rejected"] == []
 
 
 def test_events_newest_external_usage_sample_wins_on_its_subscription(client: TestClient) -> None:
@@ -1729,8 +1988,9 @@ def test_events_newest_external_usage_sample_wins_on_its_subscription(client: Te
                 ],
             },
         )
-        assert ack.json()["applied"] == [seq]
-    view = client.get("/api/fleet/runners/r1").json()
+        body: _FactAck = ack.json()
+        assert body["applied"] == [seq]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
     subscription = view["subscriptions"][0]
     assert subscription["sampled_at"] == "2026-08-01T12:00:00+00:00"
     assert subscription["windows"][0]["utilization_pct"] == 71.5
@@ -1740,9 +2000,11 @@ def test_registration_round_trips_env_capacity_onto_the_runner_view(client: Test
     """``env_capacity`` is reported at registration and overwritten on every re-register,
     exactly like ``workspace_id``."""
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws", "env_capacity": 4})
-    assert client.get("/api/fleet/runners/r1").json()["env_capacity"] == 4
+    first: dict[str, object] = client.get("/api/fleet/runners/r1").json()
+    assert first["env_capacity"] == 4
     client.post("/api/fleet/runners", json={"runner_id": "r1", "workspace_id": "ws", "env_capacity": 2})
-    assert client.get("/api/fleet/runners/r1").json()["env_capacity"] == 2
+    second: dict[str, object] = client.get("/api/fleet/runners/r1").json()
+    assert second["env_capacity"] == 2
 
 
 def test_events_external_subscription_usage_sampled_is_accepted(client: TestClient) -> None:
@@ -1773,8 +2035,9 @@ def test_events_external_subscription_usage_sampled_is_accepted(client: TestClie
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
-    assert ack.json()["rejected"] == []
+    body: dict[str, object] = ack.json()
+    assert body["applied"] == [1]
+    assert body["rejected"] == []
 
 
 @pytest.mark.parametrize(
@@ -1805,8 +2068,10 @@ def test_events_invalid_external_usage_sample_is_rejected_without_a_subscription
         },
     )
 
-    assert ack.json()["rejected"] == [1]
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+    body: _FactAck = ack.json()
+    assert body["rejected"] == [1]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == []
 
 
 # The `missed` fact and its `condition` derivation.
@@ -1834,8 +2099,9 @@ def test_events_external_subscription_usage_missed_is_accepted(client: TestClien
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
-    assert ack.json()["rejected"] == []
+    body: _FactAck = ack.json()
+    assert body["applied"] == [1]
+    assert body["rejected"] == []
 
 
 @pytest.mark.parametrize(
@@ -1860,8 +2126,10 @@ def test_events_invalid_external_usage_miss_is_rejected_without_a_subscription(
         },
     )
 
-    assert ack.json()["rejected"] == [1]
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+    body: _FactAck = ack.json()
+    assert body["rejected"] == [1]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == []
 
 
 def test_a_miss_with_no_prior_sample_renders_a_miss_only_lapsed_row(client: TestClient) -> None:
@@ -1884,9 +2152,11 @@ def test_a_miss_with_no_prior_sample_renders_a_miss_only_lapsed_row(client: Test
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
+    body: _FactAck = ack.json()
+    assert body["applied"] == [1]
 
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == [
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == [
         {
             "slug": "openai",
             "name": "OpenAI",
@@ -1937,10 +2207,11 @@ def test_a_miss_newer_than_the_sample_sets_lapsed_over_the_surviving_sample(clie
             ],
         },
     )
-    assert ack.json()["applied"] == [2]
+    body: _FactAck = ack.json()
+    assert body["applied"] == [2]
 
-    view = client.get("/api/fleet/runners/r1").json()["subscriptions"]
-    assert view == [
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == [
         {
             "slug": "openai",
             "name": "OpenAI",
@@ -1991,10 +2262,11 @@ def test_a_sample_newer_than_the_miss_clears_the_condition(client: TestClient) -
             ],
         },
     )
-    assert ack.json()["applied"] == [2]
+    body: _FactAck = ack.json()
+    assert body["applied"] == [2]
 
-    view = client.get("/api/fleet/runners/r1").json()["subscriptions"]
-    assert view == [
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == [
         {
             "slug": "openai",
             "name": "OpenAI",
@@ -2029,10 +2301,12 @@ def test_a_non_lapsed_miss_reason_never_surfaces_as_a_condition(client: TestClie
             ],
         },
     )
-    assert ack.json()["applied"] == [1]
+    body: _FactAck = ack.json()
+    assert body["applied"] == [1]
 
     # Never sampled, and only a non-lapsed miss on record — simply absent.
-    assert client.get("/api/fleet/runners/r1").json()["subscriptions"] == []
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    assert view["subscriptions"] == []
 
 
 def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client: TestClient) -> None:
@@ -2075,7 +2349,8 @@ def test_a_miss_never_overwrites_the_sample_row_it_supersedes_in_the_view(client
         },
     )
 
-    subscriptions = client.get("/api/fleet/runners/r1").json()["subscriptions"]
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    subscriptions = view["subscriptions"]
     assert len(subscriptions) == 1
     assert subscriptions[0]["condition"] is None
     assert subscriptions[0]["windows"][0]["utilization_pct"] == 12.0
@@ -2111,9 +2386,10 @@ def test_two_distinct_subscriptions_render_separately_on_the_subscriptions_colle
                 ],
             },
         )
-        assert ack.json()["applied"] == [seq]
+        body: _FactAck = ack.json()
+        assert body["applied"] == [seq]
 
-    view = client.get("/api/fleet/runners/r1").json()
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
     subscriptions = {s["slug"]: s for s in view["subscriptions"]}
     assert set(subscriptions) == {"anthropic", "openai"}
     assert subscriptions["anthropic"]["name"] == "Anthropic"
@@ -2160,7 +2436,8 @@ def test_each_subscription_advances_on_its_own_cadence_independently(client: Tes
         },
     )
 
-    subscriptions = {s["slug"]: s for s in client.get("/api/fleet/runners/r1").json()["subscriptions"]}
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
+    subscriptions = {s["slug"]: s for s in view["subscriptions"]}
     assert subscriptions["anthropic"]["sampled_at"] == "2026-08-01T12:00:00+00:00"
     assert subscriptions["openai"]["sampled_at"] == "2026-08-01T12:10:00+00:00"
 
@@ -2184,7 +2461,7 @@ def test_a_subscription_with_no_reported_sample_has_no_entry(client: TestClient)
         },
     )
 
-    view = client.get("/api/fleet/runners/r1").json()
+    view: _UsageView = client.get("/api/fleet/runners/r1").json()
     assert [s["slug"] for s in view["subscriptions"]] == ["anthropic"]
 
 
@@ -2201,7 +2478,7 @@ def test_events_known_kind_on_an_unknown_chunk_is_still_applied(client: TestClie
             ],
         },
     )
-    body = ack.json()
+    body: _FactAck = ack.json()
     assert body["applied"] == [1]
     assert body["rejected"] == []
     assert body["high_water"] == 1
@@ -2212,7 +2489,7 @@ def test_events_unknown_kind_lands_in_rejected(client: TestClient) -> None:
         "/api/fleet/events", json={"runner_id": "r1", "facts": [{"seq": 1, "kind": "made.up", "payload": {}}]}
     )
     assert ack.status_code == 200
-    body = ack.json()
+    body: _FactAck = ack.json()
     assert body["applied"] == []
     assert body["rejected"] == [1]
     assert body["already_applied"] == []
@@ -2229,7 +2506,8 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
             "facts": [{"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": 1}}],
         },
     )
-    assert first.json()["applied"] == [1]
+    first_body: _FactAck = first.json()
+    assert first_body["applied"] == [1]
     replayed = client.post(
         "/api/fleet/events",
         json={
@@ -2237,10 +2515,12 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
             "facts": [{"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk_id, "epoch": 99}}],
         },
     )
-    assert replayed.json()["already_applied"] == [1]
-    assert replayed.json()["applied"] == []
+    replay_body: _FactAck = replayed.json()
+    assert replay_body["already_applied"] == [1]
+    assert replay_body["applied"] == []
     # the replayed epoch is discarded, not re-applied — the fence stays at 1.
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["latest_epoch"] == 1
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["latest_epoch"] == 1
 
 
 # --- transcript segments ---------------------------------------
@@ -2248,8 +2528,8 @@ def test_events_already_applied_idempotency_on_a_replayed_seq(client: TestClient
 
 def _transcript_record(
     chunk_id: str, *, seq: int, turn_range_start: int = 0, turn_range_end: int = 0, **overrides: object
-) -> dict:
-    record: dict = {
+) -> dict[str, object]:
+    record: dict[str, object] = {
         "seq": seq,
         "segment_id": "sg_1",
         "chunk_id": chunk_id,
@@ -2278,7 +2558,7 @@ def _transcript_record(
     return record
 
 
-def _turn_with_text(text: str, *, index: int = 0) -> dict:
+def _turn_with_text(text: str, *, index: int = 0) -> dict[str, object]:
     """A full, validation-passing turn (every field is now required)
     carrying just the given oversized ``text``, for cap tests that don't care about
     turn shape."""
@@ -2302,9 +2582,8 @@ def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClien
     .TurnSegmentView`` (``bzh:wire-change-extends-mock``), an unrecognized required field
     (``input_shape`` missing from a ``tool``) 422s instead of silently passing through."""
     chunk_id = _seed(client)
-    bad_record = _transcript_record(
-        chunk_id, seq=1, turns=[{"index": 0, "kind": "tool", "tool": {"name": "Bash", "input": {}}}]
-    )
+    turn: dict[str, object] = {"index": 0, "kind": "tool", "tool": {"name": "Bash", "input": {}}}
+    bad_record = _transcript_record(chunk_id, seq=1, turns=[turn])
 
     resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [bad_record]})
 
@@ -2317,7 +2596,7 @@ def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestCli
     default. A record whose tool
     call omits it entirely must still 200, not 422 like a genuine field rename would."""
     chunk_id = _seed(client)
-    turn = {
+    turn: dict[str, object] = {
         "index": 0,
         "kind": "tool",
         "timestamp": None,
@@ -2341,7 +2620,8 @@ def test_transcripts_accepts_a_tool_call_missing_input_truncated(client: TestCli
     resp = client.post("/api/fleet/transcripts", json={"runner_id": "r1", "records": [record]})
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["applied"] == [1]
+    body: dict[str, object] = resp.json()
+    assert body["applied"] == [1]
 
 
 def test_transcripts_rejects_a_turn_renamed_at_the_top_level(client: TestClient) -> None:
@@ -2397,7 +2677,7 @@ def test_transcripts_lands_records_on_its_own_lane(client: TestClient) -> None:
         "/api/fleet/transcripts", json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]}
     )
     assert ack.status_code == 200, ack.text
-    body = ack.json()
+    body: _TranscriptAck = ack.json()
     assert body["applied"] == [1]
     assert body["high_water"] == 1
     assert body["capped"] == []
@@ -2408,11 +2688,13 @@ def test_transcripts_already_applied_idempotency_on_a_replayed_seq(client: TestC
     payload = {"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1)]}
 
     first = client.post("/api/fleet/transcripts", json=payload)
-    assert first.json()["applied"] == [1]
+    first_body: _TranscriptAck = first.json()
+    assert first_body["applied"] == [1]
 
     replayed = client.post("/api/fleet/transcripts", json=payload)
-    assert replayed.json()["already_applied"] == [1]
-    assert replayed.json()["applied"] == []
+    replay_body: _TranscriptAck = replayed.json()
+    assert replay_body["already_applied"] == [1]
+    assert replay_body["applied"] == []
 
 
 def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_advances_past_it(
@@ -2430,8 +2712,9 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
-    assert first.json()["capped"] == [1]
-    assert first.json()["high_water"] == 1  # advances past a capped record too
+    first_body: _TranscriptAck = first.json()
+    assert first_body["capped"] == [1]
+    assert first_body["high_water"] == 1  # advances past a capped record too
 
     # A replay of the same now-behind-the-mark seq still reports its cap outcome, mirroring
     # the real hub's natural-key lookup on the already-applied path: a runner that
@@ -2441,8 +2724,9 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
-    assert replay.json()["capped"] == [1]
-    assert replay.json()["already_applied"] == []
+    replay_body: _TranscriptAck = replay.json()
+    assert replay_body["capped"] == [1]
+    assert replay_body["already_applied"] == []
 
     # A LATER, in-cap record in the same batch as a cap still applies.
     ack = client.post(
@@ -2455,7 +2739,7 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
             ],
         },
     )
-    body = ack.json()
+    body: _TranscriptAck = ack.json()
     assert body["capped"] == [2]
     assert body["applied"] == [3]
     assert body["high_water"] == 3
@@ -2469,8 +2753,9 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
             "records": [_transcript_record(chunk_id, seq=3, turn_range_start=2, turn_range_end=2)],
         },
     )
-    assert clean_replay.json()["already_applied"] == [3]
-    assert clean_replay.json()["capped"] == []
+    clean_body: _TranscriptAck = clean_replay.json()
+    assert clean_body["already_applied"] == [3]
+    assert clean_body["capped"] == []
 
 
 def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(client: TestClient) -> None:
@@ -2495,7 +2780,7 @@ def test_transcripts_chunk_budget_cap_rejects_independently_of_the_record_cap(cl
                 ],
             },
         )
-        body = ack.json()
+        body: _TranscriptAck = ack.json()
         assert body["high_water"] == seq  # every record advances the mark, applied or capped
         if body["capped"]:
             capped_seq = seq
@@ -2517,7 +2802,8 @@ def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
-    assert first.json()["capped"] == [1]
+    first_body: _TranscriptAck = first.json()
+    assert first_body["capped"] == [1]
 
     # The SAME natural key (segment_id="sg_1", turn_range_start=0), re-offered under a
     # fresh seq, now in-cap and accepted.
@@ -2525,8 +2811,9 @@ def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=2)]},
     )
-    assert reoffer.json()["applied"] == [2]
-    assert reoffer.json()["capped"] == []
+    reoffer_body: _TranscriptAck = reoffer.json()
+    assert reoffer_body["applied"] == [2]
+    assert reoffer_body["capped"] == []
 
     # A lost-ack replay of the ORIGINAL (now behind-the-mark) seq must no longer report
     # `capped` — the key's own decision moved to accepted, not stuck at its first outcome.
@@ -2534,11 +2821,12 @@ def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped
         "/api/fleet/transcripts",
         json={"runner_id": "r1", "records": [_transcript_record(chunk_id, seq=1, turns=huge_turns)]},
     )
-    assert replay.json()["capped"] == []
-    assert replay.json()["already_applied"] == [1]
+    replay_body: _TranscriptAck = replay.json()
+    assert replay_body["capped"] == []
+    assert replay_body["already_applied"] == [1]
 
 
-def _turns_of_size(target_bytes: int) -> list[dict]:
+def _turns_of_size(target_bytes: int) -> list[dict[str, object]]:
     """A single turn whose ``turns`` JSON encodes to exactly ``target_bytes`` — the exact
     quantity the mock's own chunk-budget accounting sums (``len(json.dumps(record.get(
     "turns", [])).encode("utf-8"))``)."""
@@ -2575,7 +2863,8 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
                 ],
             },
         )
-        assert ack.json()["applied"] == [seq], ack.text
+        body: _TranscriptAck = ack.json()
+        assert body["applied"] == [seq], ack.text
 
     # Re-offer the FIRST accepted key (turn_range_start=0) under a fresh seq — must apply
     # with no re-adjudication and no re-crediting.
@@ -2591,7 +2880,8 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
             ],
         },
     )
-    assert replay.json()["applied"] == [seq]
+    replay_body: _TranscriptAck = replay.json()
+    assert replay_body["applied"] == [seq]
 
     # The remaining 2 MiB of headroom is still free — a genuinely new key fits exactly,
     # which it would not if the replay above had re-credited its own 2 MiB a second time.
@@ -2607,8 +2897,9 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
             ],
         },
     )
-    assert fresh.json()["applied"] == [seq]
-    assert fresh.json()["capped"] == []
+    fresh_body: _TranscriptAck = fresh.json()
+    assert fresh_body["applied"] == [seq]
+    assert fresh_body["capped"] == []
 
 
 # --- lease-transcript read --------------------------------------
@@ -2628,7 +2919,7 @@ def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestCli
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body: _LeaseTranscript = resp.json()
     assert body["chunk_id"] == chunk_id
     assert body["node_id"] == "build"
     assert body["epoch"] == 1
@@ -2650,7 +2941,7 @@ def test_lease_transcript_read_spans_every_ingested_record_in_seq_order(client: 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body: _LeaseTranscript = resp.json()
     assert [t["text"] for t in body["turns"]] == ["hi", "second"]
     # Renumbered across the whole read, like the real route: a segment's own index is
     # generation-local, so a lease's concatenation would otherwise restart it mid-list.
@@ -2669,7 +2960,8 @@ def test_lease_transcript_read_does_not_cross_node_ids(client: TestClient) -> No
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "review", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["turns"] == []
+    body: _LeaseTranscript = resp.json()
+    assert body["turns"] == []
 
 
 def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> None:
@@ -2686,7 +2978,8 @@ def test_lease_transcript_read_does_not_cross_chunk_ids(client: TestClient) -> N
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["turns"] == []
+    body: _LeaseTranscript = resp.json()
+    assert body["turns"] == []
 
 
 def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: TestClient) -> None:
@@ -2706,7 +2999,8 @@ def test_a_record_re_offered_under_a_fresh_seq_replaces_not_duplicates(client: T
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    assert [t["text"] for t in resp.json()["turns"]] == ["hi"]
+    body: _LeaseTranscript = resp.json()
+    assert [t["text"] for t in body["turns"]] == ["hi"]
 
 
 def test_lease_transcript_read_orders_by_spawn_generation_segment_id_turn_range_not_arrival(
@@ -2734,7 +3028,8 @@ def test_lease_transcript_read_orders_by_spawn_generation_segment_id_turn_range_
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    assert [t["text"] for t in resp.json()["turns"]] == ["from-sg-a", "hi"]
+    body: _LeaseTranscript = resp.json()
+    assert [t["text"] for t in body["turns"]] == ["from-sg-a", "hi"]
 
 
 def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(client: TestClient) -> None:
@@ -2743,7 +3038,7 @@ def test_lease_transcript_read_is_empty_for_a_lease_with_no_retained_segments(cl
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 1})
 
     assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body: _LeaseTranscript = resp.json()
     assert body["turns"] == []
 
 
@@ -2757,7 +3052,8 @@ def test_lease_transcript_read_does_not_cross_epochs(client: TestClient) -> None
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/transcript-segments", params={"node_id": "build", "epoch": 2})
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["turns"] == []
+    body: _LeaseTranscript = resp.json()
+    assert body["turns"] == []
 
 
 # --- test-control answer route ------------------------------------------------
@@ -2787,9 +3083,10 @@ def test_seed_answer_makes_the_question_poll_return_answered(client: TestClient)
     )
     resp = client.post("/_seed/answer", json={"question_id": "q1", "answer": "yes", "answered_by": "ops"})
     assert resp.status_code == 200
-    assert resp.json() == {"answered": True, "question_id": "q1"}
+    answer: dict[str, object] = resp.json()
+    assert answer == {"answered": True, "question_id": "q1"}
 
-    polled = client.get("/api/fleet/questions/q1").json()
+    polled: dict[str, object] = client.get("/api/fleet/questions/q1").json()
     assert polled["answered"] is True
     assert polled["answer"] == "yes"
     assert polled["answered_by"] == "ops"
@@ -2810,9 +3107,10 @@ def test_seed_stop_reports_stopped_with_no_route_and_the_graph_still_readable(cl
 
     resp = client.post("/_seed/stop", json={"chunk_id": chunk_id})
     assert resp.status_code == 200
-    assert resp.json() == {"stopped": True, "chunk_id": chunk_id}
+    stopped: dict[str, object] = resp.json()
+    assert stopped == {"stopped": True, "chunk_id": chunk_id}
 
-    detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert detail["status"] == "stopped"
     assert detail["route"] is None
     assert detail["current_node_id"] == "build"
@@ -2827,11 +3125,12 @@ def test_seed_stop_404s_on_unknown_chunk(client: TestClient) -> None:
 def test_seed_stop_leaves_levers_unchanged(client: TestClient) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id)
-    before = client.get("/_levers").json()
+    before: dict[str, object] = client.get("/_levers").json()
 
     client.post("/_seed/stop", json={"chunk_id": chunk_id})
 
-    assert client.get("/_levers").json() == before
+    after: dict[str, object] = client.get("/_levers").json()
+    assert after == before
 
 
 # --- the session declaration on the envelope -------------
@@ -2877,12 +3176,14 @@ _SESSION_SPEC = {
 def test_a_seeded_session_declaration_rides_the_claim_envelope(client: TestClient) -> None:
     resp = client.post("/_seed/chunk", json=_SESSION_SPEC)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert claim.status_code == 201, claim.text
-    node = claim.json()["envelope"]["node"]
+    claimed: _FlexibleClaim = claim.json()
+    node = claimed["envelope"]["node"]
     assert node["session"] == "fresh"
     assert node["session_source"] == "code"
     assert node["session_name"] == "code"
@@ -2899,7 +3200,8 @@ def test_a_seeded_session_declaration_rides_the_claim_envelope(client: TestClien
 
 def test_the_declaration_rides_the_next_envelope_and_the_idempotent_re_read(client: TestClient) -> None:
     resp = client.post("/_seed/chunk", json=_SESSION_SPEC)
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
     _claim_and_fence(client, chunk_id)
 
     step = client.post(
@@ -2907,11 +3209,12 @@ def test_the_declaration_rides_the_next_envelope_and_the_idempotent_re_read(clie
         json={"choice": "pass", "epoch": 1, "runner_id": "r1", "from_node_id": "build"},
     )
 
-    node = step.json()["next_envelope"]["node"]
+    stepped: _FlexibleCompletion = step.json()
+    node = stepped["next_envelope"]["node"]
     assert (node["node_name"], node["session"], node["session_name"]) == ("review", "resume", "code")
     assert node["session_rotate"] is None  # `review` declares no bounds
 
-    re_read = client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
+    re_read: _FlexibleEnvelope = client.get(f"/api/fleet/chunks/{chunk_id}/envelope").json()
     assert re_read["node"]["session_name"] == "code"
 
 
@@ -2921,7 +3224,8 @@ def test_a_node_declaring_no_session_carries_the_pre_144_shape(client: TestClien
 
     claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
-    node = claim.json()["envelope"]["node"]
+    claimed: _FlexibleClaim = claim.json()
+    node = claimed["envelope"]["node"]
     assert node["session_source"] is None
     assert node["session_name"] is None
     assert node["session_model"] == []
@@ -2942,13 +3246,15 @@ def test_seeded_graph_artifacts_ride_the_claim_envelope(client: TestClient) -> N
     ]
     resp = client.post("/_seed/chunk", json=spec)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     claim = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     # Authored order, so a silent sort flips these; "runbook" seeds its kind explicitly
     # while "docket" leans on the default, so both spellings have to reach the envelope.
-    assert claim.json()["envelope"]["graph_artifacts"] == [
+    claimed: _FlexibleClaim = claim.json()
+    assert claimed["envelope"]["graph_artifacts"] == [
         {"name": "runbook", "kind": "asset", "content": "how to ship it"},
         {"name": "docket", "kind": "asset", "content": "the work item text"},
     ]
@@ -2960,27 +3266,32 @@ def test_seeded_graph_artifacts_ride_the_claim_envelope(client: TestClient) -> N
 def test_system_artifacts_start_empty(client: TestClient) -> None:
     resp = client.get("/api/fleet/system-artifacts")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    body: list[dict[str, object]] = resp.json()
+    assert body == []
 
 
 def test_seeded_system_artifact_is_readable_by_list_and_by_name(client: TestClient) -> None:
     seeded = client.post("/_seed/system-artifacts", json={"name": "garden/finding-format", "content": "the format"})
     assert seeded.status_code == 201, seeded.text
-    assert seeded.json() == {"name": "garden/finding-format"}
+    seed_body: dict[str, object] = seeded.json()
+    assert seed_body == {"name": "garden/finding-format"}
 
     listed = client.get("/api/fleet/system-artifacts")
     assert listed.status_code == 200, listed.text
-    assert listed.json() == [{"name": "garden/finding-format", "content": "the format"}]
+    list_body: list[dict[str, object]] = listed.json()
+    assert list_body == [{"name": "garden/finding-format", "content": "the format"}]
 
     fetched = client.get("/api/fleet/system-artifacts/garden/finding-format")
     assert fetched.status_code == 200, fetched.text
-    assert fetched.json() == {"name": "garden/finding-format", "content": "the format"}
+    fetched_body: dict[str, object] = fetched.json()
+    assert fetched_body == {"name": "garden/finding-format", "content": "the format"}
 
 
 def test_get_system_artifact_404s_for_an_unpublished_name(client: TestClient) -> None:
     resp = client.get("/api/fleet/system-artifacts/ghost")
     assert resp.status_code == 404
-    assert "ghost" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "ghost" in body["detail"]
 
 
 def test_seeding_the_same_name_twice_replaces_it(client: TestClient) -> None:
@@ -2988,7 +3299,8 @@ def test_seeding_the_same_name_twice_replaces_it(client: TestClient) -> None:
     client.post("/_seed/system-artifacts", json={"name": "docket", "content": "second"})
 
     resp = client.get("/api/fleet/system-artifacts/docket")
-    assert resp.json()["content"] == "second"
+    body: dict[str, object] = resp.json()
+    assert body["content"] == "second"
 
 
 def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
@@ -2996,7 +3308,8 @@ def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
     assert client.post("/_seed/reset").status_code == 200
 
     resp = client.get("/api/fleet/system-artifacts")
-    assert resp.json() == []
+    body: list[dict[str, object]] = resp.json()
+    assert body == []
 
 
 # --- scopes (global vocabulary) ------------------------------
@@ -3005,18 +3318,21 @@ def test_reset_clears_seeded_system_artifacts(client: TestClient) -> None:
 def test_scopes_start_empty(client: TestClient) -> None:
     resp = client.get("/api/fleet/scopes")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    body: list[dict[str, object]] = resp.json()
+    assert body == []
 
 
 def test_seeded_scope_is_readable_by_the_fleet_route(client: TestClient) -> None:
     seeded = client.post("/_seed/scopes", json={"slug": "blizzard", "description": "the platform"})
     assert seeded.status_code == 201, seeded.text
-    assert seeded.json() == {"slug": "blizzard"}
+    seed_body: dict[str, object] = seeded.json()
+    assert seed_body == {"slug": "blizzard"}
 
     listed = client.get("/api/fleet/scopes")
     assert listed.status_code == 200, listed.text
-    assert len(listed.json()) == 1
-    row = listed.json()[0]
+    list_body: list[dict[str, object]] = listed.json()
+    assert len(list_body) == 1
+    row = list_body[0]
     assert row["slug"] == "blizzard"
     assert row["description"] == "the platform"
     assert row["retired"] is False
@@ -3026,7 +3342,8 @@ def test_a_retired_scope_is_seedable_directly(client: TestClient) -> None:
     client.post("/_seed/scopes", json={"slug": "gone", "retired": True})
 
     resp = client.get("/api/fleet/scopes")
-    assert resp.json()[0]["retired"] is True
+    body: list[dict[str, object]] = resp.json()
+    assert body[0]["retired"] is True
 
 
 def test_seeding_the_same_slug_twice_replaces_it(client: TestClient) -> None:
@@ -3034,8 +3351,9 @@ def test_seeding_the_same_slug_twice_replaces_it(client: TestClient) -> None:
     client.post("/_seed/scopes", json={"slug": "blizzard", "description": "second"})
 
     resp = client.get("/api/fleet/scopes")
-    assert len(resp.json()) == 1
-    assert resp.json()[0]["description"] == "second"
+    body: list[dict[str, object]] = resp.json()
+    assert len(body) == 1
+    assert body[0]["description"] == "second"
 
 
 def test_reset_clears_seeded_scopes(client: TestClient) -> None:
@@ -3043,14 +3361,17 @@ def test_reset_clears_seeded_scopes(client: TestClient) -> None:
     assert client.post("/_seed/reset").status_code == 200
 
     resp = client.get("/api/fleet/scopes")
-    assert resp.json() == []
+    body: list[dict[str, object]] = resp.json()
+    assert body == []
 
 
 # --- garden findings (worker-scoped bucket read) ------------------------------
 
 
-def _garden_spec(*, garden_run: dict | None, garden_findings: list[dict] | None = None) -> dict:
-    spec = dict(_SPEC)
+def _garden_spec(
+    *, garden_run: dict[str, object] | None, garden_findings: list[dict[str, object]] | None = None
+) -> dict[str, object]:
+    spec: dict[str, object] = dict(_SPEC)
     if garden_run is not None:
         spec["garden_run"] = garden_run
     if garden_findings is not None:
@@ -3067,11 +3388,13 @@ def test_garden_findings_reads_the_seeded_live_bucket(client: TestClient) -> Non
     )
     resp = client.post("/_seed/chunk", json=spec)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     findings = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
     assert findings.status_code == 200, findings.text
-    assert findings.json() == [
+    body: list[dict[str, object]] = findings.json()
+    assert body == [
         {
             "finding_id": "fin_1",
             "routine_name": "nightly",
@@ -3111,10 +3434,12 @@ def test_garden_findings_excludes_a_seeded_non_live_finding(client: TestClient) 
             },
         ],
     )
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     findings = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
-    assert [row["finding_id"] for row in findings.json()] == ["fin_1"]
+    body: list[dict[str, object]] = findings.json()
+    assert [row["finding_id"] for row in body] == ["fin_1"]
 
 
 def test_garden_findings_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
@@ -3122,20 +3447,24 @@ def test_garden_findings_404s_on_a_chunk_with_no_run_context(client: TestClient)
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/garden/findings")
     assert resp.status_code == 404
-    assert "no run context" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "no run context" in body["detail"]
 
 
 def test_garden_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
     resp = client.get("/api/fleet/chunks/ch_ghost/garden/findings")
     assert resp.status_code == 404
-    assert "ch_ghost" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "ch_ghost" in body["detail"]
 
 
 # --- garden proposals (worker-scoped open-bucket read) ------------------------
 
 
-def _proposal_spec(*, garden_run: dict | None, garden_proposals: list[dict] | None = None) -> dict:
-    spec = dict(_SPEC)
+def _proposal_spec(
+    *, garden_run: dict[str, object] | None, garden_proposals: Sequence[Mapping[str, object]] | None = None
+) -> dict[str, object]:
+    spec: dict[str, object] = dict(_SPEC)
     if garden_run is not None:
         spec["garden_run"] = garden_run
     if garden_proposals is not None:
@@ -3152,11 +3481,13 @@ def test_garden_proposals_reads_the_seeded_open_bucket(client: TestClient) -> No
     )
     resp = client.post("/_seed/chunk", json=spec)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
     assert proposals.status_code == 200, proposals.text
-    assert proposals.json() == [
+    body: list[dict[str, object]] = proposals.json()
+    assert body == [
         {
             "proposal_id": "prop_1",
             "origin": "routine-run",
@@ -3182,11 +3513,13 @@ def test_garden_proposals_accepts_a_proposal_citing_no_findings(client: TestClie
     )
     resp = client.post("/_seed/chunk", json=spec)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
     assert proposals.status_code == 200, proposals.text
-    assert proposals.json()[0]["findings"] == []
+    body: list[dict[str, object]] = proposals.json()
+    assert body[0]["findings"] == []
 
 
 def test_garden_proposals_state_closed_returns_only_closed_ones_with_their_closure(client: TestClient) -> None:
@@ -3204,11 +3537,12 @@ def test_garden_proposals_state_closed_returns_only_closed_ones_with_their_closu
             },
         ],
     )
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": "closed"})
     assert proposals.status_code == 200, proposals.text
-    body = proposals.json()
+    body: list[dict[str, object]] = proposals.json()
     assert [row["proposal_id"] for row in body] == ["prop_closed"]
     assert body[0]["closure"] == {
         "closure": "passed",
@@ -3236,14 +3570,16 @@ def test_garden_proposals_state_all_returns_open_and_closed(client: TestClient) 
             },
         ],
     )
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     proposals = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": "all"})
     assert proposals.status_code == 200, proposals.text
-    assert [row["proposal_id"] for row in proposals.json()] == ["prop_open", "prop_closed"]
+    body: list[dict[str, object]] = proposals.json()
+    assert [row["proposal_id"] for row in body] == ["prop_open", "prop_closed"]
 
 
-def _paged_proposal_spec() -> dict:
+def _paged_proposal_spec() -> dict[str, object]:
     return _proposal_spec(
         garden_run={"routine_name": "nightly", "scope_slug": "blizzard"},
         garden_proposals=[
@@ -3256,15 +3592,18 @@ def _paged_proposal_spec() -> dict:
 
 @pytest.mark.parametrize("state", ["open", "closed", "all"])
 def test_garden_proposals_page_follows_next_cursor_to_the_unpaged_docket(client: TestClient, state: str) -> None:
-    chunk_id = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()["chunk_id"]
-    whole = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": state}).json()
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()
+    chunk_id = seeded["chunk_id"]
+    whole: list[dict[str, object]] = client.get(
+        f"/api/fleet/chunks/{chunk_id}/garden/proposals", params={"state": state}
+    ).json()
 
-    collected: list[dict] = []
+    collected: list[dict[str, object]] = []
     params: dict[str, str | int] = {"state": state, "limit": 2}
     while True:
         page = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals/page", params=params)
         assert page.status_code == 200, page.text
-        body = page.json()
+        body: _ProposalPage = page.json()
         assert len(body["proposals"]) <= 2
         collected += body["proposals"]
         if body["next_cursor"] is None:
@@ -3275,7 +3614,8 @@ def test_garden_proposals_page_follows_next_cursor_to_the_unpaged_docket(client:
 
 
 def test_garden_proposals_page_refuses_a_malformed_cursor_and_an_out_of_range_limit(client: TestClient) -> None:
-    chunk_id = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()
+    chunk_id = seeded["chunk_id"]
     url = f"/api/fleet/chunks/{chunk_id}/garden/proposals/page"
 
     assert client.get(url, params={"cursor": "junk"}).status_code == 422
@@ -3293,13 +3633,15 @@ def test_garden_proposals_404s_on_a_chunk_with_no_run_context(client: TestClient
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/garden/proposals")
     assert resp.status_code == 404
-    assert "no run context" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "no run context" in body["detail"]
 
 
 def test_garden_proposals_404s_on_an_unknown_chunk(client: TestClient) -> None:
     resp = client.get("/api/fleet/chunks/ch_ghost/garden/proposals")
     assert resp.status_code == 404
-    assert "ch_ghost" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "ch_ghost" in body["detail"]
 
 
 # --- fleet analytics (worker-scoped counts/spend read) ----------
@@ -3314,8 +3656,10 @@ _ANALYTICS_ROUTES = [
 ]
 
 
-def _analytics_spec(*, garden_run: dict | None, analytics: dict | None = None) -> dict:
-    spec = dict(_SPEC)
+def _analytics_spec(
+    *, garden_run: dict[str, object] | None, analytics: dict[str, object] | None = None
+) -> dict[str, object]:
+    spec: dict[str, object] = dict(_SPEC)
     if garden_run is not None:
         spec["garden_run"] = garden_run
     if analytics is not None:
@@ -3329,20 +3673,23 @@ def test_analytics_404s_on_a_chunk_with_no_run_context(client: TestClient, suffi
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 404
-    assert "no run context" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "no run context" in body["detail"]
 
 
 @pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
 def test_analytics_404s_on_an_unknown_chunk(client: TestClient, suffix: str) -> None:
     resp = client.get(f"/api/fleet/chunks/ch_ghost/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 404
-    assert "ch_ghost" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "ch_ghost" in body["detail"]
 
 
 @pytest.mark.parametrize("suffix", _ANALYTICS_ROUTES)
 def test_analytics_422s_without_since(client: TestClient, suffix: str) -> None:
     spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"})
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}")
     assert resp.status_code == 422, resp.text
@@ -3374,26 +3721,29 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
         }
     )
     spec = _analytics_spec(garden_run={"routine_name": "nightly", "scope_slug": "blizzard"}, analytics={key: [row]})
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}", params={"since": "2020-01-01T00:00:00Z"})
     assert resp.status_code == 200, resp.text
     envelope_key = "counts" if suffix.startswith("counts/") else "spend"
-    assert resp.json()[envelope_key] == [row]
+    body: dict[str, list[dict[str, object]]] = resp.json()
+    assert body[envelope_key] == [row]
     if suffix in {"counts/nodes", "spend/nodes", "spend/graphs"}:
         rolled = client.get(
             f"/api/fleet/chunks/{chunk_id}/analytics/{suffix}",
             params={"since": "2020-01-01T00:00:00Z", "by_name": "true"},
         )
         assert rolled.status_code == 200, rolled.text
-        assert rolled.json()[envelope_key] == [row]  # the mock serves its seeded rows as-is
+        rolled_body: dict[str, list[dict[str, object]]] = rolled.json()
+        assert rolled_body[envelope_key] == [row]
 
 
 # --- answered findings (worker-scoped per-chunk read) -------------------------
 
 
-def _answered_spec(*, garden_answered_findings: list[dict] | None) -> dict:
-    spec = dict(_SPEC)
+def _answered_spec(*, garden_answered_findings: list[dict[str, object]] | None) -> dict[str, object]:
+    spec: dict[str, object] = dict(_SPEC)
     if garden_answered_findings is not None:
         spec["garden_answered_findings"] = garden_answered_findings
     return spec
@@ -3414,11 +3764,13 @@ def test_chunk_findings_reads_the_seeded_answered_set(client: TestClient) -> Non
     )
     resp = client.post("/_seed/chunk", json=spec)
     assert resp.status_code == 201, resp.text
-    chunk_id = resp.json()["chunk_id"]
+    seeded: _SeedResponse = resp.json()
+    chunk_id = seeded["chunk_id"]
 
     findings = client.get(f"/api/fleet/chunks/{chunk_id}/findings")
     assert findings.status_code == 200, findings.text
-    assert findings.json() == [
+    body: list[dict[str, object]] = findings.json()
+    assert body == [
         {
             "finding_id": "fin_1",
             "routine_name": "nightly",
@@ -3448,13 +3800,15 @@ def test_chunk_findings_404s_on_a_chunk_with_no_answered_set(client: TestClient)
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings")
     assert resp.status_code == 404
-    assert "no accepted, minted garden proposal" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "no accepted, minted garden proposal" in body["detail"]
 
 
 def test_chunk_findings_404s_on_an_unknown_chunk(client: TestClient) -> None:
     resp = client.get("/api/fleet/chunks/ch_ghost/findings")
     assert resp.status_code == 404
-    assert "ch_ghost" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "ch_ghost" in body["detail"]
 
 
 def test_chunk_finding_reads_one_finding_within_the_answered_set(client: TestClient) -> None:
@@ -3478,11 +3832,13 @@ def test_chunk_finding_reads_one_finding_within_the_answered_set(client: TestCli
             },
         ]
     )
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_2")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["finding_id"] == "fin_2"
+    body: dict[str, object] = resp.json()
+    assert body["finding_id"] == "fin_2"
 
 
 def test_chunk_finding_404s_on_an_id_outside_the_answered_set(client: TestClient) -> None:
@@ -3498,11 +3854,13 @@ def test_chunk_finding_404s_on_an_id_outside_the_answered_set(client: TestClient
             },
         ]
     )
-    chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    chunk_id = seeded["chunk_id"]
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_other")
     assert resp.status_code == 404
-    assert "not among the findings" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "not among the findings" in body["detail"]
 
 
 def test_chunk_finding_404s_on_a_chunk_with_no_answered_set(client: TestClient) -> None:
@@ -3510,7 +3868,8 @@ def test_chunk_finding_404s_on_a_chunk_with_no_answered_set(client: TestClient) 
 
     resp = client.get(f"/api/fleet/chunks/{chunk_id}/findings/fin_1")
     assert resp.status_code == 404
-    assert "no accepted, minted garden proposal" in resp.json()["detail"]
+    body: dict[str, str] = resp.json()
+    assert "no accepted, minted garden proposal" in body["detail"]
 
 
 # --- the hub's runner-facing refusals -----------------------------------------
@@ -3520,18 +3879,18 @@ _HUB_INSTANT = datetime(2026, 7, 13, tzinfo=UTC)
 
 
 def _chunk_state(**overrides: object) -> ChunkState:
-    fields: dict = {
+    fields: dict[str, object] = {
         "chunk_id": "c1",
         "graph_id": "gr_mock",
         "entry": "build",
         "nodes": {"build": NodeSpec(), "deliver": NodeSpec(executor=Executor.HUB)},
     }
     fields.update(overrides)
-    return ChunkState(**fields)
+    return ChunkState.model_validate(fields)
 
 
 def _question_state(**overrides: object) -> QuestionState:
-    fields: dict = {
+    fields: dict[str, object] = {
         "question_id": "q1",
         "chunk_id": "c1",
         "runner_id": "r1",
@@ -3540,7 +3899,7 @@ def _question_state(**overrides: object) -> QuestionState:
         "asked_at": "2026-07-13T00:00:00+00:00",
     }
     fields.update(overrides)
-    return QuestionState(**fields)
+    return QuestionState.model_validate(fields)
 
 
 def _ask(client: TestClient, chunk_id: str, *, seq: int, question_id: str = "q1", epoch: int = 1) -> None:
@@ -3563,16 +3922,20 @@ def _ask(client: TestClient, chunk_id: str, *, seq: int, question_id: str = "q1"
             ],
         },
     )
-    assert seq in ack.json()["applied"]
+    body: _FactAck = ack.json()
+    assert seq in body["applied"]
 
 
-def _complete(client: TestClient, chunk_id: str, *, from_node_id: str, epoch: int = 1, choice: str = "pass") -> dict:
+def _complete(
+    client: TestClient, chunk_id: str, *, from_node_id: str, epoch: int = 1, choice: str = "pass"
+) -> dict[str, object]:
     resp = client.post(
         f"/api/fleet/chunks/{chunk_id}/completions",
         json={"from_node_id": from_node_id, "epoch": epoch, "choice": choice, "runner_id": "r1"},
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()
+    body: dict[str, object] = resp.json()
+    return body
 
 
 @pytest.mark.parametrize("status", [ChunkStatus.DONE, ChunkStatus.STOPPED])
@@ -3722,24 +4085,27 @@ def test_a_claim_from_an_unregistered_runner_answers_403_and_leaves_the_chunk_un
     denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "ghost"})
 
     assert denied.status_code == 403
-    assert denied.json() == {
+    body: dict[str, object] = denied.json()
+    assert body == {
         "chunk_id": chunk_id,
         "runner_id": "ghost",
         "detail": "runner ghost is not registered at the hub",
     }
-    assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [chunk_id]
+    queue: _Queue = client.get("/api/fleet/queue/peek").json()
+    assert [e["chunk_id"] for e in queue["entries"]] == [chunk_id]
 
 
 def test_a_claim_from_a_runner_paused_at_the_hub_answers_403(client: TestClient) -> None:
     chunk_id = _seed(client)
     _register(client)
-    service: MockHubService = client.app.state.service  # type: ignore[attr-defined]
+    service = _service(client)
     service.set_paused("r1", True)
 
     denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 403
-    assert denied.json() == {"chunk_id": chunk_id, "runner_id": "r1", "detail": "runner is paused at the hub"}
+    body: dict[str, object] = denied.json()
+    assert body == {"chunk_id": chunk_id, "runner_id": "r1", "detail": "runner is paused at the hub"}
 
 
 def test_a_claim_on_a_stopped_chunk_answers_409_terminal(client: TestClient) -> None:
@@ -3749,7 +4115,8 @@ def test_a_claim_on_a_stopped_chunk_answers_409_terminal(client: TestClient) -> 
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409
-    assert denied.json() == {"chunk_id": chunk_id, "status": "stopped", "detail": "chunk is terminal"}
+    body: dict[str, object] = denied.json()
+    assert body == {"chunk_id": chunk_id, "status": "stopped", "detail": "chunk is terminal"}
 
 
 def test_a_claim_on_a_done_chunk_still_carrying_its_route_answers_terminal_before_conflict(client: TestClient) -> None:
@@ -3761,22 +4128,26 @@ def test_a_claim_on_a_done_chunk_still_carrying_its_route_answers_terminal_befor
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
 
     assert denied.status_code == 409
-    assert denied.json() == {"chunk_id": chunk_id, "status": "done", "detail": "chunk is terminal"}
+    body: dict[str, object] = denied.json()
+    assert body == {"chunk_id": chunk_id, "status": "done", "detail": "chunk is terminal"}
 
 
 @pytest.mark.parametrize("status", ["not_ready", "paused", "needs_human", "delivering"])
 def test_a_claim_on_a_chunk_not_ready_answers_409_with_its_status(client: TestClient, status: str) -> None:
-    chunk_id = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()["chunk_id"]
+    seeded: _SeedResponse = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()
+    chunk_id = seeded["chunk_id"]
 
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409
-    assert denied.json() == {
+    body: dict[str, object] = denied.json()
+    assert body == {
         "chunk_id": chunk_id,
         "status": status,
         "detail": f"chunk {chunk_id} is {status}, not ready to claim",
     }
-    assert client.get("/api/fleet/queue/peek").json()["entries"] == []
+    queue: _Queue = client.get("/api/fleet/queue/peek").json()
+    assert queue["entries"] == []
 
 
 def test_a_chunk_cannot_be_seeded_running_without_a_route(client: TestClient) -> None:
@@ -3792,7 +4163,8 @@ def test_a_rekey_on_a_done_chunk_still_carrying_its_route_answers_409(client: Te
     denied = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
 
     assert denied.status_code == 409
-    assert denied.json() == {"detail": f"chunk {chunk_id} is done, its route confers no tenure"}
+    body: dict[str, object] = denied.json()
+    assert body == {"detail": f"chunk {chunk_id} is done, its route confers no tenure"}
 
 
 def test_the_envelope_of_a_stopped_chunk_answers_409(client: TestClient) -> None:
@@ -3803,7 +4175,8 @@ def test_the_envelope_of_a_stopped_chunk_answers_409(client: TestClient) -> None
     denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
 
     assert denied.status_code == 409
-    assert denied.json() == {"detail": "chunk has no current runner node (terminal)"}
+    body: dict[str, object] = denied.json()
+    assert body == {"detail": "chunk has no current runner node (terminal)"}
 
 
 def test_the_envelope_of_a_done_chunk_answers_409(client: TestClient) -> None:
@@ -3815,7 +4188,8 @@ def test_the_envelope_of_a_done_chunk_answers_409(client: TestClient) -> None:
     denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
 
     assert denied.status_code == 409
-    assert denied.json() == {"detail": "chunk has no current runner node (terminal)"}
+    body: dict[str, object] = denied.json()
+    assert body == {"detail": "chunk has no current runner node (terminal)"}
 
 
 def test_a_completion_off_the_current_node_names_both_nodes_and_the_epoch(client: TestClient) -> None:
@@ -3845,7 +4219,8 @@ def test_a_completion_from_an_escalated_attempt_is_refused(client: TestClient) -
     refused = _complete(client, chunk_id, from_node_id="build")
 
     assert refused["detail"] == "the attempt at epoch 1 escalated — requeue the chunk before it moves on"
-    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == "build"
+    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
+    assert detail["current_node_id"] == "build"
 
 
 def test_a_completion_waits_on_the_attempts_own_open_question(client: TestClient) -> None:
@@ -3886,8 +4261,8 @@ def test_a_decision_waits_on_the_attempts_own_open_question(client: TestClient) 
     assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["status"] == "running"
 
 
-def _deliver(client: TestClient, *, seq: int, chunk_id: str, question_id: str = "q1") -> dict:
-    return client.post(
+def _deliver(client: TestClient, *, seq: int, chunk_id: str, question_id: str = "q1") -> dict[str, object]:
+    body: dict[str, object] = client.post(
         "/api/fleet/events",
         json={
             "runner_id": "r1",
@@ -3896,6 +4271,7 @@ def _deliver(client: TestClient, *, seq: int, chunk_id: str, question_id: str = 
             ],
         },
     ).json()
+    return body
 
 
 def test_events_answer_delivered_rejects_an_unanswered_question(client: TestClient) -> None:
@@ -3976,7 +4352,7 @@ def test_transcripts_admit_the_owning_runners_record(client: TestClient) -> None
 # --------------------------------------------------------------------------- #
 
 
-def _affordances(detail: dict) -> dict:
+def _affordances(detail: dict[str, object]) -> dict[str, object]:
     keys = (
         "pausable",
         "status_if_paused",
@@ -4054,7 +4430,9 @@ def _affordances(detail: dict) -> dict:
         ),
     ],
 )
-def test_chunk_detail_derives_each_seeded_status_affordances(client: TestClient, status: str, expected: dict) -> None:
+def test_chunk_detail_derives_each_seeded_status_affordances(
+    client: TestClient, status: str, expected: dict[str, object]
+) -> None:
     chunk_id = client.post("/_seed/chunk", json={**_SPEC, "status": status}).json()["chunk_id"]
 
     assert _affordances(client.get(f"/api/fleet/chunks/{chunk_id}").json()) == expected
@@ -4112,8 +4490,12 @@ def test_chunk_detail_of_a_stopped_chunk_is_terminal_and_still_completable(clien
 
 
 def test_chunk_detail_of_a_chunk_routed_to_the_reserved_terminal_is_done(client: TestClient) -> None:
-    review = {**_SPEC["nodes"]["review"], "choices": [{"name": "pass", "description": "p", "to": "done"}]}
-    spec = {**_SPEC, "nodes": {**_SPEC["nodes"], "review": review}}
+    nodes = _SPEC["nodes"]
+    assert isinstance(nodes, dict)
+    review_node = nodes["review"]
+    assert isinstance(review_node, dict)
+    review = {**review_node, "choices": [{"name": "pass", "description": "p", "to": "done"}]}
+    spec = {**_SPEC, "nodes": {**nodes, "review": review}}
     chunk_id = client.post("/_seed/chunk", json=spec).json()["chunk_id"]
     _claim_and_fence(client, chunk_id)
     _complete(client, chunk_id, from_node_id="build")
@@ -4143,7 +4525,7 @@ def test_work_items_mark_only_the_hub_reserved_source_as_hub_source(client: Test
 
 
 def test_chunk_findings_carry_each_exited_finding_exit(client: TestClient) -> None:
-    def finding(finding_id: str, state: str) -> dict:
+    def finding(finding_id: str, state: str) -> dict[str, object]:
         return {
             "finding_id": finding_id,
             "routine_name": "nightly",
@@ -4179,10 +4561,11 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _add(client: TestClient, name: str = "r-claude") -> dict:
+def _add(client: TestClient, name: str = "r-claude") -> _RunnerAdded:
     added = TestClient(client.app).post("/api/runners", json={"name": name})
     assert added.status_code == 201, added.text
-    return added.json()
+    body: _RunnerAdded = added.json()
+    return body
 
 
 def test_add_mints_a_runner_id_and_token_and_leaves_the_runner_never_connected(client: TestClient) -> None:
@@ -4269,8 +4652,8 @@ def test_a_fleet_call_without_a_token_the_hub_issued_is_refused_401(client: Test
 
 
 def test_a_runner_reads_only_its_own_registry_row(client: TestClient) -> None:
-    register_runner(client.app.state.service, "r1")  # type: ignore[attr-defined]
-    register_runner(client.app.state.service, "r2")  # type: ignore[attr-defined]
+    register_runner(_service(client), "r1")
+    register_runner(_service(client), "r2")
 
     other = client.get("/api/fleet/runners/r2", headers=_bearer(runner_token("r1")))
 
@@ -4380,7 +4763,7 @@ def test_identity_tells_a_missing_an_unknown_a_revoked_and_a_retired_token_apart
     assert fresh.status_code == 201 and fresh.json()["runner_id"] == rotated["runner_id"]
     assert plain.post(f"/_seed/runners/{retired['runner_id']}/retire", json={}).status_code == 200
 
-    def refusal(headers: dict[str, str]) -> tuple[int, dict]:
+    def refusal(headers: dict[str, str]) -> tuple[int, dict[str, object]]:
         resp = plain.get("/api/fleet/identity", headers=headers)
         return resp.status_code, resp.json()
 
@@ -4402,7 +4785,7 @@ def test_a_revoked_token_is_refused_on_every_fleet_call(client: TestClient) -> N
 
 def test_the_seed_pause_brakes_a_runner_until_released_and_refuses_an_id_never_added(client: TestClient) -> None:
     chunk_id = _seed(client)
-    register_runner(client.app.state.service, "r1")  # type: ignore[attr-defined]
+    register_runner(_service(client), "r1")
     plain = TestClient(client.app)
 
     assert plain.post("/_seed/runners/r1/pause").json() == {"paused": True, "runner_id": "r1"}
@@ -4498,7 +4881,7 @@ def test_add_naming_a_tenant_no_tenant_holds_answers_404_and_adds_nothing(client
 
     assert (unknown.status_code, unknown.json()) == (404, {"detail": "no such tenant"})
     assert (by_name.status_code, by_name.json()) == (404, {"detail": "no such tenant"})
-    assert client.app.state.service._state.list_runners() == []  # type: ignore[attr-defined]
+    assert _service(client)._state.list_runners() == []  # pyright: ignore[reportPrivateUsage]  # inspect domain state
 
 
 def test_a_fleet_call_naming_another_tenant_is_refused_400_and_its_own_is_accepted(client: TestClient) -> None:
