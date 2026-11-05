@@ -1144,11 +1144,12 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_fourteen(client: TestClient) -> None:
+def test_lever_catalog_lists_all_fifteen(client: TestClient) -> None:
     body: dict[str, dict[str, object]] = client.get("/_levers").json()
     catalog = body["catalog"]
     assert set(catalog) == {
         "delay",
+        "artifact_refusal",
         "delay_transcripts",
         "drop_ack",
         "conflicting_fact",
@@ -4693,6 +4694,27 @@ def test_lever_fleet_flags_sets_the_identity_answers_map_until_replaced_or_clear
     assert flags() == {"b": False}
     client.delete("/_levers/fleet_flags")
     assert flags() == {}
+
+
+def test_lever_artifact_refusal_makes_the_artifact_check_refuse_until_cleared(client: TestClient) -> None:
+    added = _add(client, "r-claude")
+    chunk_id = client.post("/_seed/chunk", json=_SPEC).json()["chunk_id"]
+    plain = TestClient(client.app)
+    offer = {"name": "delta", "content": "{}"}
+
+    def verdict() -> object:
+        resp = plain.post(f"/api/fleet/chunks/{chunk_id}/artifact-check", json=offer, headers=_bearer(added["token"]))
+        assert resp.status_code == 200, resp.text
+        return resp.json()["refusal"]
+
+    assert verdict() is None
+    client.post("/_levers/artifact_refusal", json={"payload": {"refusal": "no good"}})
+    assert verdict() == "no good"
+    assert verdict() == "no good", "sticky: an offer does not consume it"
+    client.delete("/_levers/artifact_refusal")
+    assert verdict() is None
+    unknown = plain.post("/api/fleet/chunks/ch_ghost/artifact-check", json=offer, headers=_bearer(added["token"]))
+    assert unknown.status_code == 404
 
 
 def test_lever_version_refused_refuses_the_named_runner_alone_and_records_nothing(client: TestClient) -> None:
