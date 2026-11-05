@@ -15,8 +15,10 @@ a hub reacts to it.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from blizzard_mock.clock import FixedClock
@@ -71,7 +73,7 @@ def _seed(hub: TestClient) -> str:
     return hub.post("/_seed/chunk", json=_SPEC).json()["chunk_id"]
 
 
-def _claim(runner: TestClient, chunk_id: str) -> dict:
+def _claim(runner: TestClient, chunk_id: str) -> dict[str, Any]:
     """Claim as a live runner does: registered first, since the hub refuses an unregistered
     claimant."""
     runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY})
@@ -81,7 +83,7 @@ def _claim(runner: TestClient, chunk_id: str) -> dict:
 def _held(runner: TestClient, chunk_id: str) -> Held | None:
     """The driver's own held-lease record — introspection the ``TestClient`` surface
     doesn't expose, for asserting exactly what a route-token lever made it submit."""
-    service: MockRunnerService = runner.app.state.service  # type: ignore[attr-defined]
+    service = cast("MockRunnerService", cast(FastAPI, runner.app).state.service)
     return service.held(chunk_id)
 
 
@@ -120,14 +122,14 @@ def test_driver_can_assert_a_capability_snapshot_on_registration(stack: tuple[Te
     )
     assert reg.json()["status"] == 201
 
-    service: MockHubService = hub.app.state.service  # type: ignore[attr-defined]
-    row = service._state.get_runner("runner-mock")
+    service = cast("MockHubService", cast(FastAPI, hub.app).state.service)
+    row = service.runner_view("runner-mock")
     assert row is not None
     assert len(row.capabilities) == 1
     capability = row.capabilities[0]
     assert capability.harness_id == "claude_code"
     assert capability.version == "1.0.0"
-    assert capability.tiers == ("blizzard:frontier",)
+    assert capability.tiers == ["blizzard:frontier"]
     assert capability.default is True
 
 
@@ -212,7 +214,7 @@ def test_drive_peek_matched_answers_a_driver_that_has_not_registered_yet(
 def test_driver_learns_its_runner_id_from_its_first_registration(stack: tuple[TestClient, TestClient]) -> None:
     """The driver sends no id — its token names it — and holds the one the hub answers."""
     _hub, runner = stack
-    service: MockRunnerService = runner.app.state.service  # type: ignore[attr-defined]
+    service = cast("MockRunnerService", cast(FastAPI, runner.app).state.service)
     assert service.runner_id is None
 
     reply = runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()
@@ -612,8 +614,8 @@ def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
     assert pushed["status"] == 200
     assert pushed["response"]["applied"] == [1]
     assert pushed["response"]["capped"] == []
-    service = hub.app.state.service  # type: ignore[attr-defined]
-    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()
+    service = cast("MockHubService", cast(FastAPI, hub.app).state.service)
+    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()  # pyright: ignore[reportPrivateUsage]
     assert record["harness_id"] == "claude_code"
 
 
@@ -639,8 +641,8 @@ def test_drive_push_transcript_forwards_an_explicit_harness_id(stack: tuple[Test
     ).json()
 
     assert pushed["drove"] is True
-    service = hub.app.state.service  # type: ignore[attr-defined]
-    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()
+    service = cast("MockHubService", cast(FastAPI, hub.app).state.service)
+    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()  # pyright: ignore[reportPrivateUsage]
     assert record["harness_id"] == OPENCODE_HARNESS_ID
 
 

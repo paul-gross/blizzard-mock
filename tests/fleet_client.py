@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi import FastAPI
@@ -71,8 +71,7 @@ class FleetClient(TestClient):
 
     @property
     def service(self) -> MockHubService:
-        service: MockHubService = self.app.state.service  # type: ignore[attr-defined]
-        return service
+        return cast("MockHubService", cast("FastAPI", self.app).state.service)
 
     def request(self, method: str, url: Any, **kwargs: Any) -> Any:
         path = urlsplit(str(url)).path
@@ -89,13 +88,13 @@ class FleetClient(TestClient):
                 body = json.loads(kwargs["content"])
             except ValueError:
                 body = None
-        if isinstance(body, dict) and isinstance(body.get("runner_id"), str):
-            return body["runner_id"]
+        if isinstance(body, dict) and isinstance(cast("dict[str, Any]", body).get("runner_id"), str):
+            return cast("dict[str, Any]", body)["runner_id"]
         if path.startswith(_RUNNER_PATH):
             return path[len(_RUNNER_PATH) :].split("/", 1)[0]
         params = kwargs.get("params")
-        if isinstance(params, dict) and isinstance(params.get("runner_id"), str):
-            return params["runner_id"]
+        if isinstance(params, dict) and isinstance(cast("dict[str, Any]", params).get("runner_id"), str):
+            return cast("dict[str, Any]", params)["runner_id"]
         query = parse_qs(urlsplit(url).query)
         if query.get("runner_id"):
             return query["runner_id"][0]
