@@ -13,7 +13,7 @@ from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_hub.app import create_app
 from blizzard_mock.mock_hub.domain.models import DEFAULT_PROJECT_SLUG
 from tests.fleet_client import FleetClient
-from tests.test_mock_hub_projects import _seed_chunk, _seed_project
+from tests.test_mock_hub_projects import seed_chunk, seed_project
 
 _CAPABILITIES = [{"harness_id": "claude_code", "default": True}]
 
@@ -36,9 +36,9 @@ class _World:
 
     def __init__(self, client: FleetClient, *, hosted: bool = True) -> None:
         self.client = client
-        self.web_id = _seed_project(client, "web")
-        self.web = _seed_chunk(client, self.web_id)
-        self.default = _seed_chunk(client)
+        self.web_id = seed_project(client, "web")
+        self.web = seed_chunk(client, self.web_id)
+        self.default = seed_chunk(client)
         self.host = client.post("/api/hosts", json={"name": "box"}).json()
         added = client.post(
             "/api/runners", json={"name": "r", **({"host_id": self.host["host_id"]} if hosted else {})}
@@ -172,7 +172,7 @@ def test_projects_narrows_to_the_union_it_names_and_is_refused_beside_project(cl
 
 
 def test_a_per_project_hold_offers_the_next_project_past_an_unusable_head(client: FleetClient) -> None:
-    web_id = _seed_project(client, "web")
+    web_id = seed_project(client, "web")
     spec = {
         "entry": "build",
         "project_id": web_id,
@@ -187,8 +187,8 @@ def test_a_per_project_hold_offers_the_next_project_past_an_unusable_head(client
         },
     }
     assert client.post("/_seed/chunk", json=spec).status_code == 201
-    later_web = _seed_chunk(client, web_id)
-    default = _seed_chunk(client)
+    later_web = seed_chunk(client, web_id)
+    default = seed_chunk(client)
     token = client.post("/api/runners", json={"name": "r"}).json()["token"]
     registered = client.post(
         "/api/fleet/runners",

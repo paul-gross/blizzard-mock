@@ -49,7 +49,7 @@ from pathlib import Path
 import httpx2 as httpx
 import pytest
 
-from blizzard_mock.fixture_workspace.cli import _resolve_winter_source
+from blizzard_mock.fixture_workspace.cli import resolve_winter_source
 from blizzard_mock.fixture_workspace.internal.subprocess_git import SubprocessGit
 from blizzard_mock.fixture_workspace.internal.subprocess_winter import SubprocessWinterCli
 from blizzard_mock.fixture_workspace.scratch import FixtureLayout
@@ -164,7 +164,7 @@ def _run_mock_agent(worktree: Path, fenced_env: dict[str, str]) -> dict[str, obj
 
 
 def test_acceptance_loop_lands_a_mock_commit_the_forge_merges(tmp_path: Path) -> None:
-    winter_source = _resolve_winter_source(None)
+    winter_source = resolve_winter_source(None)
     if winter_source is None:
         pytest.skip("no local winter source (set BLIZZARD_MOCK_WINTER_SOURCE)")
 

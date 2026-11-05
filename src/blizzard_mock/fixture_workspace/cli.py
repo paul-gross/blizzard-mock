@@ -40,7 +40,7 @@ def _resolve_scratch_root(explicit: str | None) -> Path:
     return Path(tempfile.gettempdir()) / "blizzard-mock" / "fixtures"
 
 
-def _resolve_winter_source(explicit: str | None) -> Path | None:
+def resolve_winter_source(explicit: str | None) -> Path | None:
     raw = explicit or os.environ.get(_ENV_WINTER)
     if raw:
         return Path(raw).expanduser().resolve()
@@ -48,7 +48,7 @@ def _resolve_winter_source(explicit: str | None) -> Path | None:
 
 
 def _service(scratch_root: str | None, winter_source: str | None) -> FixtureWorkspaceService:
-    source = _resolve_winter_source(winter_source)
+    source = resolve_winter_source(winter_source)
     return FixtureWorkspaceService(
         git=SubprocessGit(),
         winter=SubprocessWinterCli() if source is not None else None,

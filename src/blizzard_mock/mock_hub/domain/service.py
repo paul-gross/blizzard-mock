@@ -184,7 +184,7 @@ class _ExternalSubscriptionUsageWindowFact(BaseModel):
 
 #: The real hub's caps, restated not imported (no ``blizzard`` dep); the daily-rate one needs
 #: a wall clock. Keep the record cap >= the RUNNER's, or this rejects what the real hub stores.
-_TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
+TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
 
@@ -488,6 +488,11 @@ class MockHubService:
         #: natural key — only accepted records land here, so a capped one never reads back.
         self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
         self._found_first_tenant()
+
+    @property
+    def state(self) -> IHubState:
+        """The hub state store — what a test reads back where the wire exposes no read."""
+        return self._state
 
     @property
     def levers(self) -> ILeverStore:
@@ -1083,7 +1088,7 @@ class MockHubService:
             chunk_id = str(record.get("chunk_id", ""))
             size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
             stored = self._transcript_chunk_bytes.get(chunk_id, 0)
-            if size > _TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
+            if size > TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
                 self._transcript_key_state[key] = "rejected"
                 capped.append(seq)
                 continue

@@ -208,10 +208,10 @@ def test_cli_mint_without_a_source_is_winter_free_even_inside_a_winter_workspace
 
 def test_cli_winter_source_flag_beats_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BLIZZARD_MOCK_WINTER_SOURCE", str(tmp_path / "from-env"))
-    assert cli._resolve_winter_source(str(tmp_path / "from-flag")) == (tmp_path / "from-flag").resolve()
-    assert cli._resolve_winter_source(None) == (tmp_path / "from-env").resolve()
+    assert cli.resolve_winter_source(str(tmp_path / "from-flag")) == (tmp_path / "from-flag").resolve()
+    assert cli.resolve_winter_source(None) == (tmp_path / "from-env").resolve()
     monkeypatch.delenv("BLIZZARD_MOCK_WINTER_SOURCE")
-    assert cli._resolve_winter_source(None) is None
+    assert cli.resolve_winter_source(None) is None
 
 
 def test_mint_with_a_winter_source_but_no_cli_refuses(tmp_path: Path) -> None:
@@ -235,9 +235,9 @@ def test_cli_help_lists_verbs() -> None:
 
 
 def _discoverable_winter_source() -> Path | None:
-    from blizzard_mock.fixture_workspace.cli import _resolve_winter_source
+    from blizzard_mock.fixture_workspace.cli import resolve_winter_source
 
-    return _resolve_winter_source(None)
+    return resolve_winter_source(None)
 
 
 def test_real_winter_ws_init_and_env_creation(tmp_path: Path) -> None:

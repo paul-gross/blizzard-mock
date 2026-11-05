@@ -56,7 +56,7 @@ def emit(
                 shutil.copytree(source, destination, ignore=shutil.ignore_patterns("__pycache__"))
             else:
                 shutil.copy2(source, destination)
-        (staging / "_baked.py").write_text(_render_baked(levers, version, auth_read_marker, version_touch_path))
+        (staging / "_baked.py").write_text(render_baked(levers, version, auth_read_marker, version_touch_path))
         # Not zipapp's own `main=`: its generated shim drops `cli.main()`'s return value,
         # silently discarding every nonzero exit code a lever like PERMISSION_NONZERO relies on.
         (scratch / "__main__.py").write_text(
@@ -66,7 +66,7 @@ def emit(
     out.chmod(0o755)
 
 
-def _render_baked(
+def render_baked(
     levers: frozenset[Lever], version: str, auth_read_marker: str | None, version_touch_path: str | None
 ) -> str:
     """The generated ``_baked.py`` module text — the artifact's own fixed configuration."""

@@ -357,7 +357,7 @@ def test_a_scripted_tool_timeline_beats_before_it_stalls(fenced_repo: RepoEnv) -
 
 
 def test_tool_call_is_bound_into_the_script_namespace(tmp_path: Path) -> None:
-    """The binding itself, asserted against ``_script_globals`` — a script calls
+    """The binding itself, asserted against ``script_globals`` — a script calls
     ``tool_call(...)`` with no import, exactly as it calls ``commit(...)``."""
     ctx = engine.RunContext(
         session=SessionState(session_id="s"),
@@ -367,7 +367,7 @@ def test_tool_call_is_bound_into_the_script_namespace(tmp_path: Path) -> None:
         store=SessionStore(tmp_path),
         is_resume=False,
     )
-    ns = engine._script_globals(ctx)  # pyright: ignore[reportPrivateUsage]
+    ns = engine.script_globals(ctx)
     assert ns["tool_call"] is helpers.tool_call
 
 

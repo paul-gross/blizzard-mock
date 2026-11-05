@@ -31,7 +31,7 @@ def client() -> FleetClient:
     return FleetClient(create_app(clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
 
 
-def _seed_project(client: FleetClient, slug: str, *, tenant_id: str | None = None) -> str:
+def seed_project(client: FleetClient, slug: str, *, tenant_id: str | None = None) -> str:
     body = {"slug": slug, "name": slug.title()}
     if tenant_id is not None:
         body["tenant_id"] = tenant_id
@@ -40,7 +40,7 @@ def _seed_project(client: FleetClient, slug: str, *, tenant_id: str | None = Non
     return resp.json()["project_id"]
 
 
-def _seed_chunk(client: FleetClient, project_id: str | None = None) -> str:
+def seed_chunk(client: FleetClient, project_id: str | None = None) -> str:
     spec: dict = {
         "entry": "build",
         "nodes": {
@@ -93,10 +93,10 @@ def _peek(client: FleetClient, runner_id: str = "r1", *, policy: str = "pass_ove
 
 
 def test_the_first_tenant_starts_with_its_default_project_and_a_reset_restores_it(client: FleetClient) -> None:
-    other = _seed_project(client, "other")
+    other = seed_project(client, "other")
     assert client.post("/_seed/reset").status_code == 200
 
-    assert client.get(f"/api/fleet/chunks/{_seed_chunk(client)}").json()["project_id"] == FIRST_PROJECT_ID
+    assert client.get(f"/api/fleet/chunks/{seed_chunk(client)}").json()["project_id"] == FIRST_PROJECT_ID
     resp = client.post("/_seed/chunk", json={"entry": "b", "nodes": {"b": {"executor": "hub"}}, "project_id": other})
     assert resp.status_code == 404, resp.text
 
@@ -120,8 +120,8 @@ def test_seeding_a_project_refuses_a_slug_the_tenant_holds_and_an_unknown_tenant
 
 
 def test_chunk_reads_carry_the_chunk_project(client: FleetClient) -> None:
-    project_id = _seed_project(client, "web")
-    chunk_id = _seed_chunk(client, project_id)
+    project_id = seed_project(client, "web")
+    chunk_id = seed_chunk(client, project_id)
 
     detail = client.get(f"/api/fleet/chunks/{chunk_id}").json()
     (status,) = client.get("/api/fleet/chunk-statuses", params={"chunk_id": chunk_id}).json()
@@ -140,14 +140,14 @@ def test_a_runner_added_naming_no_project_serves_the_tenant_only_project(client:
 
 
 def test_a_runner_added_naming_none_in_a_tenant_of_several_projects_serves_nothing(client: FleetClient) -> None:
-    _seed_project(client, "web")
+    seed_project(client, "web")
     added = client.post("/api/runners", json={"name": "unassigned"})
 
     assert _register_added(client, added).json()["projects"] == []
 
 
 def test_a_runner_added_naming_projects_serves_exactly_those(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
+    web = seed_project(client, "web")
     added = client.post("/api/runners", json={"name": "named", "projects": ["web", FIRST_PROJECT_ID]})
 
     resp = _register_added(client, added)
@@ -159,13 +159,13 @@ def test_a_runner_added_naming_projects_serves_exactly_those(client: FleetClient
 
 
 def test_adding_a_runner_naming_an_unknown_project_is_refused_422_and_adds_nothing(client: FleetClient) -> None:
-    before = len(client.service._state.list_runners())
+    before = len(client.service.state.list_runners())
 
     resp = client.post("/api/runners", json={"name": "lost", "projects": ["default", "nowhere"]})
 
     assert resp.status_code == 422, resp.text
     assert "nowhere" in resp.json()["detail"]
-    assert len(client.service._state.list_runners()) == before
+    assert len(client.service.state.list_runners()) == before
 
 
 # --- the declaration at registration -----------------------------------------
@@ -183,7 +183,7 @@ def test_registration_declaring_an_empty_list_serves_nothing(client: FleetClient
 
 
 def test_registration_declaring_a_list_replaces_the_declaration(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
+    web = seed_project(client, "web")
 
     resp = _register(client, projects=[web])
 
@@ -199,7 +199,7 @@ def test_an_unresolved_entry_is_kept_serving_nothing_until_a_project_answers_to_
         {"entry": "later", "project_id": None, "slug": None, "name": None, "color": None, "claimable": False}
     ]
 
-    later = _seed_project(client, "later")
+    later = seed_project(client, "later")
     resolved = _register(client, projects=["later"])
 
     assert resolved.json()["projects"] == [
@@ -209,7 +209,7 @@ def test_an_unresolved_entry_is_kept_serving_nothing_until_a_project_answers_to_
 
 def test_a_project_of_another_tenant_resolves_to_nothing(client: FleetClient) -> None:
     tenant_id = client.post("/_seed/tenants", json={"name": "Second"}).json()["tenant_id"]
-    foreign = _seed_project(client, "foreign", tenant_id=tenant_id)
+    foreign = seed_project(client, "foreign", tenant_id=tenant_id)
 
     (served,) = _register(client, projects=[foreign]).json()["projects"]
 
@@ -227,9 +227,9 @@ def test_a_project_of_another_tenant_resolves_to_nothing(client: FleetClient) ->
 
 
 def test_the_matched_peek_offers_only_chunks_of_served_projects(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
-    _seed_chunk(client, web)
-    mine = _seed_chunk(client)
+    web = seed_project(client, "web")
+    seed_chunk(client, web)
+    mine = seed_chunk(client)
     _register(client, projects=[DEFAULT_PROJECT_SLUG])
 
     (entry,) = _peek(client)
@@ -244,25 +244,25 @@ def test_the_matched_peek_offers_only_chunks_of_served_projects(client: FleetCli
 
 
 def test_hold_is_never_stalled_by_another_project_head(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
-    _seed_chunk(client, web)
-    mine = _seed_chunk(client)
+    web = seed_project(client, "web")
+    seed_chunk(client, web)
+    mine = seed_chunk(client)
     _register(client, projects=[DEFAULT_PROJECT_SLUG])
 
     assert [e["chunk_id"] for e in _peek(client, policy="hold")] == [mine]
 
 
 def test_a_runner_serving_nothing_is_offered_nothing(client: FleetClient) -> None:
-    _seed_chunk(client)
+    seed_chunk(client)
     _register(client, projects=[])
 
     assert _peek(client) == []
 
 
 def test_the_unmatched_peek_still_shows_every_project(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
-    theirs = _seed_chunk(client, web)
-    mine = _seed_chunk(client)
+    web = seed_project(client, "web")
+    theirs = seed_chunk(client, web)
+    mine = seed_chunk(client)
 
     assert [e["chunk_id"] for e in client.get("/api/fleet/queue/peek").json()["entries"]] == [theirs, mine]
 
@@ -271,8 +271,8 @@ def test_the_unmatched_peek_still_shows_every_project(client: FleetClient) -> No
 
 
 def test_a_claim_on_an_unserved_project_is_refused_with_the_project_reason(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
-    chunk_id = _seed_chunk(client, web)
+    web = seed_project(client, "web")
+    chunk_id = seed_chunk(client, web)
     register_runner(client.service, "r1")
 
     denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
@@ -313,8 +313,8 @@ def test_a_claim_refused_for_capabilities_names_the_capability_reason(client: Fl
 
 
 def test_a_claim_on_a_served_project_mints_the_route(client: FleetClient) -> None:
-    web = _seed_project(client, "web")
-    chunk_id = _seed_chunk(client, web)
+    web = seed_project(client, "web")
+    chunk_id = seed_chunk(client, web)
     register_runner(client.service, "r1")
     assert client.put("/_seed/runners/r1/projects", json={"projects": ["web"]}).status_code == 200
 
