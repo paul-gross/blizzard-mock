@@ -154,7 +154,7 @@ def usage_limited(*, resets_at: str = "5:40pm (America/Chicago)") -> None:
 def usage_limit_error(*, message: str | None = None) -> None:
     """Stage OpenCode's own captured usage-limit ``error`` event — the
     ``AI_APICallError``/429 shape confirmed against the installed ``opencode-ai`` binary
-    (see ``tests/opencode_usage_limit_fixture.py`` in the sibling ``blizzard`` checkout for
+    (see ``tests/support/opencode_usage_limit_fixture.py`` in the sibling ``blizzard`` checkout for
     its full provenance). OpenCode-only; :func:`usage_limited` is Claude Code's own."""
     ctx = current_context()
     wire = _opencode_wire(ctx, "usage_limit_error")
