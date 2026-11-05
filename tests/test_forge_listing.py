@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx2 import Response
 
 from blizzard_mock.forge.domain.clock import FixedClock
 from tests.forge_world import REPO, START, forge, open_pull
@@ -21,15 +22,21 @@ def world(tmp_path: Path) -> Iterator[tuple[TestClient, FixedClock]]:
 
 
 def _three_pulls(client: TestClient, clock: FixedClock) -> list[int]:
-    numbers = []
+    numbers: list[int] = []
     for head in ("ahead", "ahead2", "feature"):
         numbers.append(open_pull(client, head)["number"])
         clock.tick(10)
     return numbers
 
 
-def _numbers(resp: object) -> list[int]:
-    return [p["number"] for p in resp.json()]  # type: ignore[attr-defined]
+def _numbers(resp: Response) -> list[int]:
+    pulls: list[dict[str, object]] = resp.json()
+    numbers: list[int] = []
+    for p in pulls:
+        number = p["number"]
+        assert isinstance(number, int)
+        numbers.append(number)
+    return numbers
 
 
 def test_no_sort_answers_newest_first(world: tuple[TestClient, FixedClock]) -> None:
@@ -128,7 +135,7 @@ def test_bad_sort_is_422(world: tuple[TestClient, FixedClock]) -> None:
 
 
 def _links(header: str) -> list[tuple[str, str]]:
-    out = []
+    out: list[tuple[str, str]] = []
     for part in header.split(", "):
         url, _, rel = part.partition("; rel=")
         out.append((url.strip("<>"), rel.strip('"')))

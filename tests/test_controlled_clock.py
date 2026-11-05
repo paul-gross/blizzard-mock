@@ -33,7 +33,7 @@ def test_clock_moves_and_concurrency() -> None:
     barrier = Barrier(8)
 
     def writer() -> list[datetime]:
-        moves = []
+        moves: list[datetime] = []
         for _ in range(25):
             barrier.wait()
             moves.append(clock.advance(timedelta(seconds=1))[1])
@@ -41,7 +41,7 @@ def test_clock_moves_and_concurrency() -> None:
         return moves
 
     def reader() -> list[datetime]:
-        readings = []
+        readings: list[datetime] = []
         for _ in range(25):
             barrier.wait()
             readings.append(clock.now())
