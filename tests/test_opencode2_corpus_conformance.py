@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
+from typing_extensions import TypeIs
 
 from blizzard_mock.harness.opencode2_engine.domain import failures, fence
 from tests.opencode2_service import Json, Service, Starter, artifact, objects
@@ -62,6 +63,15 @@ _UNCAPTURED: dict[str, str] = {
 _OPEN = frozenset({"metadata", "input", "item"})
 
 
+def _is_object(value: object) -> TypeIs[Json]:
+    """Whether a decoded JSON value is an object — JSON object keys are always strings."""
+    return isinstance(value, dict)
+
+
+def _is_array(value: object) -> TypeIs[list[object]]:
+    return isinstance(value, list)
+
+
 def _load(name: str) -> object:
     return json.loads((_CORPUS / name).read_text())
 
@@ -78,7 +88,7 @@ class _Kinds:
         self.samples: dict[str, list[Json]] = {}
 
     def add(self, kind: str, value: object) -> None:
-        if isinstance(value, dict):
+        if _is_object(value):
             self.samples.setdefault(kind, []).append(value)
 
     def session(self, record: object) -> None:
@@ -94,7 +104,7 @@ class _Kinds:
         kind = str(part.get("type"))
         self.add(f"part.{kind}", {key: value for key, value in part.items() if key != "state"})
         state = part.get("state")
-        if isinstance(state, dict):
+        if _is_object(state):
             self.add(f"state.{state.get('status')}", state)
 
     def event(self, event: Json) -> None:
@@ -142,10 +152,10 @@ def _conform(kind: str, value: object, samples: list[object], path: str, problem
     if _type(value) not in allowed:
         problems.append(f"{path}: {_type(value)}, where the corpus has {sorted(allowed)}")
         return
-    if isinstance(value, dict):
-        shaped = [sample for sample in samples if isinstance(sample, dict)]
-        present = set().union(*(set(sample) for sample in shaped))
-        everywhere = set.intersection(*(set(sample) for sample in shaped))
+    if _is_object(value):
+        shaped = objects(samples)
+        present = set[str]().union(*(set(sample) for sample in shaped))
+        everywhere = set[str].intersection(*(set(sample) for sample in shaped))
         for key, item in value.items():
             if key not in present:
                 problems.append(f"{path}.{key}: no corpus sample carries it")
@@ -154,8 +164,8 @@ def _conform(kind: str, value: object, samples: list[object], path: str, problem
         if path == kind:
             missing = everywhere - set(value) - set(_OMITTED.get(kind, {}))
             problems.extend(f"{path}.{key}: every corpus sample carries it" for key in sorted(missing))
-    elif isinstance(value, list):
-        items = [item for sample in samples if isinstance(sample, list) for item in sample]
+    elif _is_array(value):
+        items = [item for sample in samples if _is_array(sample) for item in sample]
         if items:
             for index, item in enumerate(value):
                 _conform(kind, item, items, f"{path}[{index}]", problems)
@@ -346,7 +356,7 @@ def test_the_engines_provider_errors_take_the_corpus_shapes() -> None:
         mock.add("error", error)
     _check(mock, corpus, required=("error",))
     sourced = _load("error_shapes_from_source.json")
-    assert isinstance(sourced, dict)
+    assert _is_object(sourced)
     typed = {
         "provider_refusal": failures.provider_refusal()["type"],
         "overload": failures.overload()["type"],
@@ -356,6 +366,6 @@ def test_the_engines_provider_errors_take_the_corpus_shapes() -> None:
         entry = sourced[name]
         assert isinstance(entry, dict) and entry["type"] == kind, name
     limits = sourced["usage_limit"]
-    assert isinstance(limits, list)
+    assert _is_array(limits)
     assert {str(entry["type"]) for entry in objects(limits)} == set(failures.USAGE_LIMIT_TYPES)
     assert failures.unknown_variant(model)["message"] == "Variant unavailable for openai/gpt-6-luna: no-such"
