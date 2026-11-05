@@ -304,11 +304,12 @@ class ServedProjectView(BaseModel):
 
 class RunnerBindingView(BaseModel):
     """A runner's binding as the hub holds it — mirrors ``blizzard.wire.runner.RunnerBindingView``.
-    ``workspace_unreported`` is derived on read from the host's latest report."""
+    ``workspace_unreported`` is derived on read from the host's latest report. ``agents`` is deprecated, removed in
+    0.6: it repeats the runner's shared count, ``0`` where the runner sent none."""
 
     project: str
     workspace_id: str
-    agents: int
+    agents: int = Field(deprecated=True)
     workspace_unreported: bool = False
 
 

@@ -28,7 +28,7 @@ def _bearer(token: str) -> dict[str, str]:
 
 
 def _bindings(*pairs: tuple[str, str]) -> list[dict[str, Any]]:
-    return [{"project": project, "workspace_id": workspace, "agents": 1} for project, workspace in pairs]
+    return [{"project": project, "workspace_id": workspace} for project, workspace in pairs]
 
 
 class _World:
@@ -116,7 +116,7 @@ def test_a_runner_without_a_host_and_a_host_that_never_reported_are_never_flagge
     assert world.peek() == [world.web]
 
 
-def test_the_peek_withholds_a_flagged_binding_until_the_host_reports_it_and_narrows_to_one_project(
+def test_the_peek_withholds_a_flagged_binding_until_the_host_reports_it_and_narrows_to_the_projects_named(
     client: FleetClient,
 ) -> None:
     world = _World(client)
@@ -125,13 +125,13 @@ def test_the_peek_withholds_a_flagged_binding_until_the_host_reports_it_and_narr
     world.register(bindings=bindings, subscription="max")
 
     assert world.peek() == [world.default]
-    assert world.peek(project="web") == []
-    assert world.peek(project="nope") == []
+    assert world.peek(projects=["web"]) == []
+    assert world.peek(projects=["nope"]) == []
 
     world.report(["ws-a", "ws-x"])
 
-    assert world.peek(project="web") == [world.web]
-    assert world.peek(project=world.web_id) == [world.web]
+    assert world.peek(projects=["web"]) == [world.web]
+    assert world.peek(projects=[world.web_id]) == [world.web]
 
 
 def test_an_unrostered_subscription_withholds_every_binding(client: FleetClient) -> None:
@@ -156,19 +156,20 @@ def test_a_registration_without_bindings_clears_the_ones_held(client: FleetClien
     assert world.peek() == [world.web]
 
 
-def test_projects_narrows_to_the_union_it_names_and_is_refused_beside_project(client: FleetClient) -> None:
+def test_projects_narrows_to_the_union_it_names_and_ignores_a_legacy_project(client: FleetClient) -> None:
     world = _World(client)
     world.register(bindings=_bindings(("web", "ws-a"), (DEFAULT_PROJECT_SLUG, "ws-a")))
 
     assert world.peek(projects=["web"]) == [world.web]
     assert world.peek(projects=["web", DEFAULT_PROJECT_SLUG]) == [world.web]
     assert world.peek(projects=[]) == []
-    both = client.post(
+    legacy = client.post(
         "/api/fleet/queue/peek",
-        json={"capabilities": _CAPABILITIES, "project": "web", "projects": ["web"]},
+        json={"capabilities": _CAPABILITIES, "project": DEFAULT_PROJECT_SLUG, "projects": ["web"]},
         headers=_bearer(world.token),
     )
-    assert both.status_code == 422, both.text
+    assert legacy.status_code == 200, legacy.text
+    assert [e["chunk_id"] for e in legacy.json()["entries"]] == [world.web]
 
 
 def test_a_per_project_hold_offers_the_next_project_past_an_unusable_head(client: FleetClient) -> None:
