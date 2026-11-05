@@ -19,6 +19,9 @@ from blizzard_mock.mock_runner.domain.levers import RunnerLever
 from blizzard_mock.mock_runner.domain.models import Held
 
 #: What a driver that supplies no snapshot reports — one default binding, since an empty snapshot works nothing.
+#: The version the driver reports at registration: a hub whose window floor is at or above the handshake line refuses
+#: a runner reporting none.
+REPORTED_VERSION = "0.4.0"
 DEFAULT_CAPABILITIES: list[dict[str, Any]] = [{"harness_id": "claude_code", "default": True}]
 #: The runner-fact kind that advances the hub's fence (``blizzard.foundation.fact_kinds.LEASE_MINTED``).
 LEASE_MINTED = "lease.minted"
@@ -108,6 +111,7 @@ class MockRunnerService:
             capabilities=DEFAULT_CAPABILITIES if capabilities is None else capabilities,
             subscriptions=subscriptions,
             declining=declining,
+            version=REPORTED_VERSION,
         )
         registered_id = body.get("runner_id")
         if status in (200, 201) and isinstance(registered_id, str):
