@@ -553,15 +553,15 @@ def test_the_api_subset_pages_messages_lists_the_inbox_compacts_and_reports_itse
     _turn(service, "ses_api", "text('two')")
     every = objects(service.data("GET", "/api/session/ses_api/message"))
     _, first = service.call("GET", "/api/session/ses_api/message?limit=2")
-    assert isinstance(first, dict)
+    assert is_json(first)
     cursor = first["cursor"]
-    assert isinstance(cursor, dict)
+    assert is_json(cursor)
     following = str(cursor["next"])
     assert not following.startswith("msg_") and isinstance(cursor["previous"], str)
     _, after = service.call("GET", f"/api/session/ses_api/message?cursor={following}")
-    assert isinstance(after, dict)
+    assert is_json(after)
     after_cursor = after["cursor"]
-    assert isinstance(after_cursor, dict)
+    assert is_json(after_cursor)
     assert objects(first["data"]) + objects(after["data"]) == every
     _, tail = service.call("GET", f"/api/session/ses_api/message?cursor={after_cursor['next']}")
     assert isinstance(tail, dict) and tail["data"] == [] and tail["cursor"] == {"previous": None, "next": None}
