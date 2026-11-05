@@ -13,6 +13,8 @@ import httpx2 as httpx
 
 #: Every mock-runner->hub call mounts under the fleet partition,
 #: mirroring the real hub's own router split.
+# The release this stand-in claims to be, inside any hub window that has dropped line 0.2.
+_REPORTED_VERSION = "0.4.0"
 _API = "/api/fleet"
 
 
@@ -50,6 +52,7 @@ class HttpxHubGateway:
             "name": name,
             "workspace_id": workspace_id,
             "capabilities": capabilities or [],
+            "version": _REPORTED_VERSION,
         }
         # `subscriptions` rides only when supplied, letting the hub default it to `None`
         # itself rather than defaulting it to `[]` here.
