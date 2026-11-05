@@ -5,6 +5,7 @@ persist across service lifetimes; a session's environment does not, as in 2.1.4.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -32,6 +33,36 @@ type Json = dict[str, object]
 
 class NotFoundError(KeyError):
     pass
+
+
+class SessionNotFoundError(NotFoundError):
+    """A session the store does not hold, which 2.1.4 answers by name."""
+
+
+class InvalidCursorError(ValueError):
+    pass
+
+
+#: 2.1.4's page when a listing names no limit, and the largest it serves.
+DEFAULT_PAGE_LIMIT = 50
+MAX_PAGE_LIMIT = 200
+
+
+def encode_cursor(message_id: str, order: str, direction: str = "next") -> str:
+    """2.1.4's opaque listing cursor: unpadded base64url JSON naming a page's edge message, its order and direction."""
+    raw = json.dumps({"id": message_id, "order": order, "direction": direction}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def decode_cursor(cursor: str) -> tuple[str, str]:
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        message_id, order, direction = str(decoded["id"]), str(decoded["order"]), decoded["direction"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise InvalidCursorError("Invalid cursor") from exc
+    if direction != "next":
+        raise InvalidCursorError("the mock pages forward only")
+    return message_id, order
 
 
 class ConflictError(ValueError):
@@ -264,7 +295,7 @@ class Engine:
     def get(self, session_id: str) -> Session:
         session = self.sessions.get(session_id)
         if session is None:
-            raise NotFoundError(session_id)
+            raise SessionNotFoundError(session_id)
         return session
 
     def create(self, body: Json) -> Session:
@@ -359,15 +390,34 @@ class Engine:
             session.messages.append({"id": records.new_id("msg"), "type": "agent-switched", "agent": agent, **_now()})
             self.save()
 
-    def messages(self, session_id: str, order: str, limit: int | None, cursor: str | None) -> list[Json]:
+    def messages(
+        self, session_id: str, order: str | None, limit: int | None, cursor: str | None
+    ) -> tuple[list[Json], dict[str, str | None]]:
+        """One page and its ``previous``/``next`` cursors — both ``None`` on an empty page — as 2.1.4 pages: a cursor
+        carries its own order and is refused beside one. Only a ``next`` cursor is followed."""
+        if cursor is not None and order is not None:
+            raise InvalidCursorError("Cursor cannot be combined with order")
+        after: str | None = None
+        if cursor is not None:
+            after, order = decode_cursor(cursor)
+        order = order or "asc"
+        size = DEFAULT_PAGE_LIMIT if limit is None else limit
+        if not 1 <= size <= MAX_PAGE_LIMIT:
+            raise ValueError(f"Expected a value less than or equal to {MAX_PAGE_LIMIT} at limit")
         with self.lock:
             listed = [json.loads(json.dumps(m)) for m in self.get(session_id).messages]
         if order == "desc":
             listed.reverse()
-        if cursor is not None:
+        if after is not None:
             ids = [m.get("id") for m in listed]
-            listed = listed[ids.index(cursor) + 1 :] if cursor in ids else []
-        return listed[:limit] if limit is not None else listed
+            listed = listed[ids.index(after) + 1 :] if after in ids else []
+        page = listed[:size]
+        if not page:
+            return page, {"previous": None, "next": None}
+        return page, {
+            "previous": encode_cursor(str(page[0]["id"]), order, "previous"),
+            "next": encode_cursor(str(page[-1]["id"]), order),
+        }
 
     def message(self, session_id: str, message_id: str) -> Json:
         with self.lock:

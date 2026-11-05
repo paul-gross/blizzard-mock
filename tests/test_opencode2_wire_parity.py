@@ -1,7 +1,8 @@
 """The engine-backed OpenCode 2 mock's answers, fed through `blizzard`'s production OpenCode 2 readers
-(`blizzard.runner.harness.opencode_v2.shapes`) under blizzard's own interpreter: every session, message, permission
-request, form, error record, event, inbox item, and model it answers with must parse, since a mock whose records the
-real driver refuses is a mock nothing downstream can trust. Holding the same records to the corpus's keys is
+(`blizzard.runner.harness.opencode_v2.shapes`, the transcript normalizer, and the message page reader) under
+blizzard's own interpreter: every session, message, page, permission request, form, error record, event, inbox item,
+and model it answers with must parse, since a mock whose records the real driver refuses is a mock nothing downstream
+can trust. Holding the same records to the corpus's keys is
 `test_opencode2_corpus_conformance.py`'s; this tier holds them to the code that reads them."""
 
 from __future__ import annotations
@@ -26,7 +27,19 @@ _FENCE = {fence.FENCE_ENV_VAR: fence.FENCE_ENV_VALUE}
 #: for its kind, and prints ``{kind: count}`` — or the first refusal, naming its kind, record, and message.
 _PARSER_DRIVER = """
 import json, sys
-from blizzard.runner.harness.opencode_v2 import shapes
+from blizzard.runner.harness.opencode_v2 import client, shapes
+from blizzard.runner.harness.opencode_v2.transcript import normalizer
+
+def transcript(record):
+    message = shapes.parse_message(record)
+    normalizer.message_turns(message)
+    normalizer.spawned_children(message)
+
+def page(record):
+    try:
+        client.parse_message_page(record)
+    except client.ServiceShapeError as exc:
+        raise shapes.OpenCodeTwoShapeError(str(exc)) from exc
 
 readers = {
     "session": shapes.parse_session,
@@ -37,6 +50,8 @@ readers = {
     "event": shapes.parse_event,
     "inbox": shapes.parse_inbox_item,
     "model": shapes.parse_listed_model,
+    "transcript": transcript,
+    "page": page,
 }
 counts = {}
 for kind, records in json.load(sys.stdin).items():
@@ -117,9 +132,12 @@ def test_every_engine_record_parses_through_blizzards_opencode_2_readers(
         for message in objects(service.data("GET", f"/api/session/{session['id']}/message"))
     ]
     records["error"] = [error for m in limited if isinstance(error := m.get("error"), dict)]
+    pages = [service.call("GET", f"/api/session/{s['id']}/message?limit=1")[1] for s in sessions if isinstance(s, dict)]
+    records["page"] = [page for page in pages if isinstance(page, dict)]
     records.update(
         session=[s for s in sessions if isinstance(s, dict)],
         message=messages + limited,
+        transcript=messages + limited,
         event=received,
         model=objects(service.data("GET", "/api/model")),
     )

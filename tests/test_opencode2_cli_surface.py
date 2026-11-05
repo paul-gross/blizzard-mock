@@ -350,6 +350,7 @@ def test_every_proof_prompt_plans_to_the_tool_calls_it_names() -> None:
         "RESUME_PROMPT": ((), "RESUMED"),
         "TAKEOVER_PROMPT": ((), "TAKEN"),
         "RESTART_PROMPT": ((script.Shell(proof.RESTART_COMMAND),), "DONE"),
+        "TOOLS_PROMPT": ((script.Read(proof.NOTES_FILE), script.Skill(proof.SKILL_NAME)), "OK"),
     }
     for name, (steps, reply) in expected.items():
         plan = script.plan(getattr(proof, name))

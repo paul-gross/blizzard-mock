@@ -26,7 +26,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from ..domain import records
 from ..levers import Lever
 from . import paths, registration
-from .sessions import ConflictError, Engine, NotFoundError, TurnRunner, restart_in_background
+from .sessions import (
+    ConflictError,
+    Engine,
+    InvalidCursorError,
+    NotFoundError,
+    SessionNotFoundError,
+    TurnRunner,
+    restart_in_background,
+)
 
 START_WAIT_SECONDS = 15.0
 STOP_WAIT_SECONDS = 10.0
@@ -200,8 +208,13 @@ class _Handler(BaseHTTPRequestHandler):
         query = {key: values[-1] for key, values in parse_qs(split.query).items()}
         try:
             self._route(method, split.path, query)
+        except SessionNotFoundError as exc:
+            sid = exc.args[0]
+            self._send(404, {"_tag": "SessionNotFoundError", "sessionID": sid, "message": f"Session not found: {sid}"})
         except NotFoundError as exc:
             self._send(404, {"error": f"not found: {exc}"})
+        except InvalidCursorError as exc:
+            self._send(400, {"_tag": "InvalidCursorError", "message": str(exc)})
         except ConflictError as exc:
             self._send(409, {"error": f"already exists: {exc}"})
         except (ValueError, KeyError, TypeError) as exc:
@@ -265,13 +278,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(204)
         elif route == ("GET", "message"):
             limit = query.get("limit")
-            listed = [
-                _shaped(message, levers)
-                for message in engine.messages(
-                    sid, query.get("order", "asc"), int(limit) if limit else None, query.get("cursor")
-                )
-            ]
-            self._send(200, {"data": {"items": listed} if Lever.DISTORTED_SHAPES in levers else listed})
+            page, cursors = engine.messages(sid, query.get("order"), int(limit) if limit else None, query.get("cursor"))
+            listed = [_shaped(message, levers) for message in page]
+            if Lever.DISTORTED_SHAPES in levers:
+                self._send(200, {"data": {"items": listed}})
+            else:
+                self._send(200, {"data": listed, "cursor": cursors})
         elif route == ("GET", "message", "{id}"):
             self._send(200, {"data": _shaped(engine.message(sid, parts[1]), levers)})
         elif route == ("GET", "inbox"):

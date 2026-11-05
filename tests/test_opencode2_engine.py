@@ -552,9 +552,24 @@ def test_the_api_subset_pages_messages_lists_the_inbox_compacts_and_reports_itse
     _turn(service, "ses_api", "text('one')")
     _turn(service, "ses_api", "text('two')")
     every = objects(service.data("GET", "/api/session/ses_api/message"))
-    first_page = objects(service.data("GET", "/api/session/ses_api/message?limit=2"))
-    after = objects(service.data("GET", f"/api/session/ses_api/message?cursor={first_page[-1]['id']}"))
-    assert first_page + after == every
+    _, first = service.call("GET", "/api/session/ses_api/message?limit=2")
+    assert is_json(first)
+    cursor = first["cursor"]
+    assert is_json(cursor)
+    following = str(cursor["next"])
+    assert not following.startswith("msg_") and isinstance(cursor["previous"], str)
+    _, after = service.call("GET", f"/api/session/ses_api/message?cursor={following}")
+    assert is_json(after)
+    after_cursor = after["cursor"]
+    assert is_json(after_cursor)
+    assert objects(first["data"]) + objects(after["data"]) == every
+    _, tail = service.call("GET", f"/api/session/ses_api/message?cursor={after_cursor['next']}")
+    assert isinstance(tail, dict) and tail["data"] == [] and tail["cursor"] == {"previous": None, "next": None}
+    refused, body = service.call("GET", f"/api/session/ses_api/message?order=asc&cursor={following}")
+    assert refused == 400 and isinstance(body, dict) and body["_tag"] == "InvalidCursorError"
+    assert service.call("GET", "/api/session/ses_api/message?limit=201")[0] == 400
+    missing, body = service.call("GET", "/api/session/ses_missing/message")
+    assert missing == 404 and isinstance(body, dict) and body["_tag"] == "SessionNotFoundError"
     newest = objects(service.data("GET", "/api/session/ses_api/message?order=desc&limit=1"))
     assert newest == every[-1:]
     assert service.data("GET", f"/api/session/ses_api/message/{every[1]['id']}") == every[1]

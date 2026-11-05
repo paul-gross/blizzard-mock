@@ -1,7 +1,8 @@
 """What a prompt asks the fake model to do: the tool calls it names, in order, and how the reply is chosen.
 
-Read from the prompt's shape, never executed: a shell command is named between backticks after ``run``, a subagent's
-instructions follow ``whose instructions are:``, and the reply is the word the prompt asks for."""
+Read from the prompt's shape, never executed: a shell command is named between backticks after ``run``, a file to read
+or a skill to load between backticks after its tool, a subagent's instructions follow ``whose instructions are:``, and
+the reply is the word the prompt asks for."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 
 _RUN = re.compile(r"\brun `([^`]+)`")
 _READ = re.compile(r"read tool exactly once to read `([^`]+)`")
+_SKILL = re.compile(r"skill tool exactly once to load the skill named `([^`]+)`")
 _INSTRUCTIONS = re.compile(
     r"whose instructions are: (?P<body>.+?)(?:\. (?:Then report|Wait for|Do not wait)|$)", re.DOTALL
 )
@@ -36,12 +38,17 @@ class Read:
 
 
 @dataclass(frozen=True)
+class Skill:
+    name: str
+
+
+@dataclass(frozen=True)
 class Subagent:
     instructions: str
     background: bool
 
 
-type ToolStep = Shell | Read | Subagent
+type ToolStep = Shell | Read | Skill | Subagent
 
 
 @dataclass(frozen=True)
@@ -74,13 +81,16 @@ class Plan:
 
 
 def plan(prompt: str) -> Plan:
-    """The tool calls ``prompt`` names, in order: shell and read calls before a subagent, then the subagent."""
+    """The tool calls ``prompt`` names, in order: shell, read and skill calls before a subagent, then the subagent."""
     instructions = _INSTRUCTIONS.search(prompt) if "subagent tool" in prompt else None
     head = prompt[: instructions.start()] if instructions else prompt
     steps: list[ToolStep] = []
-    for match in sorted([*_RUN.finditer(head), *_READ.finditer(head)], key=lambda found: found.start()):
+    found = [*_RUN.finditer(head), *_READ.finditer(head), *_SKILL.finditer(head)]
+    for match in sorted(found, key=lambda each: each.start()):
         if match.re is _READ:
             steps.append(Read(match.group(1)))
+        elif match.re is _SKILL:
+            steps.append(Skill(match.group(1)))
         else:
             steps.append(Shell(match.group(1)))
     own = prompt
@@ -91,4 +101,4 @@ def plan(prompt: str) -> Plan:
     return Plan(own, tuple(steps))
 
 
-__all__ = ["CHOICE_REPLY", "DEFAULT_REPLY", "Plan", "Read", "Shell", "Subagent", "ToolStep", "plan"]
+__all__ = ["CHOICE_REPLY", "DEFAULT_REPLY", "Plan", "Read", "Shell", "Skill", "Subagent", "ToolStep", "plan"]

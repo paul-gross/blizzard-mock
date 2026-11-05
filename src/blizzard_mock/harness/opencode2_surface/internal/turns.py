@@ -64,14 +64,15 @@ class PlannedTurns:
         self, engine: Engine, session: Session, assistant: Json, step: script.ToolStep
     ) -> tuple[str, bool] | None:
         """Run one tool call; ``(output, refused)``, or ``None`` when the session was interrupted during it."""
-        name = "shell" if isinstance(step, script.Shell) else "read" if isinstance(step, script.Read) else "subagent"
-        part = engine.open_tool(session, assistant, name, _input(step))
+        part = engine.open_tool(session, assistant, _name(step), _input(step))
         if part is None:
             return "", True
         if isinstance(step, script.Shell):
             return self._shell(engine, session, assistant, part, step.command)
         if isinstance(step, script.Read):
             return self._read(engine, session, assistant, part, step.path)
+        if isinstance(step, script.Skill):
+            return self._skill(engine, session, assistant, part, step.name)
         child = engine.spawn_child(
             session, part, step.instructions, title=step.instructions[:60], background=step.background
         )
@@ -137,12 +138,41 @@ class PlannedTurns:
         engine.complete_tool(session, part, text, {"truncated": False})
         return text, False
 
+    def _skill(
+        self, engine: Engine, session: Session, assistant: Json, part: Json, name: str
+    ) -> tuple[str, bool] | None:
+        """A skill loads from the session directory's ``.opencode/skills/<name>/SKILL.md``, as 2.1.4 finds one."""
+        verdict = engine.judge(session, assistant, part, "skill", name)
+        if verdict is None:
+            return None
+        if verdict == "deny":
+            return "", True
+        directory = Path(session.directory) / ".opencode" / "skills" / name
+        try:
+            body = (directory / "SKILL.md").read_text()
+        except OSError as exc:
+            engine.fail_tool(session, part, "tool.failed", str(exc))
+            return "", False
+        text = f'<skill_content name="{name}">\n{body}</skill_content>'
+        engine.complete_tool(session, part, text, {"name": name, "directory": str(directory), "truncated": False})
+        return text, False
+
+
+def _name(step: script.ToolStep) -> str:
+    if isinstance(step, script.Shell):
+        return "shell"
+    if isinstance(step, script.Read):
+        return "read"
+    return "skill" if isinstance(step, script.Skill) else "subagent"
+
 
 def _input(step: script.ToolStep) -> Json:
     if isinstance(step, script.Shell):
         return {"command": step.command}
     if isinstance(step, script.Read):
-        return {"filePath": step.path}
+        return {"path": step.path}
+    if isinstance(step, script.Skill):
+        return {"id": step.name}
     return {"agent": "general", "prompt": step.instructions}
 
 
