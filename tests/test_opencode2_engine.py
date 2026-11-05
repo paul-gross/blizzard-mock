@@ -20,6 +20,7 @@ from blizzard_mock.harness import engine as exec_engine
 from blizzard_mock.harness.opencode2_core import emit as core_emit
 from blizzard_mock.harness.opencode2_engine import emit as engine_emit
 from blizzard_mock.harness.opencode2_engine.domain import failures, fence
+from blizzard_mock.harness.opencode2_engine.domain.program import program
 from tests.opencode2_service import Json, Service, Starter, artifact, emit_cli, is_json, objects, output, tool_parts
 
 _PACKAGE = Path(engine_emit.__file__).resolve().parent
@@ -622,3 +623,11 @@ def test_a_command_reading_stdin_sees_its_end_rather_than_the_services_pipe(
         service, "ses_stdin", "import sys\nr = shell('cat; echo EOF')\ntext(r.output.strip() + sys.stdin.read())\n"
     )
     assert _texts(_assistants(messages)[-1]) == ["EOF"]
+
+
+def test_a_turn_runs_the_script_its_prompt_holds_past_the_runners_preamble() -> None:
+    preamble = "Work the chunk.\n\n| Field | Value |\n|-------|-------|\n| chunk | ch_1 |\n\n"
+    assert program(preamble + "text('BUILT')\n") == "text('BUILT')"
+    tagged = "prose\n<behavior-script>\n  text('A')\n</behavior-script>\nmore prose"
+    assert program(tagged) == "text('A')"
+    assert program("text('WHOLE')") == "text('WHOLE')"

@@ -1,5 +1,6 @@
-"""``turn``: the child process one turn's script runs in. It reads the turn from the service, runs the script with
-the helpers bound, and reports how it ended — ``end`` when the script ran out, ``fail`` when it raised.
+"""``turn``: the child process one turn's script runs in. It reads the turn from the service, runs the script its
+prompt holds with the helpers bound, and reports how it ended — ``end`` when the script ran out, ``fail`` when it
+raised.
 
 The pipe to the service is moved off file descriptors 0 and 1 before the script runs, so nothing the script or a
 command it starts reads or prints can touch the conversation: stdin is empty, stdout lands on stderr."""
@@ -12,6 +13,7 @@ import sys
 import traceback
 
 from ..domain import failures
+from ..domain.program import program
 from . import helpers
 from .channel import Channel, ServiceGoneError
 
@@ -27,7 +29,7 @@ def main() -> int:
     try:
         header = channel.header()
         helpers.bind(channel, header)
-        source = str(header.get("script", ""))
+        source = program(str(header.get("script", "")))
         tree = ast.parse(source, "<behavior-script>")
         if not tree.body:
             channel.send("fail", error=failures.script_failed("the behavior script is empty"))

@@ -1,9 +1,9 @@
-"""The engine-backed OpenCode 2 mock's answers, fed through `blizzard`'s production OpenCode 2 readers
-(`blizzard.runner.harness.opencode_v2.shapes`, the transcript normalizer, and the message page reader) under
-blizzard's own interpreter: every session, message, page, permission request, form, error record, event, inbox item,
-and model it answers with must parse, since a mock whose records the real driver refuses is a mock nothing downstream
-can trust. Holding the same records to the corpus's keys is
-`test_opencode2_corpus_conformance.py`'s; this tier holds them to the code that reads them."""
+"""The engine-backed OpenCode 2 mock's answers, fed through `blizzard`'s production OpenCode 2 readers (the shapes,
+the transcript normalizer, and the page and info readers) under blizzard's own interpreter: every session, message,
+page, permission request, form, error record, event, inbox item, model and ``/api/info`` answer must parse, its
+version one blizzard binds to OpenCode 2, since a mock the real driver refuses is a mock nothing downstream can trust.
+Holding the same records to the corpus's keys is `test_opencode2_corpus_conformance.py`'s; this tier holds them to the
+code that reads them."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _FENCE = {fence.FENCE_ENV_VAR: fence.FENCE_ENV_VALUE}
 #: for its kind, and prints ``{kind: count}`` — or the first refusal, naming its kind, record, and message.
 _PARSER_DRIVER = """
 import json, sys
-from blizzard.runner.harness.opencode_v2 import client, shapes
+from blizzard.runner.harness.opencode_v2 import client, declaration, shapes
 from blizzard.runner.harness.opencode_v2.transcript import normalizer
 
 def transcript(record):
@@ -41,6 +41,14 @@ def page(record):
     except client.ServiceShapeError as exc:
         raise shapes.OpenCodeTwoShapeError(str(exc)) from exc
 
+def info(record):
+    try:
+        answer = client.parse_service_info(record)
+    except client.ServiceShapeError as exc:
+        raise shapes.OpenCodeTwoShapeError(str(exc)) from exc
+    if not declaration.OPENCODE_V2_DECLARATION.admits_version(answer.version):
+        raise shapes.OpenCodeTwoShapeError(f"version {answer.version} is not one OpenCode 2 binds")
+
 readers = {
     "session": shapes.parse_session,
     "message": shapes.parse_message,
@@ -52,6 +60,7 @@ readers = {
     "model": shapes.parse_listed_model,
     "transcript": transcript,
     "page": page,
+    "info": info,
 }
 counts = {}
 for kind, records in json.load(sys.stdin).items():
@@ -140,6 +149,7 @@ def test_every_engine_record_parses_through_blizzards_opencode_2_readers(
         transcript=messages + limited,
         event=received,
         model=objects(service.data("GET", "/api/model")),
+        info=objects([service.call("GET", "/api/info")[1]]),
     )
 
     counts = _parse_through_blizzard(records)
