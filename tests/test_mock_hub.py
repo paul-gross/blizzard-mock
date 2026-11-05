@@ -39,7 +39,7 @@ from blizzard_mock.mock_hub.domain.models import (
     ships_from_lease_holder,
 )
 from blizzard_mock.mock_hub.domain.service import (
-    _TRANSCRIPT_RECORD_MAX_BYTES,  # pyright: ignore[reportPrivateUsage]  # boundary under test
+    TRANSCRIPT_RECORD_MAX_BYTES,
     MockHubService,
 )
 from blizzard_mock.mock_hub.domain.state import (
@@ -453,7 +453,7 @@ def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(cli
     after: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
     assert after["current_node_id"] == node_before
     service = _service(client)
-    chunk = service._state.get_chunk(chunk_id)  # pyright: ignore[reportPrivateUsage]  # no wire read
+    chunk = service.state.get_chunk(chunk_id)
     assert chunk is not None
     assert [(r.runner_id, r.epoch, r.reason) for r in chunk.releases] == [("r1", 1, "throttled")]
 
@@ -523,7 +523,7 @@ def _registered_capabilities(client: TestClient, runner_id: str) -> tuple[Runner
     """A registered runner's stored capability snapshot, read from the composition root's
     own service directly — the domain-core dataclass shape, not the wire view."""
     service = _service(client)
-    row = service._state.get_runner(runner_id)  # pyright: ignore[reportPrivateUsage]  # inspect domain snapshot
+    row = service.state.get_runner(runner_id)
     assert row is not None
     return row.capabilities
 
@@ -657,7 +657,7 @@ def _declared_subscriptions(client: TestClient, runner_id: str) -> tuple[Declare
     """A registered runner's stored declared roster, read from the composition root's own
     service directly — mirrors ``_registered_capabilities``."""
     service = _service(client)
-    row = service._state.get_runner(runner_id)  # pyright: ignore[reportPrivateUsage]  # inspect domain snapshot
+    row = service.state.get_runner(runner_id)
     assert row is not None
     return row.declared_subscriptions
 
@@ -2706,7 +2706,7 @@ def test_transcripts_over_cap_record_is_capped_but_acked_and_the_mark_still_adva
     or fake ever populates a transcript ack's ``capped`` list, so no tier can catch a
     regression in the runner drain's own cap-handling."""
     chunk_id = _seed(client)
-    huge_turns = [_turn_with_text("x" * (_TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
+    huge_turns = [_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
 
     first = client.post(
         "/api/fleet/transcripts",
@@ -2796,7 +2796,7 @@ def test_transcripts_a_capped_key_re_offered_and_accepted_stops_reporting_capped
     accepted, must stop reporting `capped` on a later replay of the ORIGINAL seq too, not
     report it forever."""
     chunk_id = _seed(client)
-    huge_turns = [_turn_with_text("x" * (_TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
+    huge_turns = [_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1000))]
 
     first = client.post(
         "/api/fleet/transcripts",
@@ -4881,7 +4881,7 @@ def test_add_naming_a_tenant_no_tenant_holds_answers_404_and_adds_nothing(client
 
     assert (unknown.status_code, unknown.json()) == (404, {"detail": "no such tenant"})
     assert (by_name.status_code, by_name.json()) == (404, {"detail": "no such tenant"})
-    assert _service(client)._state.list_runners() == []  # pyright: ignore[reportPrivateUsage]  # inspect domain state
+    assert _service(client).state.list_runners() == []
 
 
 def test_a_fleet_call_naming_another_tenant_is_refused_400_and_its_own_is_accepted(client: TestClient) -> None:

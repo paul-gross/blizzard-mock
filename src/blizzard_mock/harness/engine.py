@@ -68,7 +68,7 @@ _TRANSCRIPT_SPAWN_TEXT = "(mock harness spawn — the behavior script it execute
 _TRANSCRIPT_RESUME_TEXT = "(mock harness resume — the behavior script it executed is not shown here)"
 
 #: What an interrupted turn reports — the interruption itself, since the script never produced a result.
-_INTERRUPTED_TEXT = "interrupted by SIGINT before the behavior script finished"
+INTERRUPTED_TEXT = "interrupted by SIGINT before the behavior script finished"
 
 
 class FenceError(RuntimeError):
@@ -385,7 +385,7 @@ def fence_base_dir(cwd: Path) -> Path:
     return marker.parent if marker is not None else cwd
 
 
-def _state_root(env: Mapping[str, str], cwd: Path) -> Path:
+def state_root(env: Mapping[str, str], cwd: Path) -> Path:
     """Where session files live: the override env var, else beside the fence marker."""
     override = env.get(STATE_DIR_ENV_VAR)
     if override:
@@ -409,7 +409,7 @@ def _chdir(target: Path) -> Generator[None]:
         os.chdir(previous)
 
 
-def _script_globals(ctx: RunContext) -> dict[str, object]:
+def script_globals(ctx: RunContext) -> dict[str, object]:
     """Build the namespace a behavior script executes in.
 
     The helper surface is bound by name so a script writes ``commit("…")`` with
@@ -526,7 +526,7 @@ def run_prompt(
     # answer: a tagged prompt's prose, else the whole raw message.
     message = tagged.prose if tagged is not None else prompt
 
-    store = SessionStore(_state_root(env, cwd))
+    store = SessionStore(state_root(env, cwd))
     if is_resume:
         if not session_id:
             raise ValueError("resume requires a session_id")
@@ -600,7 +600,7 @@ def run_prompt(
         if script_error is not None:
             raise script_error  # a bad tag or an empty whole-message script fails the turn, never silently
         with _chdir(cwd):
-            exec(compile(script, "<behavior-script>", "exec"), _script_globals(ctx))
+            exec(compile(script, "<behavior-script>", "exec"), script_globals(ctx))
         result = ctx.result or RunResult(session_id=session_id, subtype="success")
     except AskExit as exc:
         result = ctx.result or RunResult(session_id=session_id, subtype="ask", ask=exc.ask, text=exc.ask.question)
@@ -611,13 +611,13 @@ def run_prompt(
         )
     except KeyboardInterrupt:
         # A SIGINT mid-script (`hang()` included) ends the turn as real Claude Code does: an
-        # `error_during_execution` envelope, its usage synthesized from `_INTERRUPTED_TEXT`
+        # `error_during_execution` envelope, its usage synthesized from `INTERRUPTED_TEXT`
         # below (not accumulated from anything the script did) — a SIGTERM or SIGHUP, with no
         # handler installed for either, kills the process outright and leaves no envelope at
         # all, the same as a SIGKILL.
         _log.warning("behavior script interrupted", session_id=session_id)
         result = RunResult(
-            session_id=session_id, is_error=True, subtype="error_during_execution", text=_INTERRUPTED_TEXT, exit_code=1
+            session_id=session_id, is_error=True, subtype="error_during_execution", text=INTERRUPTED_TEXT, exit_code=1
         )
     except Exception as exc:  # a script blew up — the harness reports an error run
         _log.warning("behavior script raised", session_id=session_id, error=repr(exc))

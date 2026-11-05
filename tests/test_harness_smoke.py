@@ -281,12 +281,12 @@ def test_hang_interrupted_by_sigint_ends_the_turn_as_an_error_envelope_with_usag
     assert envelope["session_id"] == "sigint-1"
     assert "result" not in envelope
     # The usage/cost figures are synthesized off the fixed interrupted-turn text
-    # (`engine._INTERRUPTED_TEXT`), not accumulated from anything the script did
+    # (`engine.INTERRUPTED_TEXT`), not accumulated from anything the script did
     # before the signal — asserting the exact synthesized value (rather than just
     # `> 0`) is what actually proves that provenance.
     from blizzard_mock.harness.facades._usage import synthesize_cost_usd, synthesize_usage_tokens
 
-    expected_usage = synthesize_usage_tokens(engine._INTERRUPTED_TEXT)
+    expected_usage = synthesize_usage_tokens(engine.INTERRUPTED_TEXT)
     assert envelope["usage"] == expected_usage
     assert envelope["total_cost_usd"] == synthesize_cost_usd(expected_usage)
 
@@ -1701,7 +1701,7 @@ def test_selftest_resume_judges_from_repo_state(fenced_repo: tuple[Path, dict[st
 def test_selftest_judges_fail_without_the_commit(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     cwd, env = _selftest_env(fenced_repo)
     # The session is a selftest one, but the work never landed.
-    store = engine.SessionStore(engine._state_root(env, cwd))
+    store = engine.SessionStore(engine.state_root(env, cwd))
     state = store.load_or_create("selftest-b")
     state.selftest = True
     store.save(state)
@@ -1731,12 +1731,12 @@ def test_spawn_records_the_runner_exported_credential(fenced_repo: tuple[Path, d
     _run("verdict('ok')", (cwd, spawn_env), session_id="cred-a")
     _run("verdict('ok')", (cwd, env), session_id="cred-a", is_resume=True)
 
-    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-a")
+    state = engine.SessionStore(engine.state_root(env, cwd)).load("cred-a")
     assert state is not None
     assert state.spawn_credential == session.SpawnCredential(
         lease_id="lease-1", lease_token="tok-1", runner_url="http://127.0.0.1:9999"
     )
-    raw = json.loads((engine._state_root(env, cwd) / "cred-a.json").read_text())
+    raw = json.loads((engine.state_root(env, cwd) / "cred-a.json").read_text())
     assert raw["spawn_credential"] == {
         "lease_id": "lease-1",
         "lease_token": "tok-1",
@@ -1757,7 +1757,7 @@ def test_resume_with_a_resupplied_token_supersedes_the_recorded_one(fenced_repo:
         session_id="cred-c",
         is_resume=True,
     )
-    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-c")
+    state = engine.SessionStore(engine.state_root(env, cwd)).load("cred-c")
     assert state is not None
     assert state.spawn_credential is not None
     assert state.spawn_credential.lease_token == "tok-2"
@@ -1767,6 +1767,6 @@ def test_spawn_without_credential_records_absent_vars_as_null(fenced_repo: tuple
     cwd, env = fenced_repo
     env = {k: v for k, v in env.items() if not k.startswith("BLIZZARD_") or k == engine.FENCE_ENV_VAR}
     _run("verdict('ok')", (cwd, env), session_id="cred-b")
-    state = engine.SessionStore(engine._state_root(env, cwd)).load("cred-b")
+    state = engine.SessionStore(engine.state_root(env, cwd)).load("cred-b")
     assert state is not None
     assert state.spawn_credential == session.SpawnCredential()

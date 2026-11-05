@@ -132,7 +132,7 @@ def test_a_real_runner_registers_its_capabilities_and_the_mock_hub_reads_them_ba
         thread.join(timeout=10)
 
     service: MockHubService = app.state.service
-    runners = service._state.list_runners()  # the only read-back this feature exposes
+    runners = service.state.list_runners()  # the only read-back this feature exposes
     assert len(runners) == 1, f"expected exactly one registered runner, got {runners!r}"
     row = runners[0]
     # `runner init` added the runner at this hub — the hub minted its id and token — and the
@@ -207,13 +207,13 @@ def test_runner_init_reuses_its_token_and_re_adds_after_a_hub_reset_only_with_al
         first = init()
         assert first.returncode == 0, first.stderr
         token = _env_token(runner_dir)
-        [added] = service._state.list_runners()
+        [added] = service.state.list_runners()
         assert token is not None and service.identity(token).runner_id == added.runner_id
 
         again = init()
         assert again.returncode == 0, again.stderr
         assert _env_token(runner_dir) == token
-        assert [r.runner_id for r in service._state.list_runners()] == [added.runner_id]
+        assert [r.runner_id for r in service.state.list_runners()] == [added.runner_id]
 
         service.reset()  # the hub's data is reset: the token init wrote is unknown here now
         env_before = (runner_dir / ".env").read_bytes()
@@ -223,11 +223,11 @@ def test_runner_init_reuses_its_token_and_re_adds_after_a_hub_reset_only_with_al
         assert hub_url in refused.stderr + refused.stdout
         assert "--allow-readd" in refused.stderr + refused.stdout
         assert (runner_dir / ".env").read_bytes() == env_before
-        assert service._state.list_runners() == []
+        assert service.state.list_runners() == []
 
         readded = init("--allow-readd")
         assert readded.returncode == 0, readded.stderr
-        [fresh] = service._state.list_runners()
+        [fresh] = service.state.list_runners()
         fresh_token = _env_token(runner_dir)
         assert fresh_token is not None and fresh_token != token
         assert service.identity(fresh_token).runner_id == fresh.runner_id != added.runner_id
@@ -308,7 +308,7 @@ def _tables(database: Path) -> set[str]:
 
 
 def _added_runner_id(service: MockHubService) -> str:
-    [added] = service._state.list_runners()
+    [added] = service.state.list_runners()
     return added.runner_id
 
 

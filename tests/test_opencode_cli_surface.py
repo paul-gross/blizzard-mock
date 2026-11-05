@@ -137,7 +137,7 @@ def test_emit_version_override_is_baked_in(tmp_path: Path) -> None:
 
 def test_baked_module_fields_match_emits_generated_template() -> None:
     """The checked-in `_baked.py` (kept for import/type-checking during development) and
-    `emit._render_baked`'s generated replacement must declare the same fields — a
+    `emit.render_baked`'s generated replacement must declare the same fields — a
     hand-added field to one with nothing tying it to the other would silently drift."""
 
     def module_level_names(source: str) -> set[str]:
@@ -148,7 +148,7 @@ def test_baked_module_fields_match_emits_generated_template() -> None:
         }
 
     checked_in_fields = module_level_names(Path(_baked.__file__).read_text())
-    generated_fields = module_level_names(surface_emit._render_baked(frozenset(), "1.0.0", None, None))
+    generated_fields = module_level_names(surface_emit.render_baked(frozenset(), "1.0.0", None, None))
 
     assert checked_in_fields == generated_fields
 
