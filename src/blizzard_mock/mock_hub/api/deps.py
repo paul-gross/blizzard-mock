@@ -20,6 +20,7 @@ from blizzard_mock.mock_hub.domain.service import (
     HostRetiredError,
     MockHubService,
     NoSuchTenant,
+    RunnerRetired,
     TenantRequired,
     UnresolvableHost,
     UnresolvableRunner,
@@ -39,6 +40,21 @@ def presented_bearer(request: Request) -> str | None:
     return token.strip() or None
 
 
+class DependencyRefusal(HTTPException):
+    def __init__(self, status: int, detail: object, kind: str, title: str) -> None:
+        super().__init__(status_code=status, detail=detail)
+        self.kind = kind
+        self.title = title
+
+
+def authentication_refusal(detail: str) -> DependencyRefusal:
+    if detail == "missing or malformed Authorization header":
+        return DependencyRefusal(401, detail, "authentication-required", "Authentication required")
+    if detail == "bearer token has been revoked":
+        return DependencyRefusal(401, detail, "authentication-revoked", "Authentication revoked")
+    return DependencyRefusal(401, detail, "authentication-unresolved", "Authentication unresolved")
+
+
 def get_principal(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
     """The calling runner's id, resolved from its bearer token — the one identity a fleet call
     carries. A missing, revoked or unknown token is refused ``401`` before any handler runs, as
@@ -46,7 +62,16 @@ def get_principal(request: Request, service: Annotated[MockHubService, Depends(g
     try:
         return service.principal(presented_bearer(request))
     except UnresolvableRunner as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise authentication_refusal(str(exc)) from exc
+
+
+def require_active_runner(
+    runner_id: Annotated[str, Depends(get_principal)], service: Annotated[MockHubService, Depends(get_service)]
+) -> None:
+    try:
+        service.refuse_retired_runner(runner_id, action="fleet call")
+    except RunnerRetired as exc:
+        raise DependencyRefusal(403, str(exc), "runner-retired", "Runner retired") from exc
 
 
 def get_host_principal(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
@@ -56,9 +81,9 @@ def get_host_principal(request: Request, service: Annotated[MockHubService, Depe
     try:
         return service.host_principal(presented_bearer(request))
     except UnresolvableHost as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise authentication_refusal(str(exc)) from exc
     except HostRetiredError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise DependencyRefusal(403, str(exc), "host-retired", "Host retired") from exc
 
 
 def named_tenant(request: Request) -> str | None:
@@ -77,7 +102,7 @@ def fleet_tenant_bound(
     try:
         service.refuse_foreign_tenant(runner_id, named_tenant(request))
     except ForeignTenantNamed as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise DependencyRefusal(400, str(exc), "tenant-credential-mismatch", "Tenant credential mismatch") from exc
 
 
 def host_tenant_bound(
@@ -90,7 +115,7 @@ def host_tenant_bound(
     try:
         service.refuse_foreign_host_tenant(host_id, named_tenant(request))
     except ForeignTenantNamed as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise DependencyRefusal(400, str(exc), "tenant-credential-mismatch", "Tenant credential mismatch") from exc
 
 
 def get_tenant(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
@@ -101,9 +126,38 @@ def get_tenant(request: Request, service: Annotated[MockHubService, Depends(get_
     try:
         return service.tenant_named(named_tenant(request))
     except NoSuchTenant as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise DependencyRefusal(404, str(exc), "tenant-not-found", "Tenant not found") from exc
     except TenantRequired as exc:
-        raise HTTPException(status_code=409, detail={"code": "tenant_required", "message": str(exc)}) from exc
+        raise DependencyRefusal(
+            409, {"code": "tenant_required", "message": str(exc)}, "tenant-required", "Tenant required"
+        ) from exc
+
+
+def host_bootstrap_tenant(request: Request, service: Annotated[MockHubService, Depends(get_service)]) -> str:
+    runner_id, host_tenant = service.bootstrap_credential(presented_bearer(request))
+    if runner_id is not None:
+        raise DependencyRefusal(
+            403,
+            f"runner token for {runner_id!r} is not valid on an operator verb",
+            "runner-credential-forbidden",
+            "Runner credential forbidden",
+        )
+    if host_tenant is not None:
+        named = named_tenant(request)
+        if named is not None and named != host_tenant:
+            raise DependencyRefusal(
+                400,
+                "X-Blizzard-Tenant names a tenant other than the presented credential's",
+                "tenant-credential-mismatch",
+                "Tenant credential mismatch",
+            )
+        raise DependencyRefusal(
+            403,
+            "a machine credential is not valid here",
+            "machine-credential-forbidden",
+            "Machine credential forbidden",
+        )
+    return get_tenant(request, service)
 
 
 def get_captured(request: Request) -> ICaptureStore:
@@ -157,6 +211,11 @@ class RouteClaimBody(BaseModel):
     chunk_id: str
     workspace_id: str = "workspace-mock"
     environment_ids: list[str] = Field(default_factory=list[str])
+
+
+class ArtifactCheckBody(MirroredWireBody):
+    name: str
+    content: str
 
 
 class CompletionBody(BaseModel):

@@ -43,7 +43,11 @@ def create_app(
     owned_client: httpx.Client | None = None
     if gateway is None:
         owned_client = httpx.Client(base_url=cfg.hub_url, timeout=30.0)
-        gateway = HttpxHubGateway(owned_client, token=cfg.token or bootstrap_token(owned_client, name=cfg.name))
+        gateway = HttpxHubGateway(
+            owned_client,
+            token=cfg.token or bootstrap_token(owned_client, name=cfg.name),
+            runner_version=cfg.runner_version,
+        )
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:

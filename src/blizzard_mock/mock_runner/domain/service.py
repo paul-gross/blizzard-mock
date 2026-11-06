@@ -92,6 +92,12 @@ class MockRunnerService:
 
     # -- drive verbs -------------------------------------------------------
 
+    def _observed(self, status: int, body: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {"status": status, "response": body, "headers": self._gw.last_response_headers()}
+        if status >= 400:
+            result["refusal"] = self._gw.last_nonclaim_refusal()
+        return result
+
     def register(
         self,
         *,
@@ -116,12 +122,12 @@ class MockRunnerService:
         registered_id = body.get("runner_id")
         if status in (200, 201) and isinstance(registered_id, str):
             self._runner_id = registered_id
-        return {"status": status, "response": body}
+        return self._observed(status, body)
 
     def peek(self) -> dict[str, Any]:
         self._apply_delay(None)
         status, body = self._gw.peek()
-        return {"status": status, "response": body}
+        return self._observed(status, body)
 
     def peek_matched(
         self, *, capabilities: list[dict[str, Any]] | None = None, policy: str = "pass-over", enrolled: bool = True
@@ -130,7 +136,7 @@ class MockRunnerService:
         ``enrolled=False`` drives the tokenless case, which the hub refuses ``401``."""
         self._apply_delay(None)
         status, body = self._gw.peek_matched(enrolled=enrolled, capabilities=capabilities or [], policy=policy)
-        return {"status": status, "response": body}
+        return self._observed(status, body)
 
     def claim(self, chunk_id: str, environment_ids: list[str]) -> dict[str, Any]:
         """Claim a chunk and record the held lease; report ``lease.minted`` (D-044)."""
@@ -143,7 +149,13 @@ class MockRunnerService:
             }
         )
         if status != 201:
-            return {"claimed": False, "status": status, "response": body}
+            return {
+                "claimed": False,
+                "status": status,
+                "response": body,
+                "headers": self._gw.last_response_headers(),
+                "refusal": self._gw.last_claim_refusal(),
+            }
         envelope = body.get("envelope", {})
         node_id = envelope.get("node", {}).get("node_id", "")
         held_epoch = int(envelope.get("epoch", 0)) + 1  # the real runner mints latest+1
@@ -160,7 +172,7 @@ class MockRunnerService:
         marked head and claims nothing instead."""
         status, body = self._gw.peek()
         if status != 200:
-            return {"claimed": False, "status": status, "response": body}
+            return {"claimed": False, **self._observed(status, body)}
         entry = self._select_next(body.get("entries", []), strict=strict)
         if entry is None:
             return {"claimed": False, "reason": "no unmarked entry in the peeked queue"}
@@ -226,24 +238,32 @@ class MockRunnerService:
             submission["route_token"] = route_token
         held.last_submission = submission
         status, body = self._gw.submit_completion(chunk_id, submission)
+        headers = self._gw.last_response_headers()
 
         replayed: dict[str, Any] | None = None
         if self._pull(RunnerLever.REPLAY, chunk_id):
             rstatus, rbody = self._gw.submit_completion(chunk_id, submission)  # duplicate delivery
-            replayed = {"status": rstatus, "response": rbody}
+            replayed = {"status": rstatus, "response": rbody, "headers": self._gw.last_response_headers()}
 
         if self._pull(RunnerLever.DROP_ACK, chunk_id):
             # Lose the ack: report over the wire but do not advance the held lease.
-            return {"drove": True, "dropped_ack": True, "status": status, "response": body, "replayed": replayed}
+            return {
+                "drove": True,
+                "dropped_ack": True,
+                "status": status,
+                "response": body,
+                "replayed": replayed,
+                "headers": headers,
+            }
 
         if status == 200:
             self._advance(chunk_id, body)
-        return {"drove": True, "status": status, "response": body, "replayed": replayed}
+        return {"drove": True, "status": status, "response": body, "replayed": replayed, "headers": headers}
 
     def get_chunk(self, chunk_id: str) -> dict[str, Any]:
         self._apply_delay(chunk_id)
         status, body = self._gw.get_chunk(chunk_id)
-        return {"status": status, "response": body}
+        return self._observed(status, body)
 
     def chunk_statuses(self, chunk_ids: list[str]) -> dict[str, Any]:
         """The runner tick's slim batch status read — not scoped to one chunk, so the
@@ -251,7 +271,7 @@ class MockRunnerService:
         ``peek``'s own ``None``-keyed delay."""
         self._apply_delay(None)
         status, body = self._gw.chunk_statuses(chunk_ids)
-        return {"status": status, "response": body}
+        return self._observed(status, body)
 
     def held(self, chunk_id: str) -> Held | None:
         return self._held.get(chunk_id)
@@ -298,7 +318,12 @@ class MockRunnerService:
             "detail": detail,
         }
         status, response = self._push_fact(ESCALATION_RECORDED, self._stamped(held, payload))
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def decide(self, chunk_id: str, choice: str | None = None) -> dict[str, Any]:
         """Submit a decision at the held node — a runner-config gate parks the chunk.
@@ -317,7 +342,12 @@ class MockRunnerService:
         if held.route_token is not None:
             body["route_token"] = held.route_token
         status, response = self._gw.submit_decision(chunk_id, body)
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def ask(
         self,
@@ -351,7 +381,13 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": QUESTION_ASKED, "payload": payload}],
             }
         )
-        return {"drove": True, "question_id": question_id, "status": status, "response": response}
+        return {
+            "drove": True,
+            "question_id": question_id,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def push_transcript(
         self,
@@ -390,13 +426,18 @@ class MockRunnerService:
             "turns": turn_list,
         }
         status, response = self._gw.push_transcripts({"records": [record]})
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def poll_answer(self, question_id: str) -> dict[str, Any]:
         """``GET /questions/{id}`` — the runner's answer poll."""
         self._apply_delay(None)
         status, response = self._gw.get_question(question_id)
-        return {"status": status, "response": response}
+        return self._observed(status, response)
 
     def pause(self, by: str = "operator", reason: str | None = None) -> dict[str, Any]:
         """Push a runner-scoped ``runner.locally_paused`` fact via ``/events`` (no
@@ -411,7 +452,7 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": RUNNER_LOCALLY_PAUSED, "payload": payload}],
             }
         )
-        return {"status": status, "response": response}
+        return self._observed(status, response)
 
     def resume(self, by: str = "operator") -> dict[str, Any]:
         """Push a runner-scoped ``runner.locally_resumed`` fact via ``/events`` (no
@@ -424,7 +465,7 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": RUNNER_LOCALLY_RESUMED, "payload": payload}],
             }
         )
-        return {"status": status, "response": response}
+        return self._observed(status, response)
 
     def report_event(
         self,
@@ -457,7 +498,12 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": EVENT_RECORDED, "payload": payload}],
             }
         )
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def report_external_usage(
         self,
@@ -482,7 +528,12 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_SAMPLED, "payload": payload}],
             }
         )
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     def report_external_usage_miss(
         self,
@@ -506,7 +557,12 @@ class MockRunnerService:
                 "facts": [{"seq": self._runner_seq, "kind": EXTERNAL_SUBSCRIPTION_USAGE_MISSED, "payload": payload}],
             }
         )
-        return {"drove": True, "status": status, "response": response}
+        return {
+            "drove": True,
+            "status": status,
+            "response": response,
+            "headers": self._gw.last_response_headers(),
+        }
 
     # -- internals ---------------------------------------------------------
 

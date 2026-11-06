@@ -114,6 +114,81 @@ def test_a_host_retires_a_runner_under_itself_and_no_other(client: FleetClient) 
     assert client.get("/api/fleet/identity", headers=_bearer(mine["token"])).status_code == 401
 
 
+def test_retirement_refuses_held_routes_and_force_releases_them(client: FleetClient) -> None:
+    host = _add(client)
+    headers = _bearer(host["token"])
+    runner = client.post("/api/fleet/host/runners", json={"name": "r"}, headers=headers).json()
+    runner_headers = _bearer(runner["token"])
+    assert (
+        client.post(
+            "/api/fleet/runners",
+            json={"workspace_id": "w1", "capabilities": [{"harness_id": "claude_code", "default": True}]},
+            headers=runner_headers,
+        ).status_code
+        == 201
+    )
+    chunk = client.post("/_seed/chunk", json={"entry": "b", "nodes": {"b": {"executor": "hub"}}}).json()["chunk_id"]
+    claim = client.post(
+        "/api/fleet/routes", json={"chunk_id": chunk, "environment_ids": ["env1"]}, headers=runner_headers
+    )
+    assert claim.status_code == 201, claim.text
+    path = f"/api/fleet/host/runners/{runner['runner_id']}/retire"
+    refused = client.post(path, json={}, headers=headers)
+    assert refused.status_code == 409
+    assert refused.headers["content-type"] == "application/problem+json"
+    assert refused.json()["type"] == "urn:blizzard:problem:runner-holds-routes"
+    assert f"{chunk} (environments: env1)" in refused.json()["detail"]
+    assert client.get("/api/fleet/identity", headers=runner_headers).status_code == 200
+    assert client.get(f"/api/fleet/chunks/{chunk}", headers=runner_headers).status_code == 200
+    client.post("/_levers/legacy_host_runner_refusals", json={"remaining": 1})
+    legacy = client.post(path, json={}, headers=headers)
+    assert legacy.json() == {"detail": refused.json()["detail"]}
+    retired = client.post(path, json={"force": True}, headers=headers)
+    assert retired.status_code == 200
+    assert retired.json()["released_chunk_ids"] == [chunk]
+    assert client.get("/api/fleet/identity", headers=runner_headers).status_code == 401
+    replacement = client.post("/api/fleet/host/runners", json={"name": "replacement"}, headers=headers).json()
+    replacement_headers = _bearer(replacement["token"])
+    assert client.get(f"/api/fleet/chunks/{chunk}", headers=replacement_headers).json()["status"] == "ready"
+    assert client.post(path, json={}, headers=headers).json()["released_chunk_ids"] == []
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_host_runner_refusals_and_legacy_wire_format(client: FleetClient, legacy: bool) -> None:
+    host = _add(client)
+    headers = _bearer(host["token"])
+    cases: list[tuple[str, dict[str, object], int, str, str]] = [
+        (
+            "/api/fleet/host/runners",
+            {"name": "r", "projects": ["missing"]},
+            422,
+            "unknown-served-project",
+            "Unknown served project",
+        ),
+        ("/api/fleet/host/runners/rn_missing/retire", {}, 404, "runner-not-found", "Runner not found"),
+    ]
+    for path, body, status, kind, title in cases:
+        if legacy:
+            assert client.post("/_levers/legacy_host_runner_refusals", json={"remaining": 1}).status_code == 200
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code == status
+        data = response.json()
+        if legacy:
+            assert response.headers["content-type"] == "application/json"
+            assert set(data) == {"detail"}
+            assert client.post(path, json=body, headers=headers).headers["content-type"] == "application/problem+json"
+        else:
+            assert response.headers["content-type"] == "application/problem+json"
+            assert data == {
+                "type": f"urn:blizzard:problem:{kind}",
+                "title": title,
+                "detail": data["detail"],
+                "instance": path,
+                "status": status,
+            }
+    assert client.get("/api/fleet/host", headers=headers).json()["runners"] == []
+
+
 def test_a_host_token_reaches_no_runner_route_and_a_runner_token_no_host_route(client: FleetClient) -> None:
     added = _add(client)
     runner = client.post("/api/runners", json={"name": "r"}).json()

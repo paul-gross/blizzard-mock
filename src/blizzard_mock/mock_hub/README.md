@@ -69,7 +69,7 @@ call the runner token decides the tenant: a header naming any other tenant is re
 and a header naming the token's own tenant is accepted. The identity read resolves no tenant
 and ignores the header. The operator routes act in the tenant the header names, answering
 **404** `no such tenant` for an id no tenant holds. With no header they act in the hub's only
-tenant, or answer **409** `{"code": "tenant_required"}` once it holds several. Questions, scopes and system
+tenant, or answer **409** `{"code": "tenant_required"}` once it holds several. Scopes and system
 artifacts stay one shared set, and chunks reach a tenant only through their project, so a
 scenario runs one tenant's work at a time.
 
@@ -115,13 +115,17 @@ refusal carries `reason: "capability"`.
 | Method + path | Purpose |
 |---------------|---------|
 | `GET /api/health`, `GET /api/ready` | Liveness / readiness |
-| `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks) — D-080 |
+| `GET /api/fleet/queue/peek` | The ready queue (seeded, unclaimed chunks); `project` resolves an id or current slug within the caller's tenant and filters without renumbering. Unknown projects return the **422** `unknown-project` problem; `legacy_read_refusals` restores the detail-only response. |
+| `GET /api/fleet/summary` | Tenant-wide fleet pulse: `ready`, `running` (including delivering), `waiting` (paused), and `needs` (needs human). The mock does not model `waiting_on_human`, which the real hub also counts as waiting. Counts include every project in the caller's tenant, not just projects it serves. Fleet authentication and tenant refusals use problem JSON, or detail-only JSON with `legacy_auth_refusals`. |
+| `GET /api/fleet/chunk-statuses` | Batch status read with required repeated `chunk_id` parameters; unknown and other-tenant chunks are omitted. Missing parameters return validation **422**. |
 | `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry of a project the caller serves, capability- and policy-filtered for the caller |
 | `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or an incompatible runner (`{chunk_id, incompatible_runner_id, detail, reason}`, `reason` `project` or `capability`) |
-| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **404** with no live route, **409** when the route sits on an ended chunk |
-| `POST /api/fleet/chunks/{id}/release` | The holding runner gives the route back: the chunk returns `ready` at its current node and the write is recorded on the chunk; **403** when the caller does not hold the route, **409** (`stale` or `not-running`) when the chunk refuses it, **404** for an unknown chunk |
-| `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions |
+| `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **403** for a different runner, **404** with no live route, **409** when the route sits on an ended chunk |
+| `POST /api/fleet/chunks/{id}/release` | The holding runner gives the route back: the chunk returns `ready` at its current node and the write is recorded on the chunk; **403** when the caller does not hold the route, **409** `stale` for any epoch other than the latest or `not-running` when the chunk is not running, **404** for an unknown chunk |
+| `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions; a chunk outside the caller's tenant is refused as unknown (**404**), with detail-only JSON under `legacy_read_refusals`. The same boundary applies to envelope, work-items (and pm-items), chunk-scoped scopes, garden, analytics and answered-findings reads, and to claim, release, pause, resume, completion, decision and hub-advance mutations. Route-token rekey instead reports no live route, as for an unknown chunk. Other chunk routes do not yet consistently enforce this tenant boundary. |
+| `POST /api/fleet/chunks/{id}/pause`, `POST /api/fleet/chunks/{id}/resume` | Runner's chunk-detail proxy: pause keeps the route and resumes the prior status; **404** for an unknown chunk, and pause refuses `done`, `stopped`, or `delivering` with **409** `chunk-not-pausable`. The mock collapses pause facts into status and resumes a chunk seeded as `paused` to `ready`; it does not derive intervening facts while paused. The summary contains the mock's available fields, with other fields left to client defaults. |
 | `GET /api/fleet/chunks/{id}/envelope` | The current node envelope, idempotent re-read (D-090); **409** once the chunk has ended (`done` or `stopped`) |
+| `POST /api/fleet/chunks/{id}/artifact-check` | Check `{name, content}` against the seeded graph's formats, returning **200** `{refusal: null}` or a delivery-format refusal string. Unknown or foreign chunks return typed **404**, a missing pinned graph typed **500**; `legacy_read_refusals` restores detail-only bodies. This read does not stage content. |
 | `GET /api/fleet/chunks/{id}/work-items` | Pass-through work items — canned per pointer, no forge integration |
 | `GET /api/fleet/chunks/{id}/garden/findings` | A worker-scoped read of the chunk's own routine's live finding bucket, or **404** for a chunk seeded with no `garden_run` |
 | `GET /api/fleet/chunks/{id}/findings` | The findings the chunk's own accepted, minted garden proposal answers, or **404** for a chunk seeded with no `garden_answered_findings` |
@@ -131,19 +135,22 @@ refusal carries `reason: "capability"`.
 | `POST /api/fleet/chunks/{id}/hub-advance` | Drive a chunk parked at a hub-executor node one step (#65/#66) |
 | `POST /api/fleet/events` | Batched runner-fact push (full vocabulary, §Batched fact push below) |
 | `POST /api/fleet/transcripts` | Batched transcript-segment push — retained by lease; a record whose `(chunk_id, epoch)` another runner minted is listed in `refused`, never stored |
-| `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, concatenated across every stored record |
+| `GET /api/fleet/chunks/{id}/transcript-segments` | A lease's retained transcript, excluding superseded segments; **403** when another runner shipped a record, including a capped one. `truncated` is true when a visible record was capped or declared `record_truncated`; an empty unrecorded lease is not truncated. Re-adjudicating a rejected key replaces its identity and cap outcome. |
 | `POST /api/fleet/runners`, `GET /api/fleet/runners/{id}` | Register the caller (name, workspace, federation identity, `env_capacity`, `projects`, `bindings`, `subscription`, `agents`, `declining`, `version`) → `{runner_id, runner_name, first_registration, tenant_id, tenant_name, projects, bindings, subscription, subscription_unrostered, hub_version, window}`, `hub_version` `0.2.0` and `window` `{floor: "0.2", ceiling: "0.2"}`; `version` is accepted and never judged, so only the `version_refused` lever refuses it **409** `{reason, runner_version, hub_version, floor, detail}`, recording nothing / read the caller's own mirrored `RunnerView` — both brakes (D-070/D-043) and its report; **403** for another runner's id — an id never added included — and **409** before the first registration |
+| `GET /api/fleet/runners/{id}/decisions` | Runner's gate-decisions proxy: **403** `runner-ownership` for another id, including an unknown id; `legacy_read_refusals` restores detail-only JSON. Own-id reads return an empty `decisions` list: the mock parks gates but does not retain decision rows for this read. |
+| `POST /api/fleet/runners/{id}/heartbeats` | Refresh the caller's `last_seen_at` and return **204**; another id is refused **403** `runner-ownership`, and the caller before registration is refused **404** `runner-not-found`. `legacy_read_refusals` restores detail-only responses. |
 | `GET /api/fleet/identity` | The caller's `{runner_id, runner_name, tenant_id, tenant_name}`, or **401** `{reason, runner_id}` with `reason` one of `missing`, `unknown`, `revoked`, `retired` (retired outranks revoked); registers nothing |
 | `POST /api/runners` | Add a runner under a non-blank `name` in the request's tenant, serving the `projects` named → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name or a `projects` entry no project of the tenant answers to, plus the tenant refusals above |
 | `POST /api/hosts` | Add a host under a non-blank `name` in the request's tenant, `adopt` placing existing runners under it → **201** `{host_id, host_name, token, adopted}`, the token returned once; **409** for a name a live host of the tenant holds or an adopted runner under a host or retired, **404** for an adopted runner the tenant does not hold, **422** for a blank name; nothing is added on a refusal |
 | `POST /api/fleet/host`, `GET /api/fleet/host` | Report the calling host (`name`, `url`, `redirect_uris`, `workspaces`, `subscriptions`, the last two replaced whole, and `version`, accepted and never judged) / read its own record → `{host_id, tenant_id, host_name, registered_at, last_seen_at, runners}`, `runners` holding the `{runner_id, runner_name}` of each runner under it that is not retired. A blank name, or one another live host of the tenant holds, keeps the held name |
 | `POST /api/fleet/host/events` | Push the calling host's own facts → `{host_id, high_water, applied, already_applied, rejected}`, against a mark of the host's own that no runner's push moves. Only the two usage kinds (`external_subscription_usage.sampled` / `.missed`) are applied, each stored per slug on the host's row; any other kind, or a usage fact without a `slug` (a miss also needs a `reason`), is rejected and holds the mark behind it |
 | `POST /api/fleet/host/runners` | Add a runner under the calling host, in the host's tenant → **201** `{runner_id, runner_name, token}`, the token returned once; **422** for a blank name or a `projects` entry no project answers to |
-| `POST /api/fleet/host/runners/{id}/retire` | Retire a runner under the calling host, revoking its token → **200** `{runner, released_chunk_ids}` with `runner` holding `runner_id`, `runner_name`, `retired`, `retired_by` and `host_id` alone and `released_chunk_ids` always empty, since the mock holds no routes to refuse over or release; **404** for a runner not under the calling host |
+| `POST /api/fleet/host/runners/{id}/retire` | Retire a runner under the calling host, revoking its token → **200** `{runner, released_chunk_ids}`; **404** for a runner not under the calling host; **409** `runner-holds-routes` when it holds routes and `force` is false. Forced retirement releases its held routes and returns their chunk ids. |
 | `GET /api/me` | The implicit operator of a hub without sign-in → `{user_id, username, display_name, role, permissions, assignable_roles, tenants, hub_admin}`, `tenants` holding every tenant ordered by id as `{tenant_id, name, role: "admin", permissions}`; `role` is the tenant `X-Blizzard-Tenant` names, else the only one's, else `null`; `permissions` lists are empty |
 | `POST /api/runners/{id}/enrollments` | Rotate the runner's token → **201** with the new token; **404** for an id never added in the request's tenant, **409** for a retired runner |
-| `GET /api/fleet/questions/{id}` | The runner's answer poll |
-| `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first |
+| `GET /api/fleet/questions/{id}` | The runner's answer poll; a question in another tenant is unknown (**404**), with detail-only JSON under `legacy_read_refusals`. |
+| `GET /api/fleet/scopes` | The deployment's scope vocabulary, newest first; `chunk_id` checks the chunk exists, returning a typed **404** if unknown. Scopes remain shared rather than project-filtered |
+| `GET /api/fleet/system-artifacts/{name}` | A seeded system artifact by name, including slash-bearing names; typed **404** if missing |
 
 ## Batched fact push (`POST /api/fleet/events`)
 
@@ -193,7 +200,9 @@ to either a sample or a miss.
   field list (work refs and graph-scoped artifacts included, both riding into the
   claim envelope alongside the node graph); notably, each node's
   `prompt`/`judgement_prompt` rides straight into the envelope, and `choices` names
-  the `to` node. `garden_run` (`{routine_name, scope_slug}`) and `garden_findings`
+  the `to` node. `artifact_formats` maps artifact names to lists of `finding-delta` and/or
+  `garden-proposal-candidate`, representing the formats the real graph's delivery actions owe;
+  omitted names owe no format. `garden_run` (`{routine_name, scope_slug}`) and `garden_findings`
   (each mirroring the real hub's `FindingView` fields, minus `routine_name`/
   `scope_slug`, which `garden_run` supplies) seed the chunk's own garden bucket —
   omitted, the chunk carries no run context, mirroring a chunk that is not a routine
@@ -276,6 +285,20 @@ to either a sample or a miss.
 | `stale_envelope` | — | `GET /chunks/{id}/envelope` stamps a stale (`latest_epoch-1`) fence, so a completion from it is fenced out (D-007) |
 | `chunk_unknown` | — | `GET /chunks/{id}` and `GET /chunks/{id}/envelope` 404 as an unknown chunk — the runner's env-release trigger — without deleting the chunk's actual state |
 | `dependency_unmet` | `{prerequisite_chunk_id}` | `POST /routes` denies the claim, naming `prerequisite_chunk_id` as the unmet dependency; `GET /queue/peek` marks the same chunk `blocked`, read without consuming — sticky until cleared |
+| `legacy_claim_refusals` | — | Claim refusals use the older `application/json` body without problem members; scoped and self-expiring like other levers |
+| `legacy_identity_refusals` | — | Identity refusals use the older `application/json` body without problem members; self-expiring on affected refusals |
+| `legacy_version_refusals` | — | Registration version refusals use the older `application/json` body without problem members; self-expiring on affected refusals |
+| `legacy_rekey_refusals` | — | Route-token rekey refusals use detail-only `application/json`; scoped and self-expiring on affected refusals |
+| `legacy_read_refusals` | — | Resource read, release and host bootstrap refusals use their older `application/json` bodies; scoped by chunk when applicable and self-expiring on affected refusals |
+| `enforce_release_route_token` | — | Enforce the live route token on release before holder and epoch checks; scoped by chunk and sticky. Unarmed, release retains the default permissive token behavior. |
+| `legacy_host_runner_refusals` | — | Host runner add unknown-project and retire unknown-runner or held-route refusals use detail-only `application/json`; self-expiring on affected refusals |
+| `legacy_auth_refusals` | — | Fleet credential and tenant dependency refusals use the older detail-only `application/json`; self-expiring on affected refusals |
+| `runner_read_missing` | — | Simulate the authenticated runner disappearing before its own read; returns `runner-not-found` without changing state. |
+| `host_add_runner_lifecycle_conflict` | `{runner_id?}` | Simulate an adopted runner changing between read and host add; only a valid matching adoption is affected, and nothing is written. |
+| `host_retire_lifecycle_conflict` | `{runner_id?, interrupted?}` | Simulate a lifecycle race on host runner retirement. Normally nothing is written; with `interrupted: true` and a held route, retirement and token revocation land before release is interrupted. The host-runner legacy lever restores detail-only responses. |
+| `claim_runner_retired` | `{runner_id?}` | Refuse a claim as a retired runner without changing its registration or token |
+| `claim_runner_version_refused` | `{runner_id?}` | Refuse a claim as a runner with no version outside the hub's window, without changing its registration |
+| `pinned_graph_missing` | — | An existing chunk's claim, envelope, artifact-check, completion, decision and hub-advance answer the `pinned-graph-missing` 500 problem. The refusal precedes state checks and writes, is scoped and self-expiring; unknown chunks remain 404 and do not consume it. `legacy_read_refusals` restores the detail-only body except on claim |
 | `host_plane_absent` | — | Every route under `/api/fleet/host` answers `404 {"detail": "Not Found"}` — a hub from before hosts; every other route, `POST /api/hosts` included, is unaffected. Sticky until cleared. The startup switch (`--no-host-plane`) does the same for the process's life, surviving `/_levers/reset` and `/_seed/reset` |
 | `idp_offered` | — | `GET /api/auth/jwks.json` answers `200 {"keys": []}` — a hub offering an IdP; while unarmed the route is absent (`404`). Sticky until cleared. The startup switch (`--offer-idp`) does the same for the process's life, surviving `/_levers/reset` — so it holds before a runner's first boot |
 | `fleet_flags` | `{<flag>: bool, …}` | `GET /api/fleet/identity` answers the payload as its `fleet_flags` map; `{}` while unarmed. Global and sticky — arming again replaces the map, `DELETE /_levers/fleet_flags` clears it |
@@ -285,6 +308,54 @@ to either a sample or a miss.
 Every lever is optionally scoped to one `chunk_id` and may self-expire after
 `remaining` affected requests. The control plane and liveness are exempt from the
 transport-edge levers so a test can always steer and gate on startup.
+
+By default claim refusals use `application/problem+json` with a `urn:blizzard:problem:claim-*`
+type, title, detail and instance. Terminal and not-ready refusals retain their string chunk
+`status`; conflict, dependency and incompatible refusals omit `status` entirely. Paused and
+unregistered refusals carry HTTP status 403 as a number. Legacy fields remain present.
+An unknown chunk answers the `chunk-not-found` problem with HTTP status 404, or the
+older detail-only JSON body when the legacy lever is armed. The two runner-refusal levers
+optionally target a runner id as well as a chunk; they simulate a refusal without retiring
+the runner or changing the registration's reported version.
+
+Identity refusals default to `application/problem+json` with type `urn:blizzard:problem:runner-identity`,
+retaining `reason` and `runner_id`; the identity lever serves the older no-type body instead.
+
+Registration version refusals default to `application/problem+json` with type
+`urn:blizzard:problem:runner-version`, retaining `reason`, `runner_version`, `hub_version`,
+`floor` and `detail`; the legacy version lever serves those fields without problem members.
+
+Route-token rekey refusals default to problem JSON, with types `route-not-held` (403), `route-not-found` (404)
+and `route-terminal` (409) under `urn:blizzard:problem:`. An unknown chunk and an unclaimed chunk both report
+`chunk <id> has no live route`. The legacy rekey lever returns
+the same status and detail without problem members. Ownership is checked before terminal status and a refusal never rotates the token.
+
+Host runner add unknown-project and retire unknown-runner refusals default to problem JSON,
+with types `unknown-served-project` and `runner-not-found` under `urn:blizzard:problem:`.
+Held-route retire refusals use `runner-holds-routes`. The retirement race lever also supplies `runner-lifecycle-conflict` and `runner-retire-interrupted`. A retry of an already-retired runner releases any remaining routes without force and preserves the original retirement attribution; the interrupted lever stops before the first release.
+
+Fleet credential and tenant dependency refusals use typed problem JSON by default. Envelope
+unknown-chunk and no-current-node refusals, and release unknown-chunk, not-holder and
+stale/not-running refusals, also use typed problems; `legacy_read_refusals` restores their
+previous bodies, including the release reason fields.
+The same read lever also restores detail-only responses for unknown chunks on completion,
+decision, hub-advance, pause and resume requests, for a not-pausable chunk, and for runner ownership and unregistered-runner reads.
+
+Garden, analytics, answered-finding and question reads return typed problems for unknown
+chunks, missing run context or answered proposals, findings outside the answered set, and
+unknown questions. Malformed garden proposal cursors return a `malformed-cursor` problem
+without echoing the cursor; request-validation 422s remain ordinary JSON. The read lever
+restores the detail-only legacy response for each of these refusals.
+It also restores the detail-only 403 for a foreign lease transcript read; an empty lease is readable by any runner.
+
+Host bootstrap name conflicts, missing adopted runners and already-hosted runners also
+return typed problems; the read lever restores their previous detail-only bodies.
+Runner credentials are forbidden on host bootstrap. Host credentials naming a different
+tenant are refused for the mismatch; other host credentials are forbidden. The auth lever
+restores detail-only bodies for these credential refusals.
+Adopting a retired runner returns `runner-retired` (409), even if it is also hosted; the
+legacy read lever restores its detail-only response. Adoption checks precede a host name
+conflict, and a refused add creates no host or adoption.
 
 ## Architecture
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 import httpx2 as httpx
 import pytest
@@ -272,6 +272,29 @@ def _claim_and_fence(client: TestClient, chunk_id: str, *, epoch: int = 1) -> No
     assert epoch in body["applied"]
 
 
+def test_rekey_refuses_foreign_runner_without_rotating(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+    client.post("/_seed/runners", json={"name": "r2", "runner_id": "r2", "token": runner_token("r2")})
+    foreign = runner_token("r2")
+    path = f"/api/fleet/chunks/{chunk_id}/route-token"
+    headers = {"Authorization": f"Bearer {foreign}"}
+    denial = client.post(path, headers=headers)
+    assert denial.status_code == 403
+    assert denial.headers["content-type"] == "application/problem+json"
+    assert denial.json()["type"] == "urn:blizzard:problem:route-not-held"
+    assert denial.json()["instance"] == path
+    client.post("/_levers/legacy_rekey_refusals", json={"remaining": 1})
+    legacy = client.post(path, headers=headers)
+    assert legacy.status_code == 403
+    assert legacy.json() == {"detail": denial.json()["detail"]}
+    assert client.post(path, headers=headers).headers["content-type"] == "application/problem+json"
+    owner = runner_token("r1")
+    rekey = client.post(path, headers={"Authorization": f"Bearer {owner}"})
+    assert rekey.status_code == 200
+    assert rekey.json()["route_token"].endswith("-rekey1")
+
+
 # --- happy path -------------------------------------------------------------
 
 
@@ -458,17 +481,100 @@ def test_a_release_frees_the_claim_at_the_current_node_and_records_the_write(cli
     assert [(r.runner_id, r.epoch, r.reason) for r in chunk.releases] == [("r1", 1, "throttled")]
 
 
-def test_a_release_at_a_stale_epoch_answers_409_stale(client: TestClient) -> None:
+@pytest.mark.parametrize("epoch", [1, 3])
+def test_a_release_at_a_different_epoch_answers_409_stale(client: TestClient, epoch: int) -> None:
     chunk_id = _seed(client)
     _claim_and_fence(client, chunk_id, epoch=2)
+    service = _service(client)
+    chunk = service.state.get_chunk(chunk_id)
+    assert chunk is not None
+    before = chunk.model_dump()
+    path = f"/api/fleet/chunks/{chunk_id}/release"
 
-    refused = _release(client, chunk_id, epoch=1)
+    refused = _release(client, chunk_id, epoch=epoch)
 
     assert refused.status_code == 409
-    refused_body: dict[str, object] = refused.json()
-    assert refused_body["reason"] == "stale"
-    detail: dict[str, object] = client.get(f"/api/fleet/chunks/{chunk_id}").json()
-    assert detail["status"] == "running"
+    assert refused.headers["content-type"] == "application/problem+json"
+    assert refused.json() == {
+        "type": "urn:blizzard:problem:release-refusal",
+        "title": "Release refused",
+        "detail": f"chunk {chunk_id}: release refused: stale",
+        "instance": path,
+        "status": 409,
+        "chunk_id": chunk_id,
+        "reason": "stale",
+    }
+    assert chunk.model_dump() == before
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = _release(client, chunk_id, epoch=epoch)
+    assert legacy.status_code == 409
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"chunk_id": chunk_id, "reason": "stale", "detail": refused.json()["detail"]}
+    assert chunk.model_dump() == before
+    assert _release(client, chunk_id, epoch=2).status_code == 200
+
+
+@pytest.mark.parametrize("status", [ChunkStatus.DONE, ChunkStatus.STOPPED])
+@pytest.mark.parametrize("epoch", [1, 99])
+def test_a_terminal_route_is_not_held_for_release(client: TestClient, status: ChunkStatus, epoch: int) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    service = _service(client)
+    chunk = service.state.get_chunk(chunk_id)
+    assert chunk is not None
+    chunk.status = status
+    assert chunk.claimed and chunk.route_runner_id == "r1"
+    before = chunk.model_dump()
+    path = f"/api/fleet/chunks/{chunk_id}/release"
+    detail = f"chunk {chunk_id}: release refused: not-holder"
+
+    refused = _release(client, chunk_id, epoch=epoch)
+    assert refused.status_code == 403
+    assert refused.headers["content-type"] == "application/problem+json"
+    assert refused.json() == {
+        "type": "urn:blizzard:problem:route-not-held",
+        "title": "Route not held",
+        "detail": detail,
+        "instance": path,
+        "status": 403,
+    }
+    assert chunk.model_dump() == before
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = _release(client, chunk_id, epoch=epoch)
+    assert legacy.status_code == 403
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": detail}
+    assert chunk.model_dump() == before
+
+
+def test_a_release_of_a_paused_chunk_answers_not_running(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    service = _service(client)
+    chunk = service.state.get_chunk(chunk_id)
+    assert chunk is not None
+    chunk.status = ChunkStatus.PAUSED
+    before = chunk.model_dump()
+    path = f"/api/fleet/chunks/{chunk_id}/release"
+
+    refused = _release(client, chunk_id)
+    assert refused.status_code == 409
+    assert refused.headers["content-type"] == "application/problem+json"
+    assert refused.json() == {
+        "type": "urn:blizzard:problem:release-refusal",
+        "title": "Release refused",
+        "detail": f"chunk {chunk_id}: release refused: not-running",
+        "instance": path,
+        "status": 409,
+        "chunk_id": chunk_id,
+        "reason": "not-running",
+    }
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = _release(client, chunk_id)
+    assert legacy.status_code == 409
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"chunk_id": chunk_id, "reason": "not-running", "detail": refused.json()["detail"]}
+    assert chunk.model_dump() == before
 
 
 def test_a_release_by_a_runner_not_holding_the_route_answers_403(client: TestClient) -> None:
@@ -489,7 +595,17 @@ def test_a_release_of_an_unknown_chunk_answers_404(client: TestClient) -> None:
 
 def test_rekey_route_token_404s_on_an_unclaimed_chunk(client: TestClient) -> None:
     chunk_id = _seed(client)
-    assert client.post(f"/api/fleet/chunks/{chunk_id}/route-token").status_code == 404
+    path = f"/api/fleet/chunks/{chunk_id}/route-token"
+    response = client.post(path)
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "urn:blizzard:problem:route-not-found",
+        "title": "Route not found",
+        "detail": f"chunk {chunk_id} has no live route",
+        "instance": path,
+        "status": 404,
+    }
 
 
 def test_registry_register_and_pause_readback(client: TestClient) -> None:
@@ -1039,14 +1155,16 @@ def test_matched_peek_refuses_401_without_a_token(client: TestClient) -> None:
     _seed(client)
     resp = TestClient(client.app).post("/api/fleet/queue/peek", json={})
     assert resp.status_code == 401, resp.text
-    assert resp.json() == {"detail": "missing or malformed Authorization header"}
+    assert resp.json()["detail"] == "missing or malformed Authorization header"
+    assert resp.json()["type"] == "urn:blizzard:problem:authentication-required"
 
 
 def test_matched_peek_refuses_401_for_a_token_the_hub_never_issued(client: TestClient) -> None:
     _seed(client)
     resp = client.post("/api/fleet/queue/peek", headers={"Authorization": "Bearer ghost"}, json={})
     assert resp.status_code == 401, resp.text
-    assert resp.json() == {"detail": "bearer token does not resolve to a known runner"}
+    assert resp.json()["detail"] == "bearer token does not resolve to a known runner"
+    assert resp.json()["type"] == "urn:blizzard:problem:authentication-unresolved"
 
 
 def test_matched_peek_answers_an_added_runner_that_has_never_registered(client: TestClient) -> None:
@@ -1144,7 +1262,7 @@ def test_claim_denied_once_capabilities_regress_between_registration_and_claim(c
 # --- levers -----------------------------------------------------------------
 
 
-def test_lever_catalog_lists_all_fifteen(client: TestClient) -> None:
+def test_lever_catalog_lists_all_levers(client: TestClient) -> None:
     body: dict[str, dict[str, object]] = client.get("/_levers").json()
     catalog = body["catalog"]
     assert set(catalog) == {
@@ -1163,6 +1281,20 @@ def test_lever_catalog_lists_all_fifteen(client: TestClient) -> None:
         "fleet_flags",
         "idp_offered",
         "version_refused",
+        "legacy_claim_refusals",
+        "legacy_identity_refusals",
+        "legacy_version_refusals",
+        "legacy_rekey_refusals",
+        "legacy_read_refusals",
+        "legacy_host_runner_refusals",
+        "legacy_auth_refusals",
+        "claim_runner_retired",
+        "claim_runner_version_refused",
+        "pinned_graph_missing",
+        "enforce_release_route_token",
+        "runner_read_missing",
+        "host_add_runner_lifecycle_conflict",
+        "host_retire_lifecycle_conflict",
     }
 
 
@@ -2575,6 +2707,166 @@ def _turn_with_text(text: str, *, index: int = 0) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_retired_current_token_fleet_gate_and_claim(legacy: bool) -> None:
+    app = create_app()
+    client = TestClient(app)
+    runner = client.post("/api/runners", json={"name": "owner"}).json()
+    runner_id = runner["runner_id"]
+    headers = {"Authorization": f"Bearer {runner['token']}"}
+    chunk = client.post("/_seed/chunk", json=_SPEC).json()["chunk_id"]
+    path = f"/api/fleet/chunks/{chunk}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    record = _transcript_record(chunk, seq=1)
+    assert client.post("/api/fleet/transcripts", headers=headers, json={"records": [record]}).json()["applied"] == [1]
+    before = client.get(path, headers=headers, params=params).json()
+    row = app.state.service._state.get_runner(runner_id)
+    assert row is not None
+    row.retired_at = datetime.now(UTC)
+    assert app.state.service._state.runner_for_token(runner["token"]) is row
+
+    calls: list[tuple[str, str, dict[str, Any]]] = [
+        ("GET", path, {"params": params}),
+        ("POST", "/api/fleet/transcripts", {"json": {"records": [_transcript_record(chunk, seq=2)]}}),
+        ("GET", "/api/fleet/queue/peek", {}),
+    ]
+    for method, url, kwargs in calls:
+        if legacy:
+            assert client.post("/_levers/legacy_auth_refusals", json={"remaining": 1}).status_code == 200
+        response = client.request(method, url, headers=headers, **kwargs)
+        assert response.status_code == 403
+        assert response.json()["detail"] == f"runner {runner_id} is retired — fleet call refused; `reinstate` it first"
+        if not legacy:
+            assert response.json()["type"] == "urn:blizzard:problem:runner-retired"
+        else:
+            assert set(response.json()) == {"detail"}
+
+    missing = client.post("/api/fleet/routes", headers=headers, json={"chunk_id": "missing"})
+    assert missing.status_code == 404
+    assert missing.json()["type"] == "urn:blizzard:problem:chunk-not-found"
+    assert client.post("/_levers/pinned_graph_missing", json={"chunk_id": chunk, "remaining": 1}).status_code == 200
+    graph_missing = client.post("/api/fleet/routes", headers=headers, json={"chunk_id": chunk})
+    assert graph_missing.status_code == 500
+    assert graph_missing.json()["type"] == "urn:blizzard:problem:pinned-graph-missing"
+
+    if legacy:
+        assert client.post("/_levers/legacy_claim_refusals", json={"remaining": 1}).status_code == 200
+    claim = client.post("/api/fleet/routes", headers=headers, json={"chunk_id": chunk})
+    assert claim.status_code == 403
+    assert claim.json()["runner_id"] == runner_id
+    if not legacy:
+        assert claim.json()["type"] == "urn:blizzard:problem:claim-runner-retired"
+    else:
+        assert "type" not in claim.json()
+    row.retired_at = None
+    assert client.get(path, headers=headers, params=params).json() == before
+    assert client.post(
+        "/api/fleet/transcripts", headers=headers, json={"records": [_transcript_record(chunk, seq=2)]}
+    ).json()["applied"] == [2]
+
+
+def test_normal_retirement_revokes_token_before_fleet_gate() -> None:
+    client = TestClient(create_app())
+    runner = client.post("/api/runners", json={"name": "owner"}).json()
+    headers = {"Authorization": f"Bearer {runner['token']}"}
+    assert client.post(f"/_seed/runners/{runner['runner_id']}/retire", json={}).status_code == 200
+    calls: list[tuple[str, str, dict[str, Any]]] = [
+        ("GET", "/api/fleet/queue/peek", {}),
+        ("POST", "/api/fleet/transcripts", {"json": {"records": []}}),
+        ("POST", "/api/fleet/routes", {"json": {"chunk_id": "missing"}}),
+    ]
+    for method, path, kwargs in calls:
+        response = client.request(method, path, headers=headers, **kwargs)
+        assert response.status_code == 401
+        assert response.json()["type"] == "urn:blizzard:problem:authentication-revoked"
+    assert client.get("/api/fleet/identity", headers=headers).json()["reason"] == "retired"
+
+
+def test_transcripts_are_isolated_by_tenant_for_reads_fences_and_natural_keys() -> None:
+    client = TestClient(create_app())
+    owner = client.post("/api/runners", json={"name": "owner"}).json()
+    peer = client.post("/api/runners", json={"name": "peer"}).json()
+    tenant = client.post("/_seed/tenants", json={"name": "other"}).json()["tenant_id"]
+    foreign = client.post("/api/runners", headers={"X-Blizzard-Tenant": tenant}, json={"name": "foreign"}).json()
+
+    def headers(runner: dict[str, str]) -> dict[str, str]:
+        return {"Authorization": f"Bearer {runner['token']}"}
+
+    chunk = client.post("/_seed/chunk", json=_SPEC).json()["chunk_id"]
+    path = f"/api/fleet/chunks/{chunk}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    fact = {"seq": 1, "kind": "lease.minted", "payload": {"chunk_id": chunk, "epoch": 1}}
+    assert client.post("/api/fleet/events", headers=headers(owner), json={"facts": [fact]}).json()["applied"] == [1]
+    record = _transcript_record(chunk, seq=1, turns=[_turn_with_text("owner")])
+    assert client.post("/api/fleet/transcripts", headers=headers(owner), json={"records": [record]}).json()[
+        "applied"
+    ] == [1]
+    before = client.get(path, headers=headers(owner), params=params).json()
+    assert before["turns"][0]["text"] == "owner"
+    assert client.get(path, headers=headers(peer), params=params).status_code == 403
+    empty = client.get(path, headers=headers(foreign), params=params)
+    assert empty.status_code == 200
+    assert empty.json()["turns"] == []
+    assert empty.json()["truncated"] is False
+
+    # The other tenant's same natural key and lease coordinates are independent, including the fence.
+    other_record = _transcript_record(chunk, seq=1, turns=[_turn_with_text("foreign")])
+    ack = client.post("/api/fleet/transcripts", headers=headers(foreign), json={"records": [other_record]}).json()
+    assert ack["applied"] == [1] and ack["refused"] == []
+    assert client.get(path, headers=headers(foreign), params=params).json()["turns"][0]["text"] == "foreign"
+    assert client.get(path, headers=headers(owner), params=params).json() == before
+    assert client.post("/api/fleet/transcripts", headers=headers(foreign), json={"records": [other_record]}).json()[
+        "already_applied"
+    ] == [1]
+
+
+def test_transcript_capped_key_does_not_cross_tenants() -> None:
+    client = TestClient(create_app())
+    owner = client.post("/api/runners", json={"name": "owner"}).json()
+    tenant = client.post("/_seed/tenants", json={"name": "other"}).json()["tenant_id"]
+    foreign = client.post("/api/runners", headers={"X-Blizzard-Tenant": tenant}, json={"name": "foreign"}).json()
+    owner_headers = {"Authorization": f"Bearer {owner['token']}"}
+    foreign_headers = {"Authorization": f"Bearer {foreign['token']}"}
+    record = _transcript_record("shared", seq=1, turns=[_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1))])
+    assert client.post("/api/fleet/transcripts", headers=owner_headers, json={"records": [record]}).json()[
+        "capped"
+    ] == [1]
+    path = "/api/fleet/chunks/shared/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    assert client.get(path, headers=owner_headers, params=params).json()["truncated"] is True
+    assert client.get(path, headers=foreign_headers, params=params).json()["truncated"] is False
+    record["turns"] = [_turn_with_text("small")]
+    assert client.post("/api/fleet/transcripts", headers=foreign_headers, json={"records": [record]}).json()[
+        "applied"
+    ] == [1]
+    assert client.get(path, headers=foreign_headers, params=params).json()["turns"][0]["text"] == "small"
+    assert client.get(path, headers=owner_headers, params=params).json()["truncated"] is True
+
+
+def test_transcript_chunk_budget_is_per_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
+    from blizzard_mock.mock_hub.domain import service
+
+    client = TestClient(create_app())
+    owner = client.post("/api/runners", json={"name": "owner"}).json()
+    tenant = client.post("/_seed/tenants", json={"name": "other"}).json()["tenant_id"]
+    foreign = client.post("/api/runners", headers={"X-Blizzard-Tenant": tenant}, json={"name": "foreign"}).json()
+    owner_headers = {"Authorization": f"Bearer {owner['token']}"}
+    foreign_headers = {"Authorization": f"Bearer {foreign['token']}"}
+    turns = [_turn_with_text("hello")]
+    monkeypatch.setattr(service, "_TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES", len(json.dumps(turns).encode()) + 1)
+    first = _transcript_record("shared", seq=1, turns=turns)
+    second = _transcript_record("shared", seq=2, segment_id="sg_2", turns=turns)
+    assert client.post("/api/fleet/transcripts", headers=owner_headers, json={"records": [first]}).json()[
+        "applied"
+    ] == [1]
+    assert client.post("/api/fleet/transcripts", headers=owner_headers, json={"records": [second]}).json()[
+        "capped"
+    ] == [2]
+    assert client.post("/api/fleet/transcripts", headers=foreign_headers, json={"records": [first]}).json()[
+        "applied"
+    ] == [1]
+
+
 def test_transcripts_rejects_a_turn_with_an_unrecognized_shape(client: TestClient) -> None:
     """``turns`` used to be a freeform ``list[dict]`` here — a real field
     rename on the wire (e.g. a turn's ``text`` renamed) would have shipped green through
@@ -2904,6 +3196,154 @@ def test_transcripts_reapplying_an_accepted_key_under_a_fresh_seq_does_not_recre
 
 
 # --- lease-transcript read --------------------------------------
+
+
+def test_capped_transcript_establishes_read_ownership(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    record = _transcript_record(chunk_id, seq=1, turns=[_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1))])
+    assert client.post("/api/fleet/transcripts", json={"records": [record]}).json()["capped"] == [1]
+    other = _bearer(_add(client)["token"])
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    own = client.get(path, params=params)
+    assert own.status_code == 200
+    assert own.json()["turns"] == []
+    assert own.json()["truncated"] is True
+    modern = client.get(path, params=params, headers=other)
+    assert modern.status_code == 403
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json()["type"] == "urn:blizzard:problem:lease-ownership"
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = client.get(path, params=params, headers=other)
+    assert legacy.status_code == 403
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": modern.json()["detail"]}
+    empty = client.get(path, params={"node_id": "other", "epoch": 1}, headers=other)
+    assert empty.status_code == 200
+    assert empty.json()["turns"] == []
+    assert empty.json()["truncated"] is False
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_re_adjudicated_transcript_moves_record_ownership(client: TestClient, accepted: bool) -> None:
+    chunk_id = _seed(client)
+    huge = [_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1))]
+    original = _transcript_record(chunk_id, seq=1, turns=huge)
+    assert client.post("/api/fleet/transcripts", json={"records": [original]}).json()["capped"] == [1]
+    # A separate record keeps the original lease owned when the first key moves.
+    second = _transcript_record(chunk_id, seq=2, segment_id="sg_2", turns=huge)
+    assert client.post("/api/fleet/transcripts", json={"records": [second]}).json()["capped"] == [2]
+    moved = _transcript_record(chunk_id, seq=3, node_id="review", turns=None if accepted else huge)
+    if accepted:
+        moved["turns"] = [_turn_with_text("moved")]
+    ack = client.post("/api/fleet/transcripts", json={"records": [moved]}).json()
+    assert ack["applied" if accepted else "capped"] == [3]
+    other = _bearer(_add(client)["token"])
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    assert client.get(path, params={"node_id": "build", "epoch": 1}).json()["truncated"] is True
+    assert client.get(path, params={"node_id": "review", "epoch": 1}).json()["truncated"] is (not accepted)
+    for node in ("build", "review"):
+        assert client.get(path, params={"node_id": node, "epoch": 1}, headers=other).status_code == 403
+    # Moving the remaining key removes ownership of the old lease.
+    second["seq"] = 4
+    second["node_id"] = "review"
+    assert client.post("/api/fleet/transcripts", json={"records": [second]}).json()["capped"] == [4]
+    assert client.get(path, params={"node_id": "build", "epoch": 1}, headers=other).status_code == 200
+    assert client.get(path, params={"node_id": "build", "epoch": 1}).json()["truncated"] is False
+    assert client.get(path, params={"node_id": "review", "epoch": 1}).json()["truncated"] is True
+
+
+def test_lease_transcript_truncation_re_adjudication_and_supersession(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    huge = [_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1))]
+
+    def read() -> dict[str, object]:
+        return cast(dict[str, object], client.get(path, params=params).json())
+
+    def push(record: dict[str, object]) -> dict[str, object]:
+        return cast(dict[str, object], client.post("/api/fleet/transcripts", json={"records": [record]}).json())
+
+    assert push(_transcript_record(chunk_id, seq=1, turns=huge))["capped"] == [1]
+    assert read()["truncated"] is True
+    assert push(_transcript_record(chunk_id, seq=2, record_truncated=True))["applied"] == [2]
+    assert read()["truncated"] is True
+    # Accepted keys do not re-adjudicate even when re-offered without the declaration.
+    assert push(_transcript_record(chunk_id, seq=3))["applied"] == [3]
+    assert read()["truncated"] is True
+    assert push(_transcript_record(chunk_id, seq=4, segment_id="sg_2", supersedes="sg_1"))["applied"] == [4]
+    assert read()["truncated"] is False
+    assert [turn["text"] for turn in cast(list[dict[str, object]], read()["turns"])] == ["hi"]
+
+
+def test_lease_transcript_accepted_reoffer_clears_capped_truncation(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    huge = [_turn_with_text("x" * (TRANSCRIPT_RECORD_MAX_BYTES + 1))]
+    assert client.post(
+        "/api/fleet/transcripts", json={"records": [_transcript_record(chunk_id, seq=1, turns=huge)]}
+    ).json()["capped"] == [1]
+    assert client.get(path, params=params).json()["truncated"] is True
+    assert client.post("/api/fleet/transcripts", json={"records": [_transcript_record(chunk_id, seq=2)]}).json()[
+        "applied"
+    ] == [2]
+    view = client.get(path, params=params).json()
+    assert view["truncated"] is False
+    assert [turn["text"] for turn in view["turns"]] == ["hi"]
+
+
+def test_lease_transcript_foreign_reader_modern_and_legacy(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    pushed = client.post(
+        "/api/fleet/transcripts",
+        json={"records": [_transcript_record(chunk_id, seq=1, turn_range_start=0, turn_range_end=0)]},
+    )
+    assert pushed.json()["applied"] == [1]
+    other = _add(client)
+    headers = _bearer(other["token"])
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    before = client.get(path, params=params)
+    assert before.status_code == 200
+    assert before.json()["turns"][0]["text"] == "hi"
+    modern = client.get(path, params=params, headers=headers)
+    assert modern.status_code == 403
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json() == {
+        "type": "urn:blizzard:problem:lease-ownership",
+        "title": "Lease ownership refused",
+        "detail": "lease segments belong to another runner",
+        "instance": path,
+        "status": 403,
+    }
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = client.get(path, params=params, headers=headers)
+    assert legacy.status_code == 403
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": modern.json()["detail"]}
+    assert client.get(path, params={"node_id": "other", "epoch": 1}, headers=headers).status_code == 200
+    assert client.get(path, params=params, headers=headers).json() == modern.json()
+    assert client.get(path, params=params).json() == before.json()
+
+
+def test_lease_transcript_anonymous_refusal_modern_and_legacy(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    path = f"/api/fleet/chunks/{chunk_id}/transcript-segments"
+    params = {"node_id": "build", "epoch": 1}
+    anonymous = TestClient(client.app)
+    modern = anonymous.get(path, params=params)
+    assert modern.status_code == 401
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json()["type"] == "urn:blizzard:problem:authentication-required"
+    assert modern.json()["instance"] == path
+    client.post("/_levers/legacy_auth_refusals", json={"remaining": 1})
+    legacy = anonymous.get(path, params=params)
+    assert legacy.status_code == 401
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": modern.json()["detail"]}
+    assert anonymous.get(path, params=params).json() == modern.json()
 
 
 def test_lease_transcript_read_serves_a_leases_retained_segments(client: TestClient) -> None:
@@ -3289,10 +3729,51 @@ def test_seeded_system_artifact_is_readable_by_list_and_by_name(client: TestClie
 
 
 def test_get_system_artifact_404s_for_an_unpublished_name(client: TestClient) -> None:
-    resp = client.get("/api/fleet/system-artifacts/ghost")
+    resp = client.get("/api/fleet/system-artifacts/garden/ghost")
     assert resp.status_code == 404
-    body: dict[str, str] = resp.json()
-    assert "ghost" in body["detail"]
+    assert resp.headers["content-type"] == "application/problem+json"
+    assert resp.json() == {
+        "type": "urn:blizzard:problem:system-artifact-not-found",
+        "title": "System artifact not found",
+        "detail": "no system artifact 'garden/ghost'",
+        "instance": "/api/fleet/system-artifacts/garden/ghost",
+        "status": 404,
+    }
+
+
+def test_read_refusal_legacy_lever_expires_only_on_refusal(client: TestClient) -> None:
+    chunk = _seed(client)
+    client.post("/_levers/legacy_read_refusals", json={"remaining": 2})
+    assert client.get("/api/fleet/scopes", params={"chunk_id": chunk}).status_code == 200
+    assert client.get("/api/fleet/system-artifacts").status_code == 200
+    for path, params, detail in [
+        ("/api/fleet/scopes", {"chunk_id": "missing"}, "unknown chunk missing"),
+        ("/api/fleet/system-artifacts/a/b", {}, "no system artifact 'a/b'"),
+    ]:
+        response = client.get(path, params=params)
+        assert response.status_code == 404
+        assert response.headers["content-type"] == "application/json"
+        assert response.json() == {"detail": detail}
+    assert client.get("/api/fleet/system-artifacts/a/b").headers["content-type"] == "application/problem+json"
+
+
+@pytest.mark.parametrize("suffix", ["", "/work-items"])
+def test_chunk_read_refusals_support_modern_and_legacy_bodies(client: TestClient, suffix: str) -> None:
+    path = f"/api/fleet/chunks/missing{suffix}"
+    response = client.get(path)
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "urn:blizzard:problem:chunk-not-found",
+        "title": "Chunk not found",
+        "detail": "unknown chunk missing",
+        "instance": path,
+        "status": 404,
+    }
+    client.post("/_levers/legacy_read_refusals", json={"remaining": 1})
+    response = client.get(path)
+    assert response.headers["content-type"] == "application/json"
+    assert response.json() == {"detail": "unknown chunk missing"}
 
 
 def test_seeding_the_same_name_twice_replaces_it(client: TestClient) -> None:
@@ -3321,6 +3802,19 @@ def test_scopes_start_empty(client: TestClient) -> None:
     assert resp.status_code == 200, resp.text
     body: list[dict[str, object]] = resp.json()
     assert body == []
+
+
+def test_scopes_unknown_chunk_problem(client: TestClient) -> None:
+    resp = client.get("/api/fleet/scopes", params={"chunk_id": "missing"})
+    assert resp.status_code == 404
+    assert resp.headers["content-type"] == "application/problem+json"
+    assert resp.json() == {
+        "type": "urn:blizzard:problem:chunk-not-found",
+        "title": "Chunk not found",
+        "detail": "unknown chunk missing",
+        "instance": "/api/fleet/scopes",
+        "status": 404,
+    }
 
 
 def test_seeded_scope_is_readable_by_the_fleet_route(client: TestClient) -> None:
@@ -3627,6 +4121,78 @@ def test_garden_proposals_page_refuses_a_malformed_cursor_and_an_out_of_range_li
 def test_garden_proposals_page_404s_on_no_run_context_and_an_unknown_chunk(client: TestClient) -> None:
     assert client.get(f"/api/fleet/chunks/{_seed(client)}/garden/proposals/page").status_code == 404
     assert client.get("/api/fleet/chunks/ch_ghost/garden/proposals/page").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "garden/findings",
+        "garden/proposals",
+        "garden/proposals/page",
+        "analytics/counts/files",
+        "analytics/counts/skills",
+        "analytics/counts/agent-types",
+        "analytics/counts/nodes",
+        "analytics/spend/nodes",
+        "analytics/spend/graphs",
+        "findings",
+        "findings/fin_missing",
+    ],
+)
+def test_scoped_read_refusals_modern_and_legacy(client: TestClient, suffix: str) -> None:
+    chunk_id = _seed(client)
+    query = {"since": "2026-01-01T00:00:00Z"} if suffix.startswith("analytics/") else {}
+    path = f"/api/fleet/chunks/{chunk_id}/{suffix}"
+    kind = "no-answered-proposal" if suffix.startswith("findings") else "no-run-context"
+    modern = client.get(path, params=query)
+    assert modern.status_code == 404
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json()["type"] == f"urn:blizzard:problem:{kind}"
+    assert modern.json()["instance"] == path
+    assert modern.json()["status"] == 404
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = client.get(path, params=query)
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": modern.json()["detail"]}
+    assert client.get(path, params=query).json()["type"] == modern.json()["type"]
+    unknown = client.get(f"/api/fleet/chunks/ch_ghost/{suffix}", params=query)
+    assert unknown.status_code == 404
+    assert unknown.json()["type"] == "urn:blizzard:problem:chunk-not-found"
+
+
+def test_cursor_problem_is_distinct_from_validation_and_legacy(client: TestClient) -> None:
+    chunk_id = client.post("/_seed/chunk", json=_paged_proposal_spec()).json()["chunk_id"]
+    path = f"/api/fleet/chunks/{chunk_id}/garden/proposals/page"
+    modern = client.get(path, params={"cursor": "secret-invalid"})
+    assert modern.status_code == 422
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json()["type"] == "urn:blizzard:problem:malformed-cursor"
+    assert modern.json()["detail"] == "malformed cursor"
+    assert modern.json()["instance"] == path
+    validation = client.get(path, params={"limit": 0})
+    assert validation.status_code == 422
+    assert validation.headers["content-type"] == "application/json"
+    assert isinstance(validation.json()["detail"], list)
+    client.post("/_levers/legacy_read_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = client.get(path, params={"cursor": "invalid"})
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"detail": "malformed cursor"}
+
+
+def test_missing_finding_and_question_refusals_modern_and_legacy(client: TestClient) -> None:
+    chunk_id = client.post("/_seed/chunk", json=_answered_spec(garden_answered_findings=[])).json()["chunk_id"]
+    for path, kind, scope in [
+        (f"/api/fleet/chunks/{chunk_id}/findings/fin_missing", "finding-not-in-chunk", chunk_id),
+        ("/api/fleet/questions/q_missing", "question-not-found", None),
+    ]:
+        modern = client.get(path)
+        assert modern.status_code == 404
+        assert modern.json()["type"] == f"urn:blizzard:problem:{kind}"
+        assert modern.json()["instance"] == path
+        client.post("/_levers/legacy_read_refusals", json={"chunk_id": scope, "remaining": 1})
+        legacy = client.get(path)
+        assert legacy.headers["content-type"] == "application/json"
+        assert legacy.json() == {"detail": modern.json()["detail"]}
 
 
 def test_garden_proposals_404s_on_a_chunk_with_no_run_context(client: TestClient) -> None:
@@ -4086,8 +4652,11 @@ def test_a_claim_from_an_unregistered_runner_answers_403_and_leaves_the_chunk_un
     denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "ghost"})
 
     assert denied.status_code == 403
-    body: dict[str, object] = denied.json()
-    assert body == {
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:claim-runner-unregistered",
+        "title": "Claim denied: unregistered runner",
+        "instance": "/api/fleet/routes",
+        "status": 403,
         "chunk_id": chunk_id,
         "runner_id": "ghost",
         "detail": "runner ghost is not registered at the hub",
@@ -4105,8 +4674,96 @@ def test_a_claim_from_a_runner_paused_at_the_hub_answers_403(client: TestClient)
     denied = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 403
-    body: dict[str, object] = denied.json()
-    assert body == {"chunk_id": chunk_id, "runner_id": "r1", "detail": "runner is paused at the hub"}
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:claim-paused",
+        "title": "Claim denied: paused runner",
+        "instance": "/api/fleet/routes",
+        "status": 403,
+        "chunk_id": chunk_id,
+        "runner_id": "r1",
+        "detail": "runner is paused at the hub",
+    }
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_unknown_claim_problem_and_legacy(client: TestClient, legacy: bool) -> None:
+    _register(client)
+    if legacy:
+        client.post("/_levers/legacy_claim_refusals", json={})
+    response = _claim(client, {"chunk_id": "unknown", "runner_id": "r1"})
+    assert response.status_code == 404
+    if legacy:
+        assert response.headers["content-type"] == "application/json"
+        assert response.json() == {"detail": "unknown chunk unknown"}
+    else:
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json() == {
+            "type": "urn:blizzard:problem:chunk-not-found",
+            "title": "Chunk not found",
+            "detail": "unknown chunk unknown",
+            "status": 404,
+            "instance": "/api/fleet/routes",
+        }
+
+
+@pytest.mark.parametrize(
+    "kind,detail",
+    [
+        ("retired", "runner r1 is retired — claim refused; `reinstate` it first"),
+        ("version_refused", "runner r1 reporting no version is refused by the hub's window: too-old"),
+    ],
+)
+@pytest.mark.parametrize("legacy", [False, True])
+def test_claim_runner_refusal_levers(client: TestClient, kind: str, detail: str, legacy: bool) -> None:
+    chunk_id = _seed(client)
+    client.post(f"/_levers/claim_runner_{kind}", json={"chunk_id": chunk_id, "remaining": 1})
+    if legacy:
+        client.post("/_levers/legacy_claim_refusals", json={})
+    response = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    assert response.status_code == 403
+    payload = response.json()
+    assert {k: payload[k] for k in ("chunk_id", "runner_id", "detail")} == {
+        "chunk_id": chunk_id,
+        "runner_id": "r1",
+        "detail": detail,
+    }
+    assert response.headers["content-type"] == ("application/json" if legacy else "application/problem+json")
+    if legacy:
+        assert set(payload) == {"chunk_id", "runner_id", "detail"}
+    else:
+        assert payload["type"] == f"urn:blizzard:problem:claim-runner-{kind.replace('_', '-')}"
+        assert payload["status"] == 403
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+
+
+def test_missing_pinned_graph_claim_is_scoped_and_does_not_mutate(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/_levers/pinned_graph_missing", json={"chunk_id": chunk_id, "remaining": 1})
+    client.post("/_levers/legacy_claim_refusals", json={})
+    assert _claim(client, {"chunk_id": "unknown", "runner_id": "r1"}).status_code == 404
+    response = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    assert response.status_code == 500
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "urn:blizzard:problem:pinned-graph-missing",
+        "title": "Pinned graph missing",
+        "detail": "chunk's pinned graph is missing",
+        "instance": "/api/fleet/routes",
+        "status": 500,
+    }
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+
+
+def test_claim_legacy_mode_expires_after_refusal(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/_seed/stop", json={"chunk_id": chunk_id})
+    client.post("/_levers/legacy_claim_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    legacy = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"chunk_id": chunk_id, "status": "stopped", "detail": "chunk is terminal"}
+    modern = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
+    assert modern.headers["content-type"] == "application/problem+json"
+    assert modern.json()["type"] == "urn:blizzard:problem:claim-terminal"
 
 
 def test_a_claim_on_a_stopped_chunk_answers_409_terminal(client: TestClient) -> None:
@@ -4116,8 +4773,14 @@ def test_a_claim_on_a_stopped_chunk_answers_409_terminal(client: TestClient) -> 
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {"chunk_id": chunk_id, "status": "stopped", "detail": "chunk is terminal"}
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:claim-terminal",
+        "title": "Claim denied: terminal chunk",
+        "instance": "/api/fleet/routes",
+        "chunk_id": chunk_id,
+        "status": "stopped",
+        "detail": "chunk is terminal",
+    }
 
 
 def test_a_claim_on_a_done_chunk_still_carrying_its_route_answers_terminal_before_conflict(client: TestClient) -> None:
@@ -4129,8 +4792,14 @@ def test_a_claim_on_a_done_chunk_still_carrying_its_route_answers_terminal_befor
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r2"})
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {"chunk_id": chunk_id, "status": "done", "detail": "chunk is terminal"}
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:claim-terminal",
+        "title": "Claim denied: terminal chunk",
+        "instance": "/api/fleet/routes",
+        "chunk_id": chunk_id,
+        "status": "done",
+        "detail": "chunk is terminal",
+    }
 
 
 @pytest.mark.parametrize("status", ["not_ready", "paused", "needs_human", "delivering"])
@@ -4141,8 +4810,10 @@ def test_a_claim_on_a_chunk_not_ready_answers_409_with_its_status(client: TestCl
     denied = _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"})
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:claim-not-ready",
+        "title": "Claim denied: chunk not ready",
+        "instance": "/api/fleet/routes",
         "chunk_id": chunk_id,
         "status": status,
         "detail": f"chunk {chunk_id} is {status}, not ready to claim",
@@ -4164,8 +4835,41 @@ def test_a_rekey_on_a_done_chunk_still_carrying_its_route_answers_409(client: Te
     denied = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {"detail": f"chunk {chunk_id} is done, its route confers no tenure"}
+    assert denied.headers["content-type"] == "application/problem+json"
+    assert denied.json() == {
+        "type": "urn:blizzard:problem:route-terminal",
+        "title": "Route terminal",
+        "detail": f"chunk {chunk_id} is done, its route confers no tenure",
+        "instance": f"/api/fleet/chunks/{chunk_id}/route-token",
+        "status": 409,
+    }
+
+
+def test_legacy_rekey_refusals_are_scoped_and_expire_only_on_refusal(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    _claim_and_fence(client, chunk_id)
+    path = f"/api/fleet/chunks/{chunk_id}/route-token"
+    client.post("/_levers/legacy_rekey_refusals", json={"chunk_id": chunk_id, "remaining": 1})
+    assert client.post(path).status_code == 200
+    other = client.post("/api/fleet/chunks/unknown/route-token")
+    assert other.status_code == 404
+    assert other.headers["content-type"] == "application/problem+json"
+    _complete(client, chunk_id, from_node_id="build")
+    _complete(client, chunk_id, from_node_id="review")
+    denied = client.post(path)
+    assert denied.status_code == 409
+    assert denied.headers["content-type"] == "application/json"
+    assert denied.json() == {"detail": f"chunk {chunk_id} is done, its route confers no tenure"}
+    assert client.post(path).headers["content-type"] == "application/problem+json"
+
+
+def test_legacy_rekey_not_found_retains_detail(client: TestClient) -> None:
+    chunk_id = _seed(client)
+    client.post("/_levers/legacy_rekey_refusals", json={})
+    denied = client.post(f"/api/fleet/chunks/{chunk_id}/route-token")
+    assert denied.status_code == 404
+    assert denied.headers["content-type"] == "application/json"
+    assert denied.json() == {"detail": f"chunk {chunk_id} has no live route"}
 
 
 def test_the_envelope_of_a_stopped_chunk_answers_409(client: TestClient) -> None:
@@ -4176,8 +4880,8 @@ def test_the_envelope_of_a_stopped_chunk_answers_409(client: TestClient) -> None
     denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {"detail": "chunk has no current runner node (terminal)"}
+    assert denied.json()["detail"] == "chunk has no current runner node (terminal)"
+    assert denied.json()["type"] == "urn:blizzard:problem:no-current-node"
 
 
 def test_the_envelope_of_a_done_chunk_answers_409(client: TestClient) -> None:
@@ -4189,8 +4893,8 @@ def test_the_envelope_of_a_done_chunk_answers_409(client: TestClient) -> None:
     denied = client.get(f"/api/fleet/chunks/{chunk_id}/envelope")
 
     assert denied.status_code == 409
-    body: dict[str, object] = denied.json()
-    assert body == {"detail": "chunk has no current runner node (terminal)"}
+    assert denied.json()["detail"] == "chunk has no current runner node (terminal)"
+    assert denied.json()["type"] == "urn:blizzard:problem:no-current-node"
 
 
 def test_a_completion_off_the_current_node_names_both_nodes_and_the_epoch(client: TestClient) -> None:
@@ -4577,7 +5281,8 @@ def test_add_mints_a_runner_id_and_token_and_leaves_the_runner_never_connected(c
     assert added["token"]
     readback = client.get(f"/api/fleet/runners/{added['runner_id']}", headers=_bearer(added["token"]))
     assert readback.status_code == 409
-    assert readback.json() == {"detail": f"runner {added['runner_id']} has not registered"}
+    assert readback.json()["detail"] == f"runner {added['runner_id']} has not registered"
+    assert readback.json()["type"] == "urn:blizzard:problem:runner-not-registered"
 
 
 def test_add_refuses_a_blank_name_422(client: TestClient) -> None:
@@ -4645,11 +5350,8 @@ def test_a_fleet_call_without_a_token_the_hub_issued_is_refused_401(client: Test
     tokenless = plain.post("/api/fleet/runners", json={"workspace_id": "ws"})
     unknown = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer("never-issued"))
 
-    assert (tokenless.status_code, tokenless.json()) == (401, {"detail": "missing or malformed Authorization header"})
-    assert (unknown.status_code, unknown.json()) == (
-        401,
-        {"detail": "bearer token does not resolve to a known runner"},
-    )
+    assert (tokenless.status_code, tokenless.json()["detail"]) == (401, "missing or malformed Authorization header")
+    assert (unknown.status_code, unknown.json()["detail"]) == (401, "bearer token does not resolve to a known runner")
 
 
 def test_a_runner_reads_only_its_own_registry_row(client: TestClient) -> None:
@@ -4659,7 +5361,8 @@ def test_a_runner_reads_only_its_own_registry_row(client: TestClient) -> None:
     other = client.get("/api/fleet/runners/r2", headers=_bearer(runner_token("r1")))
 
     assert other.status_code == 403
-    assert other.json() == {"detail": "token belongs to runner 'r1', not 'r2'"}
+    assert other.json()["detail"] == "token belongs to runner 'r1', not 'r2'"
+    assert other.json()["type"] == "urn:blizzard:problem:runner-ownership"
 
 
 def test_identity_answers_a_current_token_with_its_runner_and_no_side_effects(client: TestClient) -> None:
@@ -4735,7 +5438,12 @@ def test_lever_version_refused_refuses_the_named_runner_alone_and_records_nothin
     )
 
     assert refusal.status_code == 409
+    assert refusal.headers["content-type"] == "application/problem+json"
     assert refusal.json() == {
+        "type": "urn:blizzard:problem:runner-version",
+        "title": "Runner version refused",
+        "instance": "/api/fleet/runners",
+        "status": 409,
         "reason": "too-old",
         "runner_version": "0.1.4",
         "hub_version": "0.2.0",
@@ -4750,6 +5458,28 @@ def test_lever_version_refused_refuses_the_named_runner_alone_and_records_nothin
     client.delete("/_levers/version_refused")
     healed = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(refused["token"]))
     assert healed.status_code == 201
+
+
+def test_legacy_version_refusal_expires_only_on_refusal(client: TestClient) -> None:
+    refused, admitted = _add(client, "old"), _add(client, "new")
+    client.post("/_levers/version_refused", json={"payload": {"runner_id": refused["runner_id"]}})
+    client.post("/_levers/legacy_version_refusals", json={"remaining": 1})
+    plain = TestClient(client.app)
+    assert (
+        plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(admitted["token"])).status_code
+        == 201
+    )
+    response = plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(refused["token"]))
+    assert response.status_code == 409
+    assert response.headers["content-type"] == "application/json"
+    assert set(response.json()) == {"reason", "runner_version", "hub_version", "floor", "detail"}
+    assert response.json()["runner_version"] is None
+    assert (
+        plain.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(refused["token"])).headers[
+            "content-type"
+        ]
+        == "application/problem+json"
+    )
 
 
 def test_me_lists_every_tenant_the_implicit_operator_may_enter_ordered_by_id(client: TestClient) -> None:
@@ -4787,7 +5517,18 @@ def test_identity_tells_a_missing_an_unknown_a_revoked_and_a_retired_token_apart
 
     def refusal(headers: dict[str, str]) -> tuple[int, dict[str, object]]:
         resp = plain.get("/api/fleet/identity", headers=headers)
-        return resp.status_code, resp.json()
+        if resp.status_code == 200:
+            return resp.status_code, resp.json()
+        assert resp.headers["content-type"] == "application/problem+json"
+        body = resp.json()
+        assert {k: body[k] for k in ("type", "title", "detail", "instance", "status")} == {
+            "type": "urn:blizzard:problem:runner-identity",
+            "title": "Runner identity refused",
+            "detail": "runner identity refused",
+            "instance": "/api/fleet/identity",
+            "status": 401,
+        }
+        return resp.status_code, {k: body[k] for k in ("reason", "runner_id")}
 
     assert refusal({}) == (401, {"reason": "missing", "runner_id": None})
     assert refusal(_bearer("never-issued")) == (401, {"reason": "unknown", "runner_id": None})
@@ -4796,13 +5537,25 @@ def test_identity_tells_a_missing_an_unknown_a_revoked_and_a_retired_token_apart
     assert refusal(_bearer(fresh.json()["token"]))[0] == 200
 
 
+def test_identity_legacy_refusal_expires_only_on_refusal(client: TestClient) -> None:
+    plain = TestClient(client.app)
+    added = _add(client)
+    plain.post("/_levers/legacy_identity_refusals", json={"remaining": 1})
+    assert plain.get("/api/fleet/identity", headers=_bearer(added["token"])).status_code == 200
+    legacy = plain.get("/api/fleet/identity")
+    assert legacy.headers["content-type"] == "application/json"
+    assert legacy.json() == {"reason": "missing", "runner_id": None}
+    assert plain.get("/api/fleet/identity").headers["content-type"] == "application/problem+json"
+
+
 def test_a_revoked_token_is_refused_on_every_fleet_call(client: TestClient) -> None:
     added = _add(client)
     assert TestClient(client.app).post(f"/_seed/runners/{added['runner_id']}/token-revocations").status_code == 200
 
     refused = client.post("/api/fleet/runners", json={"workspace_id": "ws"}, headers=_bearer(added["token"]))
 
-    assert (refused.status_code, refused.json()) == (401, {"detail": "bearer token has been revoked"})
+    assert (refused.status_code, refused.json()["detail"]) == (401, "bearer token has been revoked")
+    assert refused.json()["type"] == "urn:blizzard:problem:authentication-revoked"
 
 
 def test_the_seed_pause_brakes_a_runner_until_released_and_refuses_an_id_never_added(client: TestClient) -> None:
@@ -4825,8 +5578,19 @@ def test_enrolling_a_retired_or_unknown_runner_is_refused(client: TestClient) ->
     retired = _add(client)
     plain.post(f"/_seed/runners/{retired['runner_id']}/retire", json={})
 
-    assert plain.post(f"/api/runners/{retired['runner_id']}/enrollments").status_code == 409
-    assert plain.post("/api/runners/rn_unknown/enrollments").status_code == 404
+    for path, status in [
+        (f"/api/runners/{retired['runner_id']}/enrollments", 409),
+        ("/api/runners/rn_unknown/enrollments", 404),
+    ]:
+        modern = plain.post(path)
+        assert modern.status_code == status
+        assert modern.headers["content-type"] == "application/json"
+        assert set(modern.json()) == {"detail"}
+        plain.post("/_levers/legacy_read_refusals", json={"remaining": 1})
+        legacy = plain.post(path)
+        assert legacy.status_code == status
+        assert legacy.headers["content-type"] == "application/json"
+        assert legacy.json() == {"detail": modern.json()["detail"]}
 
 
 def test_a_hub_reset_leaves_every_token_a_runner_holds_unknown(client: TestClient) -> None:
@@ -4835,7 +5599,8 @@ def test_a_hub_reset_leaves_every_token_a_runner_holds_unknown(client: TestClien
 
     plain.post("/_seed/reset")
 
-    assert plain.get("/api/fleet/identity", headers=_bearer(added["token"])).json() == {
+    body = plain.get("/api/fleet/identity", headers=_bearer(added["token"])).json()
+    assert {k: body[k] for k in ("reason", "runner_id")} == {
         "reason": "unknown",
         "runner_id": None,
     }
@@ -4901,8 +5666,8 @@ def test_add_naming_a_tenant_no_tenant_holds_answers_404_and_adds_nothing(client
     unknown = plain.post("/api/runners", json={"name": "r"}, headers=_tenant_header("ten_never_minted"))
     by_name = plain.post("/api/runners", json={"name": "r"}, headers=_tenant_header(FIRST_TENANT_NAME))
 
-    assert (unknown.status_code, unknown.json()) == (404, {"detail": "no such tenant"})
-    assert (by_name.status_code, by_name.json()) == (404, {"detail": "no such tenant"})
+    assert (unknown.status_code, unknown.json()["detail"]) == (404, "no such tenant")
+    assert (by_name.status_code, by_name.json()["detail"]) == (404, "no such tenant")
     assert _service(client).state.list_runners() == []
 
 
@@ -4924,8 +5689,8 @@ def test_a_fleet_call_naming_another_tenant_is_refused_400_and_its_own_is_accept
     )
 
     detail = "X-Blizzard-Tenant names a tenant other than the presented credential's"
-    assert (foreign.status_code, foreign.json()) == (400, {"detail": detail})
-    assert (unknown.status_code, unknown.json()) == (400, {"detail": detail})
+    assert (foreign.status_code, foreign.json()["detail"]) == (400, detail)
+    assert (unknown.status_code, unknown.json()["detail"]) == (400, detail)
     assert own.status_code == 201 and own.json()["first_registration"] is True
 
 
@@ -4968,7 +5733,9 @@ def test_enrolling_a_runner_of_another_tenant_answers_404_like_an_unknown_one(cl
     across = plain.post(f"/api/runners/{added['runner_id']}/enrollments", headers=_tenant_header(acme))
     own = plain.post(f"/api/runners/{added['runner_id']}/enrollments", headers=_tenant_header(FIRST_TENANT_ID))
 
-    assert (across.status_code, across.json()) == (404, {"detail": f"unknown runner {added['runner_id']}"})
+    assert across.status_code == 404
+    assert across.json()["detail"] == f"unknown runner {added['runner_id']}"
+    assert set(across.json()) == {"detail"}
     assert own.status_code == 201
 
 

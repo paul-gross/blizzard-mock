@@ -45,6 +45,7 @@ from blizzard_mock.mock_hub.domain.models import (
     GardenProposalSpec,
     NodeSpec,
     QuestionState,
+    ReleaseNotHolder,
     RoutineProposalState,
     ScopeSpec,
     SystemArtifactSpec,
@@ -76,7 +77,6 @@ from blizzard_mock.mock_hub.domain.wire import (
     AnalyticsSpendResponse,
     AnalyticsSpendView,
     ApplyResponse,
-    ArtifactCheckResponse,
     BlockedView,
     ChunkDetail,
     ChunkEscalationView,
@@ -283,8 +283,20 @@ def _spend_response(rows: list[AnalyticsSpendRowSpec]) -> AnalyticsSpendResponse
     )
 
 
+class RekeyNotHolder(Exception):
+    """The caller does not hold the live route."""
+
+
+class PinnedGraphMissing(Exception):
+    pass
+
+
 class ChunkNotFound(Exception):
     """No seeded chunk with that id."""
+
+
+class ChunkNotPausable(Exception):
+    """The chunk's current status refuses pause."""
 
 
 class QuestionNotFound(Exception):
@@ -348,11 +360,22 @@ class HostNameTaken(Exception):
 
 
 class RunnerAlreadyHosted(Exception):
-    """An adoption named a runner that already stands under a host, or is retired."""
+    """An adoption named a runner that already stands under a host."""
+
+    def __init__(self, runner_id: str, *, host_id: str) -> None:
+        super().__init__(f"runner {runner_id} already stands under host {host_id}")
+        self.runner_id = runner_id
+
+
+class RunnerLifecycleConflict(Exception):
+    """A runner changed after it was read."""
 
     def __init__(self, runner_id: str) -> None:
-        super().__init__(f"runner {runner_id} already stands under a host, or is retired")
-        self.runner_id = runner_id
+        super().__init__(f"runner {runner_id} changed after it was read — run it again")
+
+
+class RunnerRetireInterrupted(RunnerLifecycleConflict):
+    """Retirement committed before its route release was interrupted."""
 
 
 class RunnerTokenRefused(Exception):
@@ -396,6 +419,10 @@ class ForeignTenantNamed(Exception):
         super().__init__(f"{TENANT_HEADER} names a tenant other than the presented credential's")
 
 
+class RunnerHoldsRoutes(Exception):
+    """A runner cannot be retired without force while it holds routes."""
+
+
 class UnknownRunner(Exception):
     """No runner with that id was ever added here."""
 
@@ -415,8 +442,11 @@ class RunnerNeverConnected(Exception):
 class RunnerRetired(Exception):
     """A retired runner's token cannot be rotated — reinstating it is the one way back."""
 
-    def __init__(self, runner_id: str) -> None:
-        super().__init__(f"runner {runner_id} is retired")
+    def __init__(self, runner_id: str, *, action: str | None = None) -> None:
+        detail = f"runner {runner_id} is retired"
+        if action is not None:
+            detail += f" — {action} refused; `reinstate` it first"
+        super().__init__(detail)
         self.runner_id = runner_id
 
 
@@ -427,6 +457,13 @@ class DependencyUnmet(Exception):
     def __init__(self, prerequisite_chunk_id: str) -> None:
         super().__init__(f"chunk depends on unmet prerequisite {prerequisite_chunk_id}")
         self.prerequisite_chunk_id = prerequisite_chunk_id
+
+
+class ClaimRunnerLeverRefusal(Exception):
+    def __init__(self, *, kind: str, runner_id: str, detail: str) -> None:
+        super().__init__(detail)
+        self.kind = kind
+        self.runner_id = runner_id
 
 
 class ClaimIncompatible(Exception):
@@ -478,16 +515,18 @@ class MockHubService:
         #: The transcript lane's own high-water mark — a separate
         #: per-runner sequence from the fact lane's above.
         self._transcript_high_water: dict[str, int] = {}
-        #: ``(chunk_id, epoch)`` -> the runner whose ``lease.minted`` first named it.
-        self._epoch_owners: dict[tuple[str, int], str] = {}
+        #: Tenant-scoped epoch owners and transcript keys, as in the real hub's tenant stores.
+        self._epoch_owners: dict[tuple[str, str, int], str] = {}
+        self._transcript_owners: dict[tuple[str, str, int], tuple[tuple[str, str, str, int], str]] = {}
         #: Accepted bytes per chunk — the chunk-budget cap's running total.
-        self._transcript_chunk_bytes: dict[str, int] = {}
+        self._transcript_chunk_bytes: dict[tuple[str, str], int] = {}
         #: The real hub's natural key: a key's own accept/reject decision, independent of
         #: seq, mirroring `IWriteTranscriptSegments.natural_key_state`. Absent reads as "absent".
-        self._transcript_key_state: dict[tuple[str, int], str] = {}
+        self._transcript_key_state: dict[tuple[str, str, int], str] = {}
+        self._transcript_rejected: dict[tuple[str, str, int], dict[str, Any]] = {}
         #: Retained transcript records, keyed by lease, then by each record's own
         #: natural key — only accepted records land here, so a capped one never reads back.
-        self._transcript_segments: dict[tuple[str, str, int], dict[tuple[str, int], dict[str, Any]]] = {}
+        self._transcript_segments: dict[tuple[str, str, str, int], dict[tuple[str, str, int], dict[str, Any]]] = {}
         self._found_first_tenant()
 
     @property
@@ -522,6 +561,7 @@ class MockHubService:
             nodes=spec.nodes,
             work_refs=spec.work_refs,
             graph_artifacts=spec.graph_artifacts,
+            artifact_formats=spec.artifact_formats,
             garden_run=spec.garden_run,
             garden_findings=spec.garden_findings,
             garden_answered_findings=spec.garden_answered_findings,
@@ -543,8 +583,10 @@ class MockHubService:
         self._host_fact_high_water.clear()
         self._transcript_high_water.clear()
         self._epoch_owners.clear()
+        self._transcript_owners.clear()
         self._transcript_chunk_bytes.clear()
         self._transcript_key_state.clear()
+        self._transcript_rejected.clear()
         self._transcript_segments.clear()
 
     # -- system artifacts (ArtifactScope.SYSTEM, global) --------------------
@@ -578,8 +620,10 @@ class MockHubService:
             )
         )
 
-    def scopes(self) -> list[ScopeView]:
+    def scopes(self, chunk_id: str | None = None) -> list[ScopeView]:
         """Every seeded scope, newest first — mirrors ``GET /api/fleet/scopes``."""
+        if chunk_id is not None:
+            self._require(chunk_id)
         return [
             ScopeView(slug=row.slug, description=row.description, created_at=row.created_at, retired=row.retired)
             for row in self._state.list_scopes()
@@ -587,13 +631,19 @@ class MockHubService:
 
     # -- queue -------------------------------------------------------------
 
-    def peek(self) -> QueuePeekResponse:
+    def peek(self, *, runner_id: str | None = None, project: str | None = None) -> QueuePeekResponse:
         """Ready = seeded, unclaimed, not terminal — FIFO by insertion (D-080).
 
         Reads the ``dependency_unmet`` lever the same as :meth:`claim` does, but never
         consumes it — the one lever reaches both surfaces, and the peek's
         read must not expire what the later claim still needs to see."""
         ready = [c for c in self._state.list_chunks() if not c.claimed and c.status is ChunkStatus.READY]
+        project_id = None
+        if project is not None and runner_id is not None:
+            resolved = self._resolve_project(self._added(runner_id).tenant_id, project)
+            if resolved is None:
+                raise UnknownProjects([project])
+            project_id = resolved.project_id
         entries = [
             QueuePeekEntry(
                 chunk_id=c.chunk_id,
@@ -604,6 +654,7 @@ class MockHubService:
                 **self._project_fields(c.project_id),
             )
             for i, c in enumerate(ready)
+            if project_id is None or c.project_id == project_id
         ]
         return QueuePeekResponse(entries=entries)
 
@@ -663,10 +714,37 @@ class MockHubService:
 
     # -- claim -------------------------------------------------------------
 
+    def _check_pinned_graph(self, chunk_id: str) -> None:
+        missing_graph = self._levers.find(HubLever.PINNED_GRAPH_MISSING, chunk_id)
+        if missing_graph is not None:
+            self._levers.consume(missing_graph)
+            raise PinnedGraphMissing()
+
+    def check_artifact(self, chunk_id: str, *, name: str, content: str) -> str | None:
+        from blizzard_mock.mock_hub.domain.artifact_check import refusal
+
+        chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
+        armed = self._levers.find(HubLever.ARTIFACT_REFUSAL.value, chunk_id)
+        if armed is not None and armed.payload.get("refusal") is not None:
+            return str(armed.payload["refusal"])
+        return refusal(name, content, chunk.artifact_formats.get(name, []))
+
     def claim(
         self, chunk_id: str, *, runner_id: str, workspace_id: str, environment_ids: list[str]
     ) -> RouteClaimResponse:
         chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
+        self.refuse_retired_runner(runner_id, action="claim")
+        for kind in (HubLever.CLAIM_RUNNER_RETIRED, HubLever.CLAIM_RUNNER_VERSION_REFUSED):
+            lever = self._levers.find(kind.value, chunk_id)
+            if lever is not None and ("runner_id" not in lever.payload or lever.payload["runner_id"] == runner_id):
+                self._levers.consume(lever)
+                if kind == HubLever.CLAIM_RUNNER_RETIRED:
+                    detail = f"runner {runner_id} is retired — claim refused; `reinstate` it first"
+                else:
+                    detail = f"runner {runner_id} reporting no version is refused by the hub's window: too-old"
+                raise ClaimRunnerLeverRefusal(kind=kind.value, runner_id=runner_id, detail=detail)
         # Re-read fresh, never cached from the peek: a capability change landing after this
         # runner's peek must not race the claim.
         registration = refuse_braked_runner(self._state.get_runner(runner_id), runner_id=runner_id)
@@ -688,6 +766,7 @@ class MockHubService:
         chunk.route_environment_ids = list(environment_ids)
         chunk.current_node_id = node_id
         chunk.status = ChunkStatus.RUNNING
+        chunk.live_route_token = f"mock-route-token-{chunk_id}-{chunk.latest_epoch}"
         self._state.put_chunk(chunk)
         return RouteClaimResponse(
             chunk_id=chunk_id,
@@ -697,39 +776,109 @@ class MockHubService:
             envelope=self._envelope(chunk, node_id, epoch=chunk.latest_epoch),
             # A per-claim capability token. Deterministic on
             # purpose, so a scenario can predict it.
-            route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}",
+            route_token=chunk.live_route_token,
         )
 
-    def rekey_route_token(self, chunk_id: str) -> RouteTokenRekeyResponse:
+    def rekey_route_token(self, chunk_id: str, *, runner_id: str) -> RouteTokenRekeyResponse:
         """Rotate the chunk's live route capability token —
         mirrors the real hub's ``POST /api/fleet/chunks/{id}/route-token``. Why it exists:
         `blizzard/src/blizzard/hub/domain/execution/claim.py`'s ``ClaimService.rekey``. Deterministic,
         like the claim's own token, but a counter folded in so a re-key never echoes it back."""
-        chunk = self._require(chunk_id)
-        if not chunk.claimed:
+        chunk = self._state.get_chunk(chunk_id)
+        if chunk is None or not chunk.claimed:
             raise ChunkNotFound(f"chunk {chunk_id} has no live route")
+        if chunk.route_runner_id != runner_id:
+            raise RekeyNotHolder(f"token belongs to runner {runner_id!r}, not {chunk.route_runner_id!r}")
         chunk.refuse_rekey()
         chunk.route_token_rekey_count += 1
+        chunk.live_route_token = (
+            f"mock-route-token-{chunk_id}-{chunk.latest_epoch}-rekey{chunk.route_token_rekey_count}"
+        )
         self._state.put_chunk(chunk)
         return RouteTokenRekeyResponse(
             chunk_id=chunk_id,
-            route_token=f"mock-route-token-{chunk_id}-{chunk.latest_epoch}-rekey{chunk.route_token_rekey_count}",
+            route_token=chunk.live_route_token,
         )
 
-    def release(self, chunk_id: str, *, runner_id: str, epoch: int, reason: str) -> ReleaseResponse:
+    def release(
+        self, chunk_id: str, *, runner_id: str, epoch: int, reason: str, route_token: str | None = None
+    ) -> ReleaseResponse:
         """The holding runner gives the chunk's route back — mirrors the real hub's
         ``POST /api/fleet/chunks/{id}/release``. The chunk returns ``ready`` at its current node;
         the write is recorded on the chunk's ``releases``."""
         chunk = self._require(chunk_id)
+        if self.levers.find(HubLever.ENFORCE_RELEASE_ROUTE_TOKEN, chunk_id) is not None:
+            if not chunk.claimed or chunk.live_route_token is None:
+                detail = "chunk has no live route — nothing to authorize this write against"
+            elif route_token != chunk.live_route_token:
+                detail = "route token missing or does not match the chunk's live route"
+            elif runner_id != chunk.route_runner_id:
+                detail = f"runner_id {runner_id!r} does not hold the chunk's live route"
+            else:
+                detail = None
+            if detail is not None:
+                raise ReleaseNotHolder(chunk_id=chunk_id, runner_id=runner_id, detail=detail)
         released_id = chunk.release(runner_id=runner_id, epoch=epoch, reason=reason)
+        chunk.live_route_token = None
         self._state.put_chunk(chunk)
         return ReleaseResponse(chunk_id=chunk_id, released_id=released_id)
 
     # -- reads -------------------------------------------------------------
 
-    def chunk_detail(self, chunk_id: str) -> ChunkDetail:
-        self._consult_chunk_unknown(chunk_id)
+    def pause_chunk(self, chunk_id: str) -> dict[str, object]:
         chunk = self._require(chunk_id)
+        if chunk.status not in PAUSABLE_STATUSES:
+            raise ChunkNotPausable(f"chunk {chunk_id} is {chunk.status.value}, not pausable")
+        if chunk.status is not ChunkStatus.PAUSED:
+            chunk.status_before_pause = chunk.status
+            chunk.status = status_if_paused(chunk.status)
+        self._state.put_chunk(chunk)
+        return self._chunk_summary(chunk)
+
+    def resume_chunk(self, chunk_id: str) -> dict[str, object]:
+        chunk = self._require(chunk_id)
+        if chunk.status is ChunkStatus.PAUSED:
+            chunk.status = chunk.status_before_pause or ChunkStatus.READY
+        chunk.status_before_pause = None
+        self._state.put_chunk(chunk)
+        return self._chunk_summary(chunk)
+
+    def _chunk_summary(self, chunk: ChunkState) -> dict[str, object]:
+        return {
+            "chunk_id": chunk.chunk_id,
+            "graph_id": chunk.graph_id,
+            "graph_name": chunk.graph_name,
+            "status": chunk.status.value,
+            "terminal": chunk.status in TERMINAL_STATUSES,
+            "promotable": chunk.status is ChunkStatus.NOT_READY,
+            "current_node_id": chunk.current_node_id,
+            "work_refs": [ref.model_dump() for ref in chunk.work_refs],
+            "default_model": chunk.default_model,
+            "default_effort": chunk.default_effort,
+            "default_harnesses": chunk.default_harnesses,
+            "runner_id": chunk.route_runner_id if chunk.claimed and not chunk.ended else None,
+            "runner_name": self._runner_name(chunk.route_runner_id)
+            if chunk.claimed and chunk.route_runner_id
+            else None,
+            "workspace_id": chunk.route_workspace_id if chunk.claimed and not chunk.ended else None,
+            "environment_count": len(chunk.route_environment_ids) if chunk.claimed and not chunk.ended else 0,
+            **self._project_fields(chunk.project_id),
+        }
+
+    def require_runner_chunk(self, chunk_id: str, *, runner_id: str) -> ChunkState:
+        chunk = self._require(chunk_id)
+        project = self._state.get_project(chunk.project_id)
+        if project is None or project.tenant_id != self._added(runner_id).tenant_id:
+            raise ChunkNotFound(f"unknown chunk {chunk_id}")
+        return chunk
+
+    def refuse_foreign_runner_chunk(self, chunk_id: str, *, runner_id: str) -> None:
+        if self._state.get_chunk(chunk_id) is not None:
+            self.require_runner_chunk(chunk_id, runner_id=runner_id)
+
+    def chunk_detail(self, chunk_id: str, *, runner_id: str) -> ChunkDetail:
+        chunk = self.require_runner_chunk(chunk_id, runner_id=runner_id)
+        self._consult_chunk_unknown(chunk_id)
         route = None
         if chunk.claimed:
             runner_id = chunk.route_runner_id or ""
@@ -781,7 +930,23 @@ class MockHubService:
             **self._project_fields(chunk.project_id),
         )
 
-    def chunk_statuses(self, chunk_ids: list[str]) -> list[ChunkStatusView]:
+    def fleet_summary(self, runner_id: str) -> dict[str, int]:
+        tenant_id = self._added(runner_id).tenant_id
+        projects = {project.project_id for project in self._tenant_projects(tenant_id)}
+        counts = {"ready": 0, "running": 0, "waiting": 0, "needs": 0}
+        buckets = {
+            ChunkStatus.READY: "ready",
+            ChunkStatus.RUNNING: "running",
+            ChunkStatus.DELIVERING: "running",
+            ChunkStatus.PAUSED: "waiting",
+            ChunkStatus.NEEDS_HUMAN: "needs",
+        }
+        for chunk in self._state.list_chunks():
+            if chunk.project_id in projects and (bucket := buckets.get(chunk.status)) is not None:
+                counts[bucket] += 1
+        return counts
+
+    def chunk_statuses(self, chunk_ids: list[str], *, runner_id: str) -> list[ChunkStatusView]:
         """The runner tick's slim batch status read — mirrors the real hub's
         ``GET /api/fleet/chunk-statuses``. De-dupes ``chunk_ids`` preserving order; an id
         unknown to the store is silently omitted, never a 404. The ``chunk_unknown`` lever
@@ -794,12 +959,15 @@ class MockHubService:
         ids = list(dict.fromkeys(chunk_ids))
         views: list[ChunkStatusView] = []
         for chunk_id in ids:
+            chunk = self._state.get_chunk(chunk_id)
+            if chunk is None:
+                continue
+            project = self._state.get_project(chunk.project_id)
+            if project is None or project.tenant_id != self._added(runner_id).tenant_id:
+                continue
             unknown = self._levers.find(HubLever.CHUNK_UNKNOWN.value, chunk_id)
             if unknown is not None:
                 self._levers.consume(unknown)
-                continue
-            chunk = self._state.get_chunk(chunk_id)
-            if chunk is None:
                 continue
             route_runner_id = chunk.route_runner_id if chunk.claimed else None
             if chunk.claimed:
@@ -820,14 +988,6 @@ class MockHubService:
                 )
             )
         return views
-
-    def artifact_check(self, chunk_id: str) -> ArtifactCheckResponse:
-        """Mirrors ``POST /api/fleet/chunks/{id}/artifact-check`` — no refusal unless the ``artifact_refusal``
-        lever is armed, then its payload's ``refusal``. The mock holds no graph wiring, so it judges no content."""
-        self._require(chunk_id)
-        lever = self._levers.find(HubLever.ARTIFACT_REFUSAL.value, chunk_id)
-        refusal = lever.payload.get("refusal") if lever is not None else None
-        return ArtifactCheckResponse(refusal=str(refusal) if refusal is not None else None)
 
     def work_items(self, chunk_id: str) -> WorkItemsView:
         """A chunk's pass-through work items — one canned entry per pointer.
@@ -981,6 +1141,7 @@ class MockHubService:
         from it is fenced out as a zombie — the runner's stale-envelope path (D-007)."""
         self._consult_chunk_unknown(chunk_id)
         chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
         chunk.refuse_envelope()
         node_id = chunk.current_node_id or chunk.entry
         epoch = chunk.latest_epoch
@@ -1067,8 +1228,9 @@ class MockHubService:
     def ingest_transcripts(self, runner_id: str, records: list[dict[str, Any]]) -> TranscriptSegmentAck:
         """Apply a batched ``POST /transcripts`` push against the transcript lane's own high-water mark.
         Mirrors the real hub's two caps and natural-key short-circuit, retaining each accepted record by
-        lease for :meth:`lease_transcript`; a capped record is never retained. A record whose epoch another
-        runner owns is refused unstored, on replay too, and the mark still advances past it."""
+        lease for :meth:`lease_transcript`; a capped record retains its identity but no turns. A record whose
+        epoch another runner owns is refused unstored, on replay too, and the mark still advances past it."""
+        tenant_id = self._added(runner_id).tenant_id
         mark = self._transcript_high_water.get(runner_id, 0)
         applied: list[int] = []
         already_applied: list[int] = []
@@ -1076,8 +1238,8 @@ class MockHubService:
         refused: list[int] = []
         for record in sorted(records, key=lambda r: int(r.get("seq", 0))):
             seq = int(record.get("seq", 0))
-            key = (str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
-            owner = self._epoch_owners.get((str(record.get("chunk_id", "")), int(record.get("epoch", 0))))
+            key = (tenant_id, str(record.get("segment_id", "")), int(record.get("turn_range_start", 0)))
+            owner = self._epoch_owners.get((tenant_id, str(record.get("chunk_id", "")), int(record.get("epoch", 0))))
             if not ships_from_lease_holder(owner, runner_id):
                 refused.append(seq)
                 mark = max(mark, seq)
@@ -1093,15 +1255,18 @@ class MockHubService:
                 applied.append(seq)
                 continue
             chunk_id = str(record.get("chunk_id", ""))
+            lease_key = (tenant_id, chunk_id, str(record.get("node_id", "")), int(record.get("epoch", 0)))
+            self._transcript_owners[key] = (lease_key, runner_id)
             size = len(json.dumps(record.get("turns", [])).encode("utf-8"))
-            stored = self._transcript_chunk_bytes.get(chunk_id, 0)
+            stored = self._transcript_chunk_bytes.get((tenant_id, chunk_id), 0)
             if size > TRANSCRIPT_RECORD_MAX_BYTES or stored + size > _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES:
                 self._transcript_key_state[key] = "rejected"
+                self._transcript_rejected[key] = {k: v for k, v in record.items() if k != "turns"}
                 capped.append(seq)
                 continue
             self._transcript_key_state[key] = "accepted"
-            self._transcript_chunk_bytes[chunk_id] = stored + size
-            lease_key = (chunk_id, str(record.get("node_id", "")), int(record.get("epoch", 0)))
+            self._transcript_rejected.pop(key, None)
+            self._transcript_chunk_bytes[(tenant_id, chunk_id)] = stored + size
             self._transcript_segments.setdefault(lease_key, {})[key] = dict(record)
             applied.append(seq)
         self._transcript_high_water[runner_id] = mark
@@ -1114,22 +1279,39 @@ class MockHubService:
             refused=refused,
         )
 
-    def lease_transcript(self, chunk_id: str, *, node_id: str, epoch: int) -> LeaseTranscriptView:
+    def lease_transcript_owner(self, chunk_id: str, *, runner_id: str, node_id: str, epoch: int) -> str | None:
+        lease_key = (self._added(runner_id).tenant_id, chunk_id, node_id, epoch)
+        owners = {owner for lease, owner in self._transcript_owners.values() if lease == lease_key}
+        if len(owners) > 1:
+            raise RuntimeError(f"lease {lease_key!r} has segments from multiple runners {sorted(owners)!r}")
+        return next(iter(owners), None)
+
+    def lease_transcript(self, chunk_id: str, *, runner_id: str, node_id: str, epoch: int) -> LeaseTranscriptView:
         """The transcript lane's own read-back — one lease's retained turns across every
         spawn generation, ordered like the real store's ``records_for_lease``
         (``spawn_generation, segment_id, turn_range_start``) rather than by retention, which a
-        flush or a re-offer can disorder. The mock has no caller-identity concept here at
-        all — no principal, no per-runner filter — so it serves the lease to anyone."""
-        records = self._transcript_segments.get((chunk_id, node_id, epoch), {})
+        flush or a re-offer can disorder."""
+        lease_key = (self._added(runner_id).tenant_id, chunk_id, node_id, epoch)
+        records = self._transcript_segments.get(lease_key, {})
+        rejected = [
+            record for key, record in self._transcript_rejected.items() if self._transcript_owners[key][0] == lease_key
+        ]
+        superseded = {r.get("supersedes") for r in [*records.values(), *rejected] if r.get("supersedes") is not None}
+        visible = [r for r in records.values() if r.get("segment_id") not in superseded]
+        truncated = any(r.get("segment_id") not in superseded for r in rejected) or any(
+            r.get("record_truncated", False) for r in visible
+        )
 
         def _order_key(r: dict[str, Any]) -> tuple[int, str, int]:
             return int(r.get("spawn_generation", 0)), str(r.get("segment_id", "")), int(r.get("turn_range_start", 0))
 
         turns: list[dict[str, Any]] = []
-        for record in sorted(records.values(), key=_order_key):
+        for record in sorted(visible, key=_order_key):
             turns.extend(record.get("turns", []))
         renumbered: list[dict[str, object]] = [{**turn, "index": i} for i, turn in enumerate(turns)]
-        return LeaseTranscriptView(chunk_id=chunk_id, node_id=node_id, epoch=epoch, turns=renumbered)
+        return LeaseTranscriptView(
+            chunk_id=chunk_id, node_id=node_id, epoch=epoch, truncated=truncated, turns=renumbered
+        )
 
     def _apply_fact(self, runner_id: str, kind: str, payload: dict[str, Any]) -> bool:
         """Dispatch one fact by ``kind``; ``True`` = applied, ``False`` = rejected.
@@ -1234,6 +1416,7 @@ class MockHubService:
     def apply_completion(self, chunk_id: str, *, epoch: int, from_node_id: str, choice: str) -> ApplyResponse:
         """Advance the chunk on a node-step completion — epoch-fenced and idempotent."""
         chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
 
         replay = self._levers.find(HubLever.REPLAY.value, chunk_id)
         if replay is not None and chunk.last_response is not None:
@@ -1269,6 +1452,7 @@ class MockHubService:
     def apply_decision(self, chunk_id: str, *, epoch: int, from_node_id: str) -> ApplyResponse:
         """A runner-config gate: park the chunk (``parked_at_gate``) — the human loop (D-032)."""
         chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
         if epoch < chunk.latest_epoch:
             return self._fail(chunk, f"stale epoch {epoch} < {chunk.latest_epoch}")
         incoherent = self._incoherent_attempt(chunk, from_node_id=from_node_id, epoch=epoch)
@@ -1284,6 +1468,7 @@ class MockHubService:
         no-op, ``ran=False`` (pinned by tests/test_mock_hub.py).
         """
         chunk = self._require(chunk_id)
+        self._check_pinned_graph(chunk_id)
         node = chunk.node(chunk.current_node_id) if chunk.current_node_id is not None else None
         parked = node is not None and node.executor is Executor.HUB and chunk.status is not ChunkStatus.DONE
         if not parked:
@@ -1298,10 +1483,14 @@ class MockHubService:
 
     # -- questions (ask/answer rendezvous) ----------------------------------
 
-    def question_view(self, question_id: str) -> QuestionView:
+    def question_view(self, question_id: str, *, runner_id: str) -> QuestionView:
         question = self._state.get_question(question_id)
         if question is None:
             raise QuestionNotFound(f"unknown question {question_id}")
+        try:
+            self.require_runner_chunk(question.chunk_id, runner_id=runner_id)
+        except ChunkNotFound as exc:
+            raise QuestionNotFound(f"unknown question {question_id}") from exc
         return self._question_view(question)
 
     def answer_question(self, question_id: str, *, answer: str, answered_by: str = "operator") -> None:
@@ -1611,6 +1800,8 @@ class MockHubService:
     def retire(self, runner_id: str, *, by: str = "operator") -> None:
         """Retire the runner, revoking its token in the same pass, as the real hub does."""
         row = self._added(runner_id)
+        if row.retired_at is not None:
+            return
         row.retired_at = self._clock.now()
         row.retired_by = by
         self._state.replace_token(runner_id, token=None)
@@ -1629,16 +1820,25 @@ class MockHubService:
         """Add a host under ``name`` in ``tenant_id``, never connected — its id and bearer token are minted together
         (``POST /api/hosts``) and the host serves that tenant for life. ``host_id``/``token`` let a scenario pin
         either. A name a live host of the tenant holds raises :class:`HostNameTaken`; an ``adopt`` runner the tenant
-        does not hold raises :class:`UnknownRunner`, one under a host or retired :class:`RunnerAlreadyHosted`, and
-        nothing is added."""
+        does not hold raises :class:`UnknownRunner`, a retired runner :class:`RunnerRetired`, and one under a host
+        :class:`RunnerAlreadyHosted`; nothing is added on refusal."""
         tenant = self._tenant(tenant_id)
-        if any(h.name == name and h.retired_at is None for h in self._tenant_hosts(tenant.tenant_id)):
-            raise HostNameTaken(name)
         adopting = list(dict.fromkeys(adopt))
         runners = [self._tenant_runner(tenant.tenant_id, runner_id) for runner_id in adopting]
         for runner in runners:
-            if runner.host_id is not None or runner.retired_at is not None:
-                raise RunnerAlreadyHosted(runner.runner_id)
+            if runner.retired_at is not None:
+                raise RunnerRetired(runner.runner_id, action="adoption")
+            if runner.host_id is not None:
+                raise RunnerAlreadyHosted(runner.runner_id, host_id=runner.host_id)
+        if any(h.name == name and h.retired_at is None for h in self._tenant_hosts(tenant.tenant_id)):
+            raise HostNameTaken(name)
+        conflict = self.levers.find(HubLever.HOST_ADD_RUNNER_LIFECYCLE_CONFLICT, None)
+        if conflict is not None:
+            target = conflict.payload.get("runner_id")
+            runner = next((r for r in runners if target is None or r.runner_id == target), None)
+            if runner is not None:
+                self.levers.consume(conflict)
+                raise RunnerLifecycleConflict(runner.runner_id)
         added_id = host_id or mint(HOST_PREFIX, self._clock, self._rng)
         issued = token or f"mock-host-token-{secrets.token_urlsafe(18)}"
         self._state.add_host(
@@ -1647,6 +1847,17 @@ class MockHubService:
         for runner in runners:
             runner.host_id = added_id
         return HostAddResponse(host_id=added_id, host_name=name, token=issued, adopted=adopting)
+
+    def bootstrap_credential(self, token: str | None) -> tuple[str | None, str | None]:
+        """The current runner id or host tenant a bootstrap credential names, if any."""
+        if token is not None:
+            runner = self._state.runner_for_token(token)
+            if runner is not None:
+                return runner.runner_id, None
+            host = self._state.host_for_token(token)
+            if host is not None:
+                return None, host.tenant_id
+        return None, None
 
     def host_principal(self, token: str | None) -> str:
         """The id of the host ``token`` is the current token of — the one identity a host call carries — else
@@ -1719,14 +1930,39 @@ class MockHubService:
         row = self._host(host_id)
         return self.add_runner(name=name, tenant_id=row.tenant_id, projects=projects, host_id=host_id)
 
-    def retire_host_runner(self, *, host_id: str, runner_id: str, by: str = "operator") -> RunnerRow:
-        """Retire a runner under the calling host; a runner not under it is :class:`UnknownRunner`. The mock models
-        no held routes, so ``force`` has nothing to release."""
+    def retire_host_runner(
+        self, *, host_id: str, runner_id: str, by: str = "operator", force: bool = False
+    ) -> tuple[RunnerRow, list[str]]:
+        """Retire a runner under the calling host, refusing held routes unless forced."""
         runner = self._state.get_runner(runner_id)
         if runner is None or runner.host_id != host_id:
             raise UnknownRunner(runner_id)
+        held = [c for c in self._state.list_chunks() if c.claimed and c.route_runner_id == runner_id]
+        if held and not force and runner.retired_at is None:
+            holdings = "; ".join(
+                f"{c.chunk_id} (environments: {', '.join(c.route_environment_ids) or 'none'})" for c in held
+            )
+            raise RunnerHoldsRoutes(
+                f"runner {runner_id} holds {len(held)} chunk(s): {holdings} — retire with --force to release"
+            )
+        conflict = self.levers.find(HubLever.HOST_RETIRE_LIFECYCLE_CONFLICT, None)
+        if conflict is not None and conflict.payload.get("runner_id", runner_id) == runner_id:
+            interrupted = conflict.payload.get("interrupted", False)
+            if not interrupted or held:
+                self.levers.consume(conflict)
+                if interrupted:
+                    self.retire(runner_id, by=by)
+                    raise RunnerRetireInterrupted(runner_id)
+                raise RunnerLifecycleConflict(runner_id)
         self.retire(runner_id, by=by)
-        return runner
+        for chunk in held:
+            chunk.claimed = False
+            chunk.route_runner_id = None
+            chunk.route_workspace_id = None
+            chunk.route_environment_ids = []
+            if chunk.status is ChunkStatus.RUNNING:
+                chunk.status = ChunkStatus.READY
+        return runner, [chunk.chunk_id for chunk in held]
 
     def add_runner_under_host(self, host_id: str, *, tenant_id: str) -> HostRow:
         """The live host an operator's ``host_id`` add names, else :class:`UnknownHost` or :class:`HostRetiredError`."""
@@ -1793,6 +2029,11 @@ class MockHubService:
         if self._state.revoked_token_runner_id(token) is not None:
             raise UnresolvableRunner("bearer token has been revoked")
         raise UnresolvableRunner("bearer token does not resolve to a known runner")
+
+    def refuse_retired_runner(self, runner_id: str, *, action: str) -> None:
+        row = self._state.get_runner(runner_id)
+        if row is not None and row.retired_at is not None:
+            raise RunnerRetired(runner_id, action=action)
 
     def register(
         self,
@@ -1880,6 +2121,14 @@ class MockHubService:
                 ),
             )
         )
+
+    def heartbeat(self, runner_id: str) -> bool:
+        """Refresh a registered runner's liveness, or report it missing."""
+        row = self._state.get_runner(runner_id)
+        if row is None or row.never_connected():
+            return False
+        row.last_seen_at = self._clock.now()
+        return True
 
     def runner_view(self, runner_id: str) -> RunnerView | None:
         """The runner's own declarative state, ``None`` when no such runner was added;
@@ -2126,7 +2375,7 @@ class MockHubService:
         """The ``lease.minted`` fence advance (D-044). The first runner to mint an epoch owns
         it, which decides whose transcript records that epoch admits."""
         chunk.latest_epoch = max(chunk.latest_epoch, epoch)
-        self._epoch_owners.setdefault((chunk.chunk_id, epoch), runner_id)
+        self._epoch_owners.setdefault((self._added(runner_id).tenant_id, chunk.chunk_id, epoch), runner_id)
         self._state.put_chunk(chunk)
 
     @staticmethod

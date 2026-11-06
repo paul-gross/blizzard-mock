@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -272,6 +273,85 @@ def test_driver_absorbs_a_dependency_unmet_claim_denial(stack: tuple[TestClient,
     assert claim["claimed"] is False
     assert claim["status"] == 409
     assert claim["response"]["prerequisite_chunk_id"] == "ch_prereq"
+
+
+@pytest.mark.parametrize(
+    ("body", "media"),
+    [
+        ({"detail": "blocked", "prerequisite_chunk_id": "ch_1"}, "application/json"),
+        (
+            {
+                "type": "urn:blizzard:problem:claim-dependency",
+                "title": "Blocked",
+                "detail": "blocked",
+                "instance": "/api/fleet/routes",
+                "prerequisite_chunk_id": "ch_1",
+            },
+            "application/problem+json",
+        ),
+        ({"type": "urn:example:unknown", "detail": "blocked", "status": "done"}, "application/problem+json"),
+    ],
+)
+def test_driver_reports_refusals_without_reinterpreting_them(body: dict[str, object], media: str) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json=body, headers={"content-type": media, "retry-after": "5"})
+
+    gateway = HttpxHubGateway(
+        httpx.Client(transport=httpx.MockTransport(respond), base_url="http://hub"), token="token"
+    )
+    runner = TestClient(create_runner_app(gateway=gateway, clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
+    result = runner.post("/_drive/claim", json={"chunk_id": "ch_1"}).json()
+    assert result == {
+        "claimed": False,
+        "status": 409,
+        "response": body,
+        "headers": {"content-type": media, "retry-after": "5"},
+        "refusal": "unexpected",
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "kind", "fields", "expected"),
+    [
+        (409, "claim-terminal", {"status": "done"}, "terminal"),
+        (409, "claim-not-ready", {"status": "paused"}, "terminal"),
+        (409, "claim-dependency", {"prerequisite_chunk_id": "ch_p"}, "dependency"),
+        (409, "claim-incompatible", {"incompatible_runner_id": "rn_1"}, "incompatible"),
+        (409, "claim-conflict", {"held_by_runner_id": "rn_1"}, "conflict"),
+        (403, "claim-paused", {"runner_id": "rn_1"}, "paused"),
+        (403, "claim-runner-retired", {"runner_id": "rn_1"}, "paused"),
+        (403, "claim-runner-unregistered", {"runner_id": "rn_1"}, "paused"),
+        (403, "claim-runner-version-refused", {"runner_id": "rn_1"}, "paused"),
+    ],
+)
+@pytest.mark.parametrize("typed", [True, False])
+def test_claim_refusal_classification(
+    status: int, kind: str, fields: dict[str, object], expected: str, typed: bool
+) -> None:
+    body = {"chunk_id": "ch_1", "detail": "refused", **fields}
+    if typed:
+        body["type"] = f"urn:blizzard:problem:{kind}"
+    gateway = HttpxHubGateway(
+        httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)), base_url="http://hub"
+        ),
+        token="token",
+    )
+    runner = TestClient(create_runner_app(gateway=gateway, clock=FixedClock(datetime(2026, 7, 13, tzinfo=UTC))))
+    result = runner.post("/_drive/claim", json={"chunk_id": "ch_1"}).json()
+    assert result["refusal"] == expected
+    assert result["response"] == body
+
+
+def test_claim_refusal_type_takes_precedence_and_legacy_uses_status_first() -> None:
+    from blizzard_mock.mock_runner.internal.claim_refusal import classify_claim_refusal
+
+    body = {"chunk_id": "ch_1", "status": "done", "prerequisite_chunk_id": "ch_p"}
+    assert classify_claim_refusal(409, body) == "terminal"
+    assert classify_claim_refusal(409, {**body, "type": "urn:blizzard:problem:claim-dependency"}) == "dependency"
+    assert classify_claim_refusal(409, {**body, "type": None}) == "unexpected"
+    assert classify_claim_refusal(403, {**body, "type": "urn:blizzard:problem:claim-dependency"}) == "unexpected"
+    assert classify_claim_refusal(409, {"type": "urn:blizzard:problem:claim-dependency"}) == "unexpected"
 
 
 def test_driver_absorbs_a_claim_incompatible_denial(stack: tuple[TestClient, TestClient]) -> None:
@@ -614,8 +694,8 @@ def test_drive_push_transcript_applies_over_the_transcript_lanes_own_route(
     assert pushed["status"] == 200
     assert pushed["response"]["applied"] == [1]
     assert pushed["response"]["capped"] == []
-    service = cast("MockHubService", cast(FastAPI, hub.app).state.service)
-    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()  # pyright: ignore[reportPrivateUsage]
+    [request] = [r for r in hub.get("/_captured").json()["requests"] if r["path"] == "/api/fleet/transcripts"]
+    [record] = request["body"]["records"]
     assert record["harness_id"] == "claude_code"
 
 
@@ -641,8 +721,10 @@ def test_drive_push_transcript_forwards_an_explicit_harness_id(stack: tuple[Test
     ).json()
 
     assert pushed["drove"] is True
-    service = cast("MockHubService", cast(FastAPI, hub.app).state.service)
-    [record] = service._transcript_segments[(chunk_id, "build", 1)].values()  # pyright: ignore[reportPrivateUsage]
+    assert pushed["status"] == 200
+    assert pushed["response"]["applied"] == [1]
+    [request] = [r for r in hub.get("/_captured").json()["requests"] if r["path"] == "/api/fleet/transcripts"]
+    [record] = request["body"]["records"]
     assert record["harness_id"] == OPENCODE_HARNESS_ID
 
 
