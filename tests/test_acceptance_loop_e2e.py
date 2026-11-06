@@ -1,4 +1,4 @@
-"""End-to-end acceptance proof for the blizzard-mock fleet (the P4 exit criterion).
+"""End-to-end acceptance proof for the blizzard-mock fleet.
 
 The bootstrap plan's exit criterion
 (``blizzard-discovery:/implementation/bootstrap.md``):
