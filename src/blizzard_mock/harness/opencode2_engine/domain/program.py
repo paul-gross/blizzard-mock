@@ -13,6 +13,11 @@ _OPEN = re.compile(r"^\s*<behavior-script>\s*$")
 _CLOSE = re.compile(r"^\s*</behavior-script>\s*$")
 
 
+def tagged(prompt: str) -> bool:
+    """Whether ``prompt`` holds a ``<behavior-script>`` block opening on a line of its own."""
+    return any(_OPEN.match(line) for line in prompt.splitlines())
+
+
 def program(prompt: str) -> str:
     """The script ``prompt`` runs."""
     lines = prompt.splitlines()
@@ -37,4 +42,4 @@ def program(prompt: str) -> str:
     return "\n".join(lines[end + 1 :]).lstrip("\n")
 
 
-__all__ = ["PREAMBLE_TABLE_HEADER", "program"]
+__all__ = ["PREAMBLE_TABLE_HEADER", "program", "tagged"]

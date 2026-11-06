@@ -70,6 +70,24 @@ def test_the_artifact_refuses_a_surface_it_does_not_answer(tmp_path: Path) -> No
     assert proc.returncode == 2
 
 
+def test_the_disabled_service_setting_is_kept_in_the_service_configuration(tmp_path: Path) -> None:
+    out, env = str(artifact(tmp_path)), bare_env(tmp_path)
+
+    def run(*args: str) -> tuple[int, str]:
+        proc = subprocess.run([out, "service", *args], env=env, capture_output=True, text=True)
+        return proc.returncode, proc.stdout.strip()
+
+    assert run("get", "disabled") == (0, "false")
+    assert run("set", "disabled", "true") == (0, "")
+    assert run("get", "disabled") == (0, "true")
+    config = tmp_path / ".config" / "opencode" / "service.json"
+    assert json.loads(config.read_text()) == {"disabled": True}
+    assert run("unset", "disabled") == (0, "")
+    assert run("get", "disabled") == (0, "false")
+    assert run("set", "disabled", "maybe")[0] == 1
+    assert run("get", "port")[0] == 1
+
+
 def test_baked_module_fields_match_emits_generated_template() -> None:
     def fields(source: str) -> set[str]:
         return {

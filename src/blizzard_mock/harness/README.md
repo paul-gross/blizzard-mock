@@ -438,7 +438,10 @@ and the engine-backed mock shares it; `opencode2_surface/` owns only the turns,
   validated before anything is written; an unknown name fails, naming every bad
   token, and writes no file.
 - **The surface:** `--version` prints `opencode v<version>`; `service
-  start|stop|status|restart` manage a detached service; `api --standalone GET
+  start|stop|status|restart` manage a detached service; `service get|set|unset
+  disabled` keeps the one service setting the fake holds, `disabled`, in
+  `$XDG_CONFIG_HOME/opencode/service.json`, and `service get disabled` prints
+  `true` or `false`; `api --standalone GET
   /api/session` opens an OpenCode 1 store as 2.x does the first time; and
   `--session <id>` is the takeover TUI. The TUI reads one line from its
   terminal, switches the session to the `build` agent, prompts it, and stays
@@ -589,6 +592,11 @@ the identity, because a resume — the judge call included — arrives without i
 `<Choice>pass</Choice>` when `SELFTEST.txt` is tracked, else `<Choice>fail</Choice>`. The key is the identity, never the
 prompt's wording. Any other prose prompt is a script error, as before, and the fence is checked first, so the
 responder never runs unfenced.
+
+The OpenCode 2 engine-backed mock answers the selftest the same way (`opencode2_engine/domain/selftest.py`): a session
+whose environment carries the selftest's `BLIZZARD_LEASE_ID` when it first takes a prose turn is the selftest's for the
+service's lifetime, its first prose turn commits `SELFTEST.txt`, and every later prose turn on it answers the choice. A
+tagged prompt on such a session is still the script it holds.
 
 ## Script helper API
 

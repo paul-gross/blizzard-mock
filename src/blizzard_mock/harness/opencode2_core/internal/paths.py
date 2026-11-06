@@ -19,6 +19,10 @@ def registration_path(env: Mapping[str, str]) -> Path:
     return _home(env, "XDG_STATE_HOME", (".local", "state")) / "opencode" / "service.json"
 
 
+def service_config_path(env: Mapping[str, str]) -> Path:
+    return _home(env, "XDG_CONFIG_HOME", (".config",)) / "opencode" / "service.json"
+
+
 def service_log_path(env: Mapping[str, str]) -> Path:
     return _home(env, "XDG_STATE_HOME", (".local", "state")) / "opencode" / "mock-service.log"
 
@@ -31,4 +35,4 @@ def database_path(env: Mapping[str, str]) -> Path:
     return _home(env, "XDG_DATA_HOME", (".local", "share")) / "opencode" / "opencode.db"
 
 
-__all__ = ["database_path", "registration_path", "service_log_path", "store_path"]
+__all__ = ["database_path", "registration_path", "service_config_path", "service_log_path", "store_path"]
