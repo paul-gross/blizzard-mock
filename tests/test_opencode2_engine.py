@@ -625,6 +625,44 @@ def test_a_command_reading_stdin_sees_its_end_rather_than_the_services_pipe(
     assert _texts(_assistants(messages)[-1]) == ["EOF"]
 
 
+def test_a_selftest_session_commits_on_its_first_prose_turn_and_judges_by_the_commit_after(
+    tmp_path: Path, start_service: Starter
+) -> None:
+    service = _started(start_service, tmp_path)
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    service.open_session("ses_selftest", repo)
+    identity = {"BLIZZARD_LEASE_ID": "selftest", **_FENCE, "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    service.call("PUT", "/api/session/ses_selftest/environment", {"variables": identity})
+    _turn(service, "ses_selftest", "Create a file named SELFTEST.txt and commit it.")
+    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True, check=True)
+    assert tracked.stdout.split() == ["SELFTEST.txt"]
+    # A judgement arrives without the identity; the session is still the selftest's.
+    service.call("PUT", "/api/session/ses_selftest/environment", {"variables": {**_FENCE, "PATH": "/usr/bin:/bin"}})
+    messages = _turn(service, "ses_selftest", "Reply with <Choice>pass</Choice> if SELFTEST.txt is committed.")
+    assert _texts(_assistants(messages)[-1])[-1].startswith("<Choice>pass</Choice>")
+
+
+def test_a_tagged_turn_under_the_selftest_identity_runs_its_script_and_marks_nothing(
+    tmp_path: Path, start_service: Starter
+) -> None:
+    service = _started(start_service, tmp_path)
+    service.open_session("ses_tagged", _repo(tmp_path))
+    identity = {"BLIZZARD_LEASE_ID": "selftest", **_FENCE, "PATH": "/usr/bin:/bin"}
+    service.call("PUT", "/api/session/ses_tagged/environment", {"variables": identity})
+    messages = _turn(service, "ses_tagged", "<behavior-script>\ntext('TAGGED')\n</behavior-script>\n")
+    assert _texts(_assistants(messages)[-1]) == ["TAGGED"]
+    service.call("PUT", "/api/session/ses_tagged/environment", {"variables": {**_FENCE, "PATH": "/usr/bin:/bin"}})
+    assert _idle(_turn(service, "ses_tagged", "Reply with the choice."))["outcome"] == "failed"
+
+
+def test_a_prose_prompt_outside_the_selftest_is_still_a_script(tmp_path: Path, start_service: Starter) -> None:
+    service = _started(start_service, tmp_path)
+    service.open_session("ses_prose", _repo(tmp_path))
+    service.call("PUT", "/api/session/ses_prose/environment", {"variables": {**_FENCE, "PATH": "/usr/bin:/bin"}})
+    assert _idle(_turn(service, "ses_prose", "Create a file named SELFTEST.txt."))["outcome"] == "failed"
+
+
 def test_a_turn_runs_the_script_its_prompt_holds_past_the_runners_preamble() -> None:
     preamble = "Work the chunk.\n\n| Field | Value |\n|-------|-------|\n| chunk | ch_1 |\n\n"
     assert program(preamble + "text('BUILT')\n") == "text('BUILT')"

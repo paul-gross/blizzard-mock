@@ -17,7 +17,7 @@ from typing import IO, cast
 
 from ...opencode2_core.domain import records
 from ...opencode2_core.internal.sessions import Engine, Json, Session, final_text, kill
-from ..domain import failures, fence
+from ..domain import failures, fence, selftest
 
 #: How long a script that reported its end is given to exit before it is ended.
 EXIT_GRACE_SECONDS = 5.0
@@ -43,12 +43,27 @@ class ScriptedTurns:
     def __init__(self, argv0: str) -> None:
         self._argv0 = argv0
         self._wakes: dict[str, str] = {}
+        self._selftests: set[str] = set()
         self._lock = threading.Lock()
 
     def run(self, engine: Engine, session: Session, prompt: str) -> None:
         messages = session.messages
         resumed = not (messages and messages[-1].get("type") == "user")
-        self._script(engine, session, prompt, {"resumed": resumed})
+        self._script(engine, session, self._selftest_answer(session, prompt), {"resumed": resumed})
+
+    def _selftest_answer(self, session: Session, prompt: str) -> str:
+        """``prompt``, or the selftest's script in place of its prose. A session is the selftest's from its first prose
+        turn carrying the selftest's identity, which commits; a judgement or a resume after it may carry none."""
+        script = selftest.answer(prompt, first=False)
+        if script is None:
+            return prompt
+        with self._lock:
+            if session.id in self._selftests:
+                return script
+            if not selftest.selftest_identity(session.environment or {}):
+                return prompt
+            self._selftests.add(session.id)
+        return selftest.answer(prompt, first=True) or prompt
 
     def wake(self, engine: Engine, session: Session, child: Session) -> None:
         with self._lock:
