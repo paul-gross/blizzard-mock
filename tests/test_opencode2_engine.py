@@ -643,6 +643,19 @@ def test_a_selftest_session_commits_on_its_first_prose_turn_and_judges_by_the_co
     assert _texts(_assistants(messages)[-1])[-1].startswith("<Choice>pass</Choice>")
 
 
+def test_a_tagged_turn_under_the_selftest_identity_runs_its_script_and_marks_nothing(
+    tmp_path: Path, start_service: Starter
+) -> None:
+    service = _started(start_service, tmp_path)
+    service.open_session("ses_tagged", _repo(tmp_path))
+    identity = {"BLIZZARD_LEASE_ID": "selftest", **_FENCE, "PATH": "/usr/bin:/bin"}
+    service.call("PUT", "/api/session/ses_tagged/environment", {"variables": identity})
+    messages = _turn(service, "ses_tagged", "<behavior-script>\ntext('TAGGED')\n</behavior-script>\n")
+    assert _texts(_assistants(messages)[-1]) == ["TAGGED"]
+    service.call("PUT", "/api/session/ses_tagged/environment", {"variables": {**_FENCE, "PATH": "/usr/bin:/bin"}})
+    assert _idle(_turn(service, "ses_tagged", "Reply with the choice."))["outcome"] == "failed"
+
+
 def test_a_prose_prompt_outside_the_selftest_is_still_a_script(tmp_path: Path, start_service: Starter) -> None:
     service = _started(start_service, tmp_path)
     service.open_session("ses_prose", _repo(tmp_path))

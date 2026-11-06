@@ -593,10 +593,10 @@ the identity, because a resume — the judge call included — arrives without i
 prompt's wording. Any other prose prompt is a script error, as before, and the fence is checked first, so the
 responder never runs unfenced.
 
-The OpenCode 2 engine-backed mock answers the selftest the same way (`opencode2_engine/domain/selftest.py`): a session
-whose environment carries the selftest's `BLIZZARD_LEASE_ID` when it first takes a prose turn is the selftest's for the
-service's lifetime, its first prose turn commits `SELFTEST.txt`, and every later prose turn on it answers the choice. A
-tagged prompt on such a session is still the script it holds.
+The OpenCode 2 engine-backed mock answers the selftest the same way (`opencode2_engine/domain/selftest.py`): the first
+prose turn whose session environment carries the selftest's `BLIZZARD_LEASE_ID` commits `SELFTEST.txt` and makes the
+session the selftest's for the service's lifetime, and every later prose turn on it answers the choice, with or without
+the identity. A tagged prompt is always the script it holds and marks nothing.
 
 ## Script helper API
 

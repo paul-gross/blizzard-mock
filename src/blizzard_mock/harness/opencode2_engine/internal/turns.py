@@ -52,15 +52,18 @@ class ScriptedTurns:
         self._script(engine, session, self._selftest_answer(session, prompt), {"resumed": resumed})
 
     def _selftest_answer(self, session: Session, prompt: str) -> str:
-        """``prompt``, or the selftest's script in place of its prose; a session is the selftest's from the first turn
-        that carries its identity, since a judgement or a resume may carry none."""
+        """``prompt``, or the selftest's script in place of its prose. A session is the selftest's from its first prose
+        turn carrying the selftest's identity, which commits; a judgement or a resume after it may carry none."""
+        script = selftest.answer(prompt, first=False)
+        if script is None:
+            return prompt
         with self._lock:
-            known = session.id in self._selftests
-            if not known and selftest.selftest_identity(session.environment or {}):
-                self._selftests.add(session.id)
-            elif not known:
+            if session.id in self._selftests:
+                return script
+            if not selftest.selftest_identity(session.environment or {}):
                 return prompt
-        return selftest.answer(prompt, first=not known) or prompt
+            self._selftests.add(session.id)
+        return selftest.answer(prompt, first=True) or prompt
 
     def wake(self, engine: Engine, session: Session, child: Session) -> None:
         with self._lock:

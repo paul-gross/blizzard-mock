@@ -1,5 +1,5 @@
 """The runner selftest's responder: the selftest drives the real binding with prose prompts, not scripts, so a session
-minted under the selftest's lease identity answers them as a compliant agent would — its first turn commits
+whose first prose turn carries the selftest's lease identity answers them as a compliant agent would — that turn commits
 ``SELFTEST.txt``, and each later prose turn, the judgement among them, passes when that file is tracked. The key is the
 identity, never the prompt's wording, and a tagged prompt is still the script it holds."""
 
