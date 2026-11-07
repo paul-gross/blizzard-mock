@@ -18,6 +18,10 @@ from ..domain import script, shell
 TOOL_SECONDS_CAP = 6.0
 
 
+class _Declined(Exception):
+    """A rejected permission request aborted the step: the turn ends there, with no idle."""
+
+
 class PlannedTurns:
     """Each turn in one assistant step: its plan's tool calls, then the reply the prompt asks for."""
 
@@ -36,7 +40,10 @@ class PlannedTurns:
             if engine.wait(session, STEP_SECONDS):
                 engine.interrupted(session, assistant)
                 return
-            outcome = self._tool(engine, session, assistant, step)
+            try:
+                outcome = self._tool(engine, session, assistant, step)
+            except _Declined:
+                return
             if outcome is None:
                 engine.interrupted(session, assistant)
                 return
@@ -85,6 +92,8 @@ class PlannedTurns:
         verdict = engine.judge(session, assistant, part, "shell", command)
         if verdict is None:
             return None
+        if verdict == "declined":
+            raise _Declined
         if verdict == "deny":
             return "", True
         env = dict(os.environ) if session.environment is None else dict(session.environment)
@@ -128,6 +137,8 @@ class PlannedTurns:
         verdict = engine.judge(session, assistant, part, "read", path)
         if verdict is None:
             return None
+        if verdict == "declined":
+            raise _Declined
         if verdict == "deny":
             return "", True
         try:
@@ -145,6 +156,8 @@ class PlannedTurns:
         verdict = engine.judge(session, assistant, part, "skill", name)
         if verdict is None:
             return None
+        if verdict == "declined":
+            raise _Declined
         if verdict == "deny":
             return "", True
         directory = Path(session.directory) / ".opencode" / "skills" / name

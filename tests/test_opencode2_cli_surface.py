@@ -28,6 +28,7 @@ from blizzard_mock.harness.opencode2_surface import _baked
 from blizzard_mock.harness.opencode2_surface import emit as surface_emit
 from blizzard_mock.harness.opencode2_surface.domain import script, shell
 from tests.opencode2_service import (
+    Json,
     Starter,
     artifact,
     bare_env,
@@ -180,6 +181,39 @@ def test_a_turn_runs_the_fixed_shell_against_the_session_environment_and_spawns_
     child_parts = tool_parts(service.settle(str(child["id"])))
     assert output(child_parts[0]) == "CHILD=\n"
     assert messages[-1]["type"] == "idle" and messages[-1]["outcome"] == "succeeded"
+
+
+@pytest.mark.parametrize("message", [None, "Refused; carry on without it."], ids=["bare", "with-message"])
+def test_a_refused_permission_request_ends_the_turn_as_2_1_4_does(
+    tmp_path: Path, start_service: Starter, message: str | None
+) -> None:
+    service = start_service(artifact(tmp_path))
+    service.cli("service", "start")
+    service.open_session("ses_refused", tmp_path, [{"action": "shell", "resource": "touch *", "effect": "ask"}])
+    service.data(
+        "POST", "/api/session/ses_refused/prompt", {"text": "Use the shell tool exactly once to run `touch asked`."}
+    )
+    deadline = time.monotonic() + 20
+    requests: list[Json] = []
+    while not requests and time.monotonic() < deadline:
+        requests = objects(service.data("GET", "/api/session/ses_refused/permission"))
+        time.sleep(0.1)
+    reply: dict[str, object] = {"decision": "reject"}
+    if message is not None:
+        reply["message"] = message
+    service.call("POST", f"/api/session/ses_refused/permission/{requests[0]['id']}/reply", reply)
+    messages = service.settle("ses_refused")
+    assert not (tmp_path / "asked").exists()
+    (refused,) = tool_parts(messages)
+    state = refused["state"]
+    assert isinstance(state, dict)
+    if message is None:
+        # A bare refusal aborts the step and the turn ends with no idle.
+        assert state["error"] == {"type": "aborted", "message": "The user declined this tool call"}
+        assert [m["type"] for m in messages] == ["user", "assistant"]
+    else:
+        assert state["error"] == {"type": "permission.rejected", "message": message}
+        assert messages[-1]["type"] == "idle" and messages[-1]["outcome"] == "succeeded"
 
 
 def test_a_service_restart_is_a_new_lifetime_that_keeps_the_sessions(tmp_path: Path, start_service: Starter) -> None:

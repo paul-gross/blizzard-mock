@@ -33,6 +33,10 @@ class _Steered(Exception):
         self.text = text
 
 
+class _Declined(Exception):
+    """A rejected permission request aborted the step: the turn ends there, with no idle."""
+
+
 class _Interrupted(Exception):
     pass
 
@@ -130,6 +134,9 @@ class _Turn:
             except _Interrupted:
                 self._release()
                 engine.interrupted(session, self.assistant)
+                return
+            except _Declined:
+                self._release()
                 return
             except _Steered:
                 self._close("stop")
@@ -263,6 +270,8 @@ class _Turn:
         verdict = engine.judge(session, self.assistant, part, name, resource, ask=request.get("ask") is True)
         if verdict is None:
             raise _Interrupted
+        if verdict == "declined":
+            raise _Declined
         if verdict == "deny":
             self._steer()
             return {"verdict": "deny"}

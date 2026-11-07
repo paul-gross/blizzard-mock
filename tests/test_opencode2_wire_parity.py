@@ -114,7 +114,11 @@ def test_every_engine_record_parses_through_blizzards_opencode_2_readers(
         service.data("POST", "/api/session/ses_parity_asks/prompt", {"text": script})
         records["permission"] = _wait_for_list(service, "/api/session/ses_parity_asks/permission")
         request_id = records["permission"][0]["id"]
-        service.call("POST", f"/api/session/ses_parity_asks/permission/{request_id}/reply", {"decision": "reject"})
+        service.call(
+            "POST",
+            f"/api/session/ses_parity_asks/permission/{request_id}/reply",
+            {"decision": "reject", "message": "Refused."},
+        )
         records["form"] = _wait_for_list(service, "/api/session/ses_parity_asks/form")
         service.call("DELETE", f"/api/session/ses_parity_asks/form/{records['form'][0]['id']}")
         service.settle("ses_parity_asks")
