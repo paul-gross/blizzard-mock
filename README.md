@@ -2,7 +2,7 @@
 
 The **mock fleet** for [blizzard](https://github.com/paul-gross/blizzard). Everything
 blizzard integrates with is a pluggable seam
-(`blizzard-context:/architecture/system-shape.md`, `bzh:pluggable-seams`), and every
+(`blizzard-context:/architecture/system-shape/pluggable-seams.md`, `bzh:pluggable-seams`), and every
 seam gets a controllable mock here.
 
 The fleet exists for one reason: an agent building blizzard must be able to construct
