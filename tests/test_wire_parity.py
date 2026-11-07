@@ -443,11 +443,13 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "RunnerDecliningView": ("RunnerDecliningView", frozenset()),
     "RunnerEnrollmentResponse": ("RunnerEnrollmentResponse", frozenset()),
     "RunnerFactAck": ("RunnerFactAck", frozenset()),
-    "RunnerIdentityRefusal": ("RunnerIdentityRefusal", frozenset()),
+    "RunnerIdentityRefusal": ("RunnerIdentityProblem", frozenset({"type", "title", "detail", "instance", "status"})),
+    "RunnerIdentityProblem": ("RunnerIdentityProblem", frozenset()),
     "RunnerIdentityView": ("RunnerIdentityView", frozenset()),
     # The mock models no graph set, so it flags no gate as unenforceable; the real field is optional.
     "RunnerRegistrationResponse": ("RunnerRegistrationResponse", frozenset({"unenforceable_gates"})),
-    "RunnerVersionRefusal": ("RunnerVersionRefusal", frozenset()),
+    "RunnerVersionRefusal": ("RunnerVersionProblem", frozenset({"type", "title", "instance", "status"})),
+    "RunnerVersionProblem": ("RunnerVersionProblem", frozenset()),
     "RunnerBindingView": ("RunnerBindingView", frozenset()),
     "RunnerView": ("RunnerView", frozenset()),
     # Scopes are the deployment's global vocabulary in the mock, held in no project.
@@ -471,6 +473,7 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 
 #: Request-body mirrors, invisible to ``_mirror_models`` since they live in ``mock_hub.api.deps``.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
+    "ArtifactCheckBody": ("ArtifactCheckRequest", frozenset()),
     "HostAddBody": ("HostAddRequest", frozenset()),
     "HostFactBatchBody": ("HostFactBatch", frozenset()),
     "HostFactBody": ("RunnerFact", frozenset()),

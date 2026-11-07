@@ -54,6 +54,20 @@ class HubLever(StrEnum):
     ARTIFACT_REFUSAL = "artifact_refusal"
     IDP_OFFERED = "idp_offered"
     VERSION_REFUSED = "version_refused"
+    LEGACY_CLAIM_REFUSALS = "legacy_claim_refusals"
+    LEGACY_IDENTITY_REFUSALS = "legacy_identity_refusals"
+    LEGACY_VERSION_REFUSALS = "legacy_version_refusals"
+    LEGACY_REKEY_REFUSALS = "legacy_rekey_refusals"
+    LEGACY_READ_REFUSALS = "legacy_read_refusals"
+    LEGACY_HOST_RUNNER_REFUSALS = "legacy_host_runner_refusals"
+    LEGACY_AUTH_REFUSALS = "legacy_auth_refusals"
+    CLAIM_RUNNER_RETIRED = "claim_runner_retired"
+    CLAIM_RUNNER_VERSION_REFUSED = "claim_runner_version_refused"
+    PINNED_GRAPH_MISSING = "pinned_graph_missing"
+    ENFORCE_RELEASE_ROUTE_TOKEN = "enforce_release_route_token"
+    RUNNER_READ_MISSING = "runner_read_missing"
+    HOST_ADD_RUNNER_LIFECYCLE_CONFLICT = "host_add_runner_lifecycle_conflict"
+    HOST_RETIRE_LIFECYCLE_CONFLICT = "host_retire_lifecycle_conflict"
 
 
 CATALOG: dict[str, str] = {
@@ -84,4 +98,18 @@ CATALOG: dict[str, str] = {
     HubLever.VERSION_REFUSED.value: (
         "POST /api/fleet/runners from payload.runner_id answers 409 RunnerVersionRefusal from the payload (sticky)"
     ),
+    HubLever.LEGACY_CLAIM_REFUSALS.value: "serve claim refusals without problem members using application/json",
+    HubLever.LEGACY_IDENTITY_REFUSALS.value: "serve identity refusals without problem members using application/json",
+    HubLever.LEGACY_VERSION_REFUSALS.value: "serve registration version refusals without problem members",
+    HubLever.LEGACY_REKEY_REFUSALS.value: "serve route-token rekey refusals without problem members",
+    HubLever.LEGACY_READ_REFUSALS.value: "serve resource read and release refusals without problem members",
+    HubLever.LEGACY_HOST_RUNNER_REFUSALS.value: "serve host runner refusals without problem members",
+    HubLever.LEGACY_AUTH_REFUSALS.value: "serve authentication and tenant refusals without problem members",
+    HubLever.CLAIM_RUNNER_RETIRED.value: "refuse claims as if the runner were retired",
+    HubLever.CLAIM_RUNNER_VERSION_REFUSED.value: "refuse claims as if the runner version were outside the window",
+    HubLever.PINNED_GRAPH_MISSING.value: "graph-dependent calls answer 500 as if the chunk's pinned graph were missing",
+    HubLever.ENFORCE_RELEASE_ROUTE_TOKEN.value: "enforce the live route token on release (sticky)",
+    HubLever.RUNNER_READ_MISSING.value: "simulate the caller disappearing between authentication and runner read",
+    HubLever.HOST_ADD_RUNNER_LIFECYCLE_CONFLICT.value: "simulate an adopted runner changing during host add",
+    HubLever.HOST_RETIRE_LIFECYCLE_CONFLICT.value: "simulate a lifecycle race before or during host runner retirement",
 }

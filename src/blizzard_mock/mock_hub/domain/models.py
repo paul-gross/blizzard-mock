@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -449,6 +449,9 @@ class ChunkSpec(BaseModel):
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list[WorkRefSpec])
     graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list[GraphArtifactSpec])
+    artifact_formats: dict[str, list[Literal["finding-delta", "garden-proposal-candidate"]]] = Field(
+        default_factory=dict
+    )
     #: The chunk's own run identity, or ``None`` for a chunk that is not a routine run.
     garden_run: GardenRunSpec | None = None
     garden_findings: list[GardenFindingSpec] = Field(default_factory=list[GardenFindingSpec])
@@ -492,6 +495,9 @@ class ChunkState(BaseModel):
     nodes: dict[str, NodeSpec]
     work_refs: list[WorkRefSpec] = Field(default_factory=list[WorkRefSpec])
     graph_artifacts: list[GraphArtifactSpec] = Field(default_factory=list[GraphArtifactSpec])
+    artifact_formats: dict[str, list[Literal["finding-delta", "garden-proposal-candidate"]]] = Field(
+        default_factory=dict
+    )
     garden_run: GardenRunSpec | None = None
     garden_findings: list[GardenFindingSpec] = Field(default_factory=list[GardenFindingSpec])
     garden_answered_findings: list[GardenAnsweredFindingSpec] | None = None
@@ -501,6 +507,7 @@ class ChunkState(BaseModel):
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY
+    status_before_pause: ChunkStatus | None = None
     #: The fence: the newest ``lease.minted`` epoch reported for the chunk (D-044).
     latest_epoch: int = 0
     claimed: bool = False
@@ -510,6 +517,7 @@ class ChunkState(BaseModel):
     #: How many times the live route's capability token has been re-keyed,
     #: folded into the token string so a re-key never repeats.
     route_token_rekey_count: int = 0
+    live_route_token: str | None = None
     #: ``(from_node_id, epoch)`` -> the apply-response already produced, for idempotent
     #: re-apply (D-090): a replayed completion returns its original outcome, no re-advance.
     applied: dict[str, ApplyOutcome] = Field(default_factory=dict)
@@ -548,15 +556,21 @@ class ChunkState(BaseModel):
 
     def refuse_release(self, *, runner_id: str, epoch: int) -> None:
         """Refuse a release in the real hub's order: a caller not holding the route
-        (:class:`ReleaseNotHolder`), a chunk not ``running``, then an epoch the chunk has moved
-        past (both :class:`ReleaseRefused`)."""
+        (:class:`ReleaseNotHolder`), a chunk not ``running``, then an epoch other than the
+        latest (both :class:`ReleaseRefused`)."""
+        if self.ended:
+            raise ReleaseNotHolder(chunk_id=self.chunk_id, runner_id=runner_id, detail="release refused: not-holder")
         if not self.claimed or self.route_runner_id != runner_id:
             raise ReleaseNotHolder(chunk_id=self.chunk_id, runner_id=runner_id)
         if self.status is not ChunkStatus.RUNNING:
-            raise ReleaseRefused(chunk_id=self.chunk_id, reason="not-running", detail=f"chunk is {self.status.value}")
-        if epoch < self.latest_epoch:
             raise ReleaseRefused(
-                chunk_id=self.chunk_id, reason="stale", detail=f"stale epoch {epoch} < {self.latest_epoch}"
+                chunk_id=self.chunk_id,
+                reason="not-running",
+                detail=f"chunk {self.chunk_id}: release refused: not-running",
+            )
+        if epoch != self.latest_epoch:
+            raise ReleaseRefused(
+                chunk_id=self.chunk_id, reason="stale", detail=f"chunk {self.chunk_id}: release refused: stale"
             )
 
     def release(self, *, runner_id: str, epoch: int, reason: str) -> int:
@@ -653,8 +667,11 @@ class NoCurrentNode(Exception):
 class ReleaseNotHolder(Exception):
     """The caller does not hold the chunk's route — the real hub answers a release ``403``."""
 
-    def __init__(self, *, chunk_id: str, runner_id: str) -> None:
-        super().__init__(f"runner {runner_id} does not hold chunk {chunk_id}'s route")
+    def __init__(self, *, chunk_id: str, runner_id: str, detail: str | None = None) -> None:
+        message = (
+            f"chunk {chunk_id}: {detail}" if detail else f"runner {runner_id} does not hold chunk {chunk_id}'s route"
+        )
+        super().__init__(message)
         self.chunk_id = chunk_id
 
 

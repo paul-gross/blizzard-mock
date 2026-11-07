@@ -27,6 +27,7 @@ clock at startup; otherwise it reads system time.
 | Hub to drive | `--hub-url` | `BZ_HUB_URL` | `http://127.0.0.1:8421` |
 | Bearer token | `--token` | `BZ_HUB_TOKEN` | none — added at the hub on start |
 | Runner name | `--name` | `BZ_MOCK_RUNNER_NAME` | `runner-mock` |
+| Reported runner version | — | `BZ_MOCK_RUNNER_VERSION` | omitted — set to the candidate runner version when driving a version-gated hub |
 
 The token is the driver's only identity: every hub call presents it as
 `Authorization: Bearer`, and no request body names the runner. Started without one, the
@@ -67,6 +68,18 @@ hidden from OpenAPI.
   | `POST /_drive/reset` | Drop held leases + clear levers |
 
 - **Levers** (`/_levers`): the same catalog/arm/clear/reset shape as the mock hub.
+
+Drive calls report the hub's body unchanged,
+including typed problems, unknown types, and legacy responses without a type. Their
+`headers` include only `content-type`, `www-authenticate`, and `retry-after` when
+present. Refused claims additionally expose `refusal`: `terminal`, `dependency`,
+`incompatible`, `conflict`, `paused`, or `unexpected`. Known problem types take
+precedence; only a body without `type` uses the legacy field-based fallback.
+Unknown types, mismatched HTTP statuses, and malformed denial bodies are unexpected.
+Registration, peeks, chunk and question reads, and runner pause/resume also expose
+`refusal` on HTTP errors: `identity`, `version`, or `unexpected`. The same type-first
+rule applies; success clears the previous observation. The tokenless matched-peek
+control drives an actual identity refusal rather than synthesizing a hub response.
 
 ## Lever surface (`/_levers`)
 

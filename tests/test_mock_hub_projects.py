@@ -131,6 +131,22 @@ def test_chunk_reads_carry_the_chunk_project(client: FleetClient) -> None:
         assert (view["project_id"], view["project_slug"], view["project_name"]) == (project_id, "web", "Web")
 
 
+def test_chunk_status_batch_omits_foreign_tenant_and_requires_ids(client: FleetClient) -> None:
+    own = seed_chunk(client)
+    tenant_id = client.post("/_seed/tenants", json={"name": "Second"}).json()["tenant_id"]
+    foreign_project = seed_project(client, "foreign", tenant_id=tenant_id)
+    foreign = seed_chunk(client, foreign_project)
+    added = client.post("/_seed/runners", json={"name": "other", "tenant_id": tenant_id}).json()
+    headers = {"Authorization": f"Bearer {added['token']}"}
+    params = {"chunk_id": [own, foreign, "missing"]}
+
+    assert [row["chunk_id"] for row in client.get("/api/fleet/chunk-statuses", params=params).json()] == [own]
+    assert [
+        row["chunk_id"] for row in client.get("/api/fleet/chunk-statuses", params=params, headers=headers).json()
+    ] == [foreign]
+    assert client.get("/api/fleet/chunk-statuses").status_code == 422
+
+
 # --- the declaration a runner is added with ----------------------------------
 
 
@@ -165,6 +181,8 @@ def test_adding_a_runner_naming_an_unknown_project_is_refused_422_and_adds_nothi
     resp = client.post("/api/runners", json={"name": "lost", "projects": ["default", "nowhere"]})
 
     assert resp.status_code == 422, resp.text
+    assert resp.headers["content-type"] == "application/json"
+    assert set(resp.json()) == {"detail"}
     assert "nowhere" in resp.json()["detail"]
     assert len(client.service.state.list_runners()) == before
 

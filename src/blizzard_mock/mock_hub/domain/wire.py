@@ -7,6 +7,8 @@ asserted against the committed hub OpenAPI by ``tests/test_wire_parity.py``.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from blizzard_mock.mock_hub.domain.models import (
@@ -364,11 +366,20 @@ class VersionWindowView(BaseModel):
 
 
 class RunnerVersionRefusal(BaseModel):
+    """The legacy no-type version refusal, retained for older-hub simulations."""
+
     reason: str
     runner_version: str | None = None
     hub_version: str
     floor: str
     detail: str
+
+
+class RunnerVersionProblem(RunnerVersionRefusal):
+    type: Literal["urn:blizzard:problem:runner-version"]
+    title: str
+    instance: str
+    status: int | None = None
 
 
 class RunnerRegistrationResponse(BaseModel):
@@ -451,12 +462,20 @@ class RunnerIdentityView(BaseModel):
 
 
 class RunnerIdentityRefusal(BaseModel):
-    """Mirrors ``blizzard.wire.runner.RunnerIdentityRefusal`` — the identity route's typed 401.
+    """The legacy no-type identity refusal.
     ``reason`` is one of ``missing``/``unknown``/``revoked``/``retired``; ``runner_id`` names the
     runner a revoked or retired token was issued to."""
 
     reason: str
     runner_id: str | None = None
+
+
+class RunnerIdentityProblem(RunnerIdentityRefusal):
+    type: Literal["urn:blizzard:problem:runner-identity"]
+    title: str
+    detail: str
+    instance: str
+    status: int | None = None
 
 
 class MeTenantView(BaseModel):
@@ -518,9 +537,7 @@ class TranscriptSegmentAck(BaseModel):
 
 
 class LeaseTranscriptView(BaseModel):
-    """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView`` —
-    a lease's retained turns, concatenated. No cap policy, so ``truncated`` stays
-    ``False``; no bearer-token confinement either, unlike the real route."""
+    """Mirrors ``blizzard.wire.transcript_segment.LeaseTranscriptView``."""
 
     chunk_id: str
     node_id: str

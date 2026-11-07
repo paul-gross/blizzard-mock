@@ -15,7 +15,10 @@ from blizzard_mock.clock import Clock, ControlledClock, resolve_clock
 from blizzard_mock.clock_api import clock_router
 from blizzard_mock.levers import InMemoryLeverStore
 from blizzard_mock.mock_hub.api.control import captured_router, levers_router, seed_router
+from blizzard_mock.mock_hub.api.deps import DependencyRefusal
 from blizzard_mock.mock_hub.api.middleware import HubLeverMiddleware, RequestCaptureMiddleware
+from blizzard_mock.mock_hub.api.routes import RunnerChunkNotFound, read_refusal
+from blizzard_mock.mock_hub.api.routes import claim_router as hub_claim_router
 from blizzard_mock.mock_hub.api.routes import fleet_router as hub_fleet_router
 from blizzard_mock.mock_hub.api.routes import host_router as hub_host_router
 from blizzard_mock.mock_hub.api.routes import identity_router as hub_identity_router
@@ -23,6 +26,7 @@ from blizzard_mock.mock_hub.api.routes import operator_router as hub_operator_ro
 from blizzard_mock.mock_hub.api.routes import router as hub_router
 from blizzard_mock.mock_hub.config import MockHubConfig
 from blizzard_mock.mock_hub.domain.capture import InMemoryCaptureStore
+from blizzard_mock.mock_hub.domain.levers import HubLever
 from blizzard_mock.mock_hub.domain.service import ChunkNotFound, MockHubService
 from blizzard_mock.mock_hub.internal.state_store import InMemoryHubState
 
@@ -49,15 +53,40 @@ def create_app(config: MockHubConfig | None = None, *, clock: Clock | None = Non
     app.add_middleware(HubLeverMiddleware, levers=levers, host_plane_absent=host_plane_absent, idp_offered=idp_offered)
     app.add_middleware(RequestCaptureMiddleware, captured=captured)
 
+    @app.exception_handler(DependencyRefusal)
+    async def _dependency_refusal(request: Request, exc: DependencyRefusal) -> JSONResponse:
+        legacy = levers.find(HubLever.LEGACY_AUTH_REFUSALS, None)
+        if legacy is not None:
+            levers.consume(legacy)
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            media_type="application/problem+json",
+            content={
+                "type": f"urn:blizzard:problem:{exc.kind}",
+                "title": exc.title,
+                "detail": exc.detail,
+                "instance": request.url.path,
+                "status": exc.status_code,
+            },
+        )
+
     @app.exception_handler(ChunkNotFound)
     async def _not_found(_request: Request, exc: ChunkNotFound) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(RunnerChunkNotFound)
+    async def _runner_chunk_not_found(request: Request, exc: RunnerChunkNotFound) -> JSONResponse:
+        return read_refusal(
+            service, exc.chunk_id, "chunk-not-found", "Chunk not found", f"unknown chunk {exc.chunk_id}", request
+        )
 
     app.include_router(hub_router)
     # Ahead of the gated fleet router, so the identity route answers a refused token itself.
     app.include_router(hub_identity_router)
     app.include_router(hub_host_router)
     app.include_router(hub_fleet_router)
+    app.include_router(hub_claim_router)
     app.include_router(hub_operator_router)
     app.include_router(seed_router)
     app.include_router(levers_router)

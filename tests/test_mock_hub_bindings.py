@@ -215,13 +215,15 @@ def test_a_per_project_hold_offers_the_next_project_past_an_unusable_head(client
 def test_the_declared_agents_are_stored_and_read_back_and_a_bare_registration_clears_them(client: FleetClient) -> None:
     world = _World(client)
 
-    world.register(bindings=_bindings(("web", "ws-a")), agents=3)
+    answer = world.register(bindings=[{"project": "web", "workspace_id": "ws-a", "agents": 99}], agents=3)
+    assert answer["bindings"][0]["agents"] == 3
     own = client.get(f"/api/fleet/runners/{world.runner_id}", headers=_bearer(world.token)).json()
     assert own["agents"] == 3
 
     world.register(bindings=_bindings(("web", "ws-a")))
     own = client.get(f"/api/fleet/runners/{world.runner_id}", headers=_bearer(world.token)).json()
     assert own["agents"] is None
+    assert own["bindings"][0]["agents"] == 0
 
 
 def test_a_non_positive_agents_is_refused(client: FleetClient) -> None:

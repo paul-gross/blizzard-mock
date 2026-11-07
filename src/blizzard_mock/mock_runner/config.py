@@ -23,6 +23,7 @@ ENV_HUB_URL = "BZ_HUB_URL"
 ENV_TOKEN = "BZ_HUB_TOKEN"
 ENV_NAME = "BZ_MOCK_RUNNER_NAME"
 ENV_WORKSPACE_ID = "BZ_MOCK_WORKSPACE_ID"
+ENV_RUNNER_VERSION = "BZ_MOCK_RUNNER_VERSION"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class MockRunnerConfig:
     token: str | None = None
     name: str = DEFAULT_NAME
     workspace_id: str = DEFAULT_WORKSPACE_ID
+    runner_version: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -51,6 +53,7 @@ class MockRunnerConfig:
         token: str | None = None,
         name: str | None = None,
         workspace_id: str | None = None,
+        runner_version: str | None = None,
     ) -> MockRunnerConfig:
         return cls(
             host=host or os.environ.get(ENV_HOST, DEFAULT_HOST),
@@ -59,4 +62,5 @@ class MockRunnerConfig:
             token=token or os.environ.get(ENV_TOKEN) or None,
             name=name or os.environ.get(ENV_NAME, DEFAULT_NAME),
             workspace_id=workspace_id or os.environ.get(ENV_WORKSPACE_ID, DEFAULT_WORKSPACE_ID),
+            runner_version=runner_version or os.environ.get(ENV_RUNNER_VERSION) or None,
         )
