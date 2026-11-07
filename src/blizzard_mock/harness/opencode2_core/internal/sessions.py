@@ -74,6 +74,7 @@ class _Ask:
     request: Json
     answered: threading.Event = field(default_factory=threading.Event)
     decision: str | None = None
+    message: str | None = None
 
 
 @dataclass
@@ -435,12 +436,13 @@ class Engine:
             session = self.get(session_id)
             return [ask.request for ask in session.asks.values() if not ask.answered.is_set()]
 
-    def reply_permission(self, session_id: str, request_id: str, decision: str) -> None:
+    def reply_permission(self, session_id: str, request_id: str, decision: str, message: str | None = None) -> None:
         with self.lock:
             ask = self.get(session_id).asks.get(request_id)
             if ask is None:
                 raise NotFoundError(request_id)
             ask.decision = decision
+            ask.message = message
             ask.answered.set()
 
     def forms(self, session_id: str) -> list[Json]:
@@ -584,10 +586,12 @@ class Engine:
     def judge(
         self, session: Session, assistant: Json, part: Json, action: str, resource: str, *, ask: bool = False
     ) -> str | None:
-        """Hold a tool call to the session's rules: ``allow``, or ``deny`` with the part already failed as refused, or
-        ``None`` when the session was interrupted while a permission request held it. An ``ask`` — the rules', or one
-        ``ask`` forces on a call they would allow — raises a request and waits for its reply; an ``always`` reply
-        saves the request's pattern as an allow rule."""
+        """Hold a tool call to the session's rules: ``allow``, or ``deny`` with the part already failed as refused,
+        ``declined`` with the step already aborted, or ``None`` when the session was interrupted while a permission
+        request held it. An ``ask`` — the rules', or one ``ask`` forces on a call they would allow — raises a request
+        and waits for its reply; an ``always`` reply saves the request's pattern as an allow rule. A ``reject`` with
+        a message fails the call with it and the turn goes on; one without a message aborts the step and ends the
+        turn with no idle, as 2.1.4 does."""
         effect = rules.evaluate(session.permissions, action, resource)
         if ask and effect == "allow":
             effect = "ask"
@@ -597,12 +601,16 @@ class Engine:
         if effect != "ask":
             return "allow"
         source: Json = {"type": "tool", "id": part["id"], "messageID": assistant["id"]}
-        decision = self.request_permission(session, action, resource, source, holding=part)
-        if decision is None:
+        answered = self.request_permission(session, action, resource, source, holding=part)
+        if answered is None:
             return None
-        if decision == "reject":
-            self.fail_tool(session, part, "permission.rejected", f"Permission rejected: {action}")
+        decision, message = answered
+        if decision == "reject" and message is not None:
+            self.fail_tool(session, part, "permission.rejected", message)
             return "deny"
+        if decision == "reject":
+            self.declined(session, assistant)
+            return "declined"
         if decision == "always":
             with self.lock:
                 session.permissions.append(
@@ -612,9 +620,9 @@ class Engine:
 
     def request_permission(
         self, session: Session, action: str, resource: str, source: Json, *, holding: Json | None = None
-    ) -> str | None:
-        """Raise a permission request and wait for its reply: ``once``, ``always``, or ``reject``; ``None`` when the
-        session was interrupted first. ``holding`` is the tool part the request pends."""
+    ) -> tuple[str, str | None] | None:
+        """Raise a permission request and wait for its reply: ``once``, ``always``, or ``reject``, with the reply's
+        message; ``None`` when the session was interrupted first. ``holding`` is the tool part the request pends."""
         ask = _Ask(
             {
                 "id": records.new_id("per"),
@@ -637,7 +645,7 @@ class Engine:
                 _state(holding)["status"] = "running"
         if session.cancel.is_set() or ask.decision is None:
             return None
-        return ask.decision
+        return ask.decision, ask.message
 
     def await_form(self, session: Session, title: str, fields: list[Json]) -> Json | None:
         """Raise a form and hold the turn until it is cancelled; the form, or ``None`` when the session was
@@ -760,6 +768,15 @@ class Engine:
             self.save()
         self._step_ended(session, assistant)
         self.idle(session, "failed", error)
+
+    def declined(self, session: Session, assistant: Json) -> None:
+        """Abort the step a rejected request held: the call and the step fail ``aborted``, and the turn ends with no
+        idle, its outcome unset — nothing the session records says it settled."""
+        with self.lock:
+            _abort_assistant(assistant, "The user declined this tool call")
+            session.current = None
+            self.save()
+        self._step_ended(session, assistant)
 
     def interrupted(self, session: Session, assistant: Json | None) -> None:
         with self.lock:

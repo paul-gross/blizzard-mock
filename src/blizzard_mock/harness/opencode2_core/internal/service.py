@@ -291,7 +291,11 @@ class _Handler(BaseHTTPRequestHandler):
         elif route == ("GET", "permission"):
             self._send(200, {"data": engine.permission_requests(sid)})
         elif route == ("POST", "permission", "{id}", "reply"):
-            engine.reply_permission(sid, parts[1], str(self._body().get("decision")))
+            body = self._body()
+            message = body.get("message")
+            engine.reply_permission(
+                sid, parts[1], str(body.get("decision")), message if isinstance(message, str) else None
+            )
             self._send(204)
         elif route == ("GET", "form"):
             self._send(200, {"data": engine.forms(sid)})

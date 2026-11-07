@@ -242,9 +242,16 @@ def test_a_tool_denied_for_every_resource_is_withheld_and_never_called(tmp_path:
     assert _texts(_assistants(messages)[-1]) == ["withheld"]
 
 
-@pytest.mark.parametrize(("decision", "ran", "status"), [("once", True, "completed"), ("reject", False, "refused")])
+@pytest.mark.parametrize(
+    ("reply", "ran", "status"),
+    [
+        ({"decision": "once"}, True, "completed"),
+        ({"decision": "reject", "message": "Refused; carry on without it."}, False, "refused"),
+    ],
+    ids=["once", "reject-with-message"],
+)
 def test_an_ask_rule_holds_the_call_on_a_permission_request_until_it_is_answered(
-    tmp_path: Path, start_service: Starter, decision: str, ran: bool, status: str
+    tmp_path: Path, start_service: Starter, reply: Json, ran: bool, status: str
 ) -> None:
     service = _started(start_service, tmp_path)
     repo = _repo(tmp_path)
@@ -259,10 +266,47 @@ def test_an_ask_rule_holds_the_call_on_a_permission_request_until_it_is_answered
     _wait_for(raised)
     (request,) = requests
     assert request["action"] == "shell" and request["resources"] == ["touch asked"] and request["save"] == ["touch *"]
-    service.call("POST", f"/api/session/ses_ask/permission/{request['id']}/reply", {"decision": decision})
+    service.call("POST", f"/api/session/ses_ask/permission/{request['id']}/reply", reply)
     messages = service.settle("ses_ask")
     assert (repo / "asked").exists() is ran
     assert _texts(_assistants(messages)[-1]) == [status]
+    assert messages[-1]["type"] == "idle" and messages[-1]["outcome"] == "succeeded"
+    if "message" in reply:
+        (refused,) = tool_parts(messages)
+        state = refused["state"]
+        assert isinstance(state, dict) and state["error"] == {
+            "type": "permission.rejected",
+            "message": reply["message"],
+        }
+
+
+def test_a_reject_without_a_message_aborts_the_step_and_ends_the_turn_with_no_idle(
+    tmp_path: Path, start_service: Starter
+) -> None:
+    service = _started(start_service, tmp_path)
+    repo = _repo(tmp_path)
+    service.open_session("ses_declined", repo, [{"action": "shell", "resource": "touch *", "effect": "ask"}])
+    service.data("POST", "/api/session/ses_declined/prompt", {"text": "shell('touch asked')\ntext('went on')\n"})
+    requests: list[Json] = []
+
+    def raised() -> bool:
+        requests[:] = objects(service.data("GET", "/api/session/ses_declined/permission"))
+        return bool(requests)
+
+    _wait_for(raised)
+    service.call("POST", f"/api/session/ses_declined/permission/{requests[0]['id']}/reply", {"decision": "reject"})
+    messages = service.settle("ses_declined")
+    assert not (repo / "asked").exists()
+    assert [m["type"] for m in messages] == ["user", "assistant"]
+    (assistant,) = _assistants(messages)
+    assert assistant["error"] == {"type": "aborted", "message": "Step interrupted"} and assistant["finish"] == "error"
+    (declined,) = tool_parts(messages)
+    state = declined["state"]
+    assert isinstance(state, dict) and state["error"] == {
+        "type": "aborted",
+        "message": "The user declined this tool call",
+    }
+    assert _texts(assistant) == []
 
 
 def test_an_always_reply_saves_the_pattern_so_the_next_matching_call_runs_unasked(
