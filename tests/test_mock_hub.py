@@ -699,6 +699,7 @@ def test_registration_stores_declining_and_the_runner_view_serves_it_superseded_
     assert client.post("/api/fleet/runners", json={**body, "declining": [pace]}).status_code == 201
     second: _RunnerView = client.get("/api/fleet/runners/r-declining").json()
     assert [d["lever"] for d in second["declining"]] == ["pace"]
+    assert [d["lever_kind"] for d in second["declining"]] == ["pace"]
 
     assert client.post("/api/fleet/runners", json=body).status_code == 201
     third: _RunnerView = client.get("/api/fleet/runners/r-declining").json()
