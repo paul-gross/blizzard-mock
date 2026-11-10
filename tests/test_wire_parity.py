@@ -16,7 +16,7 @@ unresolvable ``blizzard`` refuses a green rather than reporting parity it never 
 
 from __future__ import annotations
 
-import importlib.util
+import ast
 import inspect
 import json
 import os
@@ -26,7 +26,7 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -61,23 +61,6 @@ def _sibling(path: Path) -> str:
         f"not green; set $BLIZZARD_SOURCE if it lives elsewhere"
     )
     return path.read_text()
-
-
-def _exec_source(name: str, path: Path) -> ModuleType:
-    """Execute one sibling source file as module ``name``, registered in ``sys.modules`` first:
-    a module's own ``@dataclass`` classes resolve their (all-string, ``from __future__ import
-    annotations``) field annotations by looking their module back up there, so unregistered,
-    every dataclass in the file fails to define at class-creation time."""
-    assert path.is_file(), (
-        f"no sibling blizzard worktree at {_BLIZZARD} (expected {path}) — parity is unverifiable, "
-        f"not green; set $BLIZZARD_SOURCE if it lives elsewhere"
-    )
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None, f"could not load a module spec from {path}"
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 #: Runs under blizzard's own interpreter: reads the facade's stdout on stdin, parses it with
@@ -578,17 +561,57 @@ def test_accepted_fact_kinds_match_the_real_vocabulary() -> None:
     assert mirrored == real
 
 
+def _enum_values(source: str, name: str) -> dict[str, str]:
+    classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == name]
+    assert len(classes) == 1, f"expected one {name} declaration"
+    values: dict[str, str] = {}
+    for node in classes[0].body:
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue
+        assert isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name), (
+            f"unsupported {name} member declaration"
+        )
+        assert isinstance(node.value, ast.Constant) and isinstance(node.value.value, str), (
+            f"unsupported {name} member value"
+        )
+        values[node.targets[0].id] = node.value.value
+    return values
+
+
+def _literal_values(source: str, name: str) -> set[str]:
+    declarations = [
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+    assert len(declarations) == 1, f"expected one {name} declaration"
+    value = declarations[0].value
+    assert isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name) and value.value.id == "Literal", (
+        f"unsupported {name} declaration"
+    )
+    elements = value.slice.elts if isinstance(value.slice, ast.Tuple) else [value.slice]
+    assert all(isinstance(element, ast.Constant) and isinstance(element.value, str) for element in elements), (
+        f"unsupported {name} literal"
+    )
+    return {
+        element.value for element in elements if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    }
+
+
 @needs_blizzard
 def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
     """The incompatible claim ``409`` body appears in no OpenAPI schema, so the mock's ``reason``
     values are pinned to the real ``ClaimDenialReason`` here: a runner reads the value to tell a
     project denial from a capability one."""
-    real = _exec_source("_claim_denials_wire_parity", _CLAIM_DENIALS_SOURCE)
-    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} == {
-        r.value for r in real.ClaimDenialReason
-    }
-    assert real.ClaimDenialReason.CAPABILITY.value == hub_service.CLAIM_DENIED_CAPABILITY
-    assert real.ClaimDenialReason.PROJECT.value == hub_service.CLAIM_DENIED_PROJECT
+    real = _enum_values(_sibling(_CLAIM_DENIALS_SOURCE), "ClaimDenialReason")
+    # The mock never denies a claim on binding.
+    omitted = {"binding"}
+    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} | omitted == set(real.values()), (
+        "claim denial vocabulary differs"
+    )
+    assert real["CAPABILITY"] == hub_service.CLAIM_DENIED_CAPABILITY
+    assert real["PROJECT"] == hub_service.CLAIM_DENIED_PROJECT
 
 
 @needs_blizzard
@@ -596,12 +619,42 @@ def test_hub_event_kinds_match_the_real_vocabulary() -> None:
     """``create event`` routes the hub's own kinds to ``hub_event_log`` by the real
     ``HubEventKind``, and lets a runner report only the kinds both logs carry — a hub kind
     the mock never learned would land in a tenant's log."""
-    real = _exec_source("_event_log_wire_parity", _EVENT_LOG_SOURCE)
-    block = re.search(r"^HubEventKind = Literal\[\n(.*?)^\]", _sibling(_HUB_EVENTS_SOURCE), re.M | re.S)
-    assert block is not None, f"no HubEventKind declaration in {_HUB_EVENTS_SOURCE}"
-    hub_kinds = set(re.findall(r'"([a-z-]+)"', block.group(1)))
+    event_kinds = _literal_values(_sibling(_EVENT_LOG_SOURCE), "EventLogKind")
+    hub_kinds = _literal_values(_sibling(_HUB_EVENTS_SOURCE), "HubEventKind")
     assert set(HUB_EVENT_KINDS) == hub_kinds
-    assert set(EXPORT_EVENT_KINDS) == hub_kinds & set(get_args(real.EventLogKind))
+    assert set(EXPORT_EVENT_KINDS) == hub_kinds & event_kinds, "shared event vocabulary differs"
+
+
+@needs_blizzard
+def test_claim_denial_guard_rejects_a_new_single_quoted_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    sibling = _sibling
+    source = sibling(_CLAIM_DENIALS_SOURCE).replace(
+        '    BINDING = "binding"', "    BINDING = 'binding'\n    FUTURE = 'future'"
+    )
+    assert "FUTURE" in source
+
+    def mutated_sibling(path: Path) -> str:
+        return source if path == _CLAIM_DENIALS_SOURCE else sibling(path)
+
+    monkeypatch.setitem(test_claim_denial_reasons_match_the_real_vocabulary.__globals__, "_sibling", mutated_sibling)
+    with pytest.raises(AssertionError, match="claim denial vocabulary differs"):
+        test_claim_denial_reasons_match_the_real_vocabulary()
+
+
+@needs_blizzard
+def test_event_guard_rejects_a_new_single_quoted_shared_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    sibling = _sibling
+    source = sibling(_EVENT_LOG_SOURCE).replace(
+        "EventLogKind = Literal[", "EventLogKind = Literal[\n    'hub-started',"
+    )
+    assert "'hub-started'" in source
+
+    def mutated_sibling(path: Path) -> str:
+        return source if path == _EVENT_LOG_SOURCE else sibling(path)
+
+    monkeypatch.setitem(test_hub_event_kinds_match_the_real_vocabulary.__globals__, "_sibling", mutated_sibling)
+    with pytest.raises(AssertionError, match="shared event vocabulary differs"):
+        test_hub_event_kinds_match_the_real_vocabulary()
 
 
 @needs_blizzard
