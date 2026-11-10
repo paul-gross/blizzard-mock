@@ -441,6 +441,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "SubscriptionUsageView": ("SubscriptionUsageView", frozenset()),
     "SystemArtifactView": ("SystemArtifactView", frozenset()),
     "TranscriptSegmentAck": ("TranscriptSegmentAck", frozenset()),
+    "UrgencyRef": ("UrgencyRef", frozenset()),
     "VersionWindowView": ("VersionWindowView", frozenset()),
     "WorkItemAuthorView": ("WorkItemAuthorView", frozenset()),
     "WorkItemEntry": ("WorkItemEntry", frozenset()),

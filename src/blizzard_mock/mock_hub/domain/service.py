@@ -13,7 +13,7 @@ import secrets
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -169,6 +169,18 @@ def _work_ref_label(ref: WorkRefSpec) -> str:
     return f"hub:{ref.ref}" if ref.source == RESERVED_HUB_SOURCE_NAME else f"{ref.source}#{ref.ref}"
 
 
+class _ProjectFields(TypedDict):
+    """The three project fields a chunk-owned view carries."""
+
+    project_id: str | None
+    project_slug: str | None
+    project_name: str | None
+
+
+#: The project fields of a view whose chunk is gone.
+_NO_PROJECT: _ProjectFields = {"project_id": None, "project_slug": None, "project_name": None}
+
+
 class _ExternalSubscriptionUsageWindowFact(BaseModel):
     """One complete subscription-usage window accepted from a runner fact.
 
@@ -189,9 +201,7 @@ TRANSCRIPT_RECORD_MAX_BYTES = 10 * 1024 * 1024
 _TRANSCRIPT_CHUNK_BUDGET_MAX_BYTES = 64 * 1024 * 1024
 
 
-def _finding_view(
-    f: GardenFindingSpec, *, routine_name: str, scope_slug: str, project: dict[str, str | None]
-) -> FindingView:
+def _finding_view(f: GardenFindingSpec, *, routine_name: str, scope_slug: str, project: _ProjectFields) -> FindingView:
     """`f` projected to the real hub's own `FindingView` shape, `routine_name`/
     `scope_slug` supplied by the caller since a `GardenFindingSpec` carries neither
     itself, and `project` — the three project fields — the same way. The one place
@@ -221,7 +231,7 @@ def _finding_view(
 
 
 def _proposal_view(
-    p: GardenProposalSpec, *, routine_name: str, now: str, project: dict[str, str | None]
+    p: GardenProposalSpec, *, routine_name: str, now: str, project: _ProjectFields
 ) -> GardenProposalView:
     """`p` projected to the real hub's own `GardenProposalView` shape, `routine_name`
     supplied by the caller since a `GardenProposalSpec` carries none itself. `now` backs
@@ -1735,7 +1745,7 @@ class MockHubService:
             )
         return views
 
-    def _project_fields(self, project_id: str) -> dict[str, str | None]:
+    def _project_fields(self, project_id: str) -> _ProjectFields:
         """The three project fields a chunk-owned view carries — the project's id, current slug and name."""
         project = self._state.get_project(project_id)
         return {
@@ -2436,7 +2446,7 @@ class MockHubService:
             delivered=question.delivered,
             delivered_at=question.delivered_at,
             superseded=False,
-            **(self._project_fields(chunk.project_id) if chunk is not None else {}),
+            **(self._project_fields(chunk.project_id) if chunk is not None else _NO_PROJECT),
         )
 
     def _advance(self, chunk: ChunkState, target: str) -> ApplyResponse:

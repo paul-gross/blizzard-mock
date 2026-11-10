@@ -179,6 +179,13 @@ class HubAdvanceResponse(BaseModel):
     detail: str = ""
 
 
+class UrgencyRef(BaseModel):
+    """The urgency a chunk carries, by id and slug — mirrors ``blizzard.wire.urgency.UrgencyRef``."""
+
+    urgency_id: str
+    slug: str
+
+
 class ChunkDetail(BaseModel):
     chunk_id: str
     graph_id: str
@@ -210,6 +217,8 @@ class ChunkDetail(BaseModel):
     project_id: str | None = None
     project_slug: str | None = None
     project_name: str | None = None
+    # The urgency the chunk carries; the mock seeds none, so it reads as a hub predating the field.
+    urgency: UrgencyRef | None = None
 
 
 class ChunkUsageTotalView(ChunkCostSpec):
@@ -248,6 +257,8 @@ class QueuePeekEntry(BaseModel):
     project_id: str | None = None
     project_slug: str | None = None
     project_name: str | None = None
+    # The urgency the chunk carries; the mock seeds none, so it reads as a hub predating the field.
+    urgency: UrgencyRef | None = None
 
 
 class QueuePeekResponse(BaseModel):
