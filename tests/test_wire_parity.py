@@ -584,7 +584,9 @@ def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
     values are pinned to the real ``ClaimDenialReason`` here: a runner reads the value to tell a
     project denial from a capability one."""
     real = _exec_source("_claim_denials_wire_parity", _CLAIM_DENIALS_SOURCE)
-    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} == {
+    # The mock never denies a claim on binding.
+    omitted = {"binding"}
+    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} | omitted == {
         r.value for r in real.ClaimDenialReason
     }
     assert real.ClaimDenialReason.CAPABILITY.value == hub_service.CLAIM_DENIED_CAPABILITY
