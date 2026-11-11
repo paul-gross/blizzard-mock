@@ -19,6 +19,7 @@ from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import (
     BranchNotFound,
     CompareRefNotFound,
+    ForgeError,
     HeadMismatch,
     IssueNotFound,
     LabelAlreadyExists,
@@ -60,6 +61,7 @@ from blizzard_mock.forge.domain.models import (
 )
 from blizzard_mock.forge.domain.rate import IRateLedger
 from blizzard_mock.forge.domain.state import IWriteForgeState
+from blizzard_mock.forge.domain.statuses import IStatusStore, StatusSpec
 
 #: GitHub's account and repository name rules, which ``create_repository`` holds a new name to.
 _OWNER_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
@@ -125,6 +127,7 @@ class ForgeService:
         checks: ICheckRunStore,
         rate: IRateLedger,
         apps: AppService,
+        statuses: IStatusStore,
     ) -> None:
         self._git = git
         self._state = state
@@ -133,6 +136,7 @@ class ForgeService:
         self._checks = checks
         self._rate = rate
         self._apps = apps
+        self._statuses = statuses
 
     # -- repositories ------------------------------------------------------
 
@@ -475,6 +479,7 @@ class ForgeService:
         """Clear every lever, and with them the armed check runs, the rate windows, and the App registry."""
         self._levers.clear_all()
         self._checks.clear_all()
+        self._statuses.clear_all()
         self._rate.clear()
         self._apps.reset()
 
@@ -492,8 +497,35 @@ class ForgeService:
             self._comment_midflight(params)
         elif kind is LeverKind.REF_CHECKS:
             self._ref_checks(params)
+        elif kind in (LeverKind.REF_STATUSES, LeverKind.STATUS_READ_ERROR):
+            self._status_control(kind, params)
         elif kind is LeverKind.RATE_BUDGET:
             self._rate.set_budget(params.token, remaining=params.remaining, reset=params.reset)
+
+    def _status_control(self, kind: LeverKind, params: LeverParams) -> None:
+        if params.repo is None or params.ref is None:
+            raise ValidationError(f"{kind} requires repo and ref")
+        owner, name = _split_full_name(params.repo)
+        repo = self.get_repo(owner, name)
+        sha = self._git.resolve_ref(repo, params.ref)
+        if kind is LeverKind.REF_STATUSES:
+            if params.statuses is None:
+                raise ValidationError("ref_statuses requires statuses")
+            self._statuses.replace(repo.full_name, sha, params.statuses)
+        else:
+            if params.status_code not in (None, 401, 403, 500, 503):
+                raise ValidationError("status_code must be 401, 403, 500, 503, or null")
+            self._statuses.set_read_error(repo.full_name, sha, params.status_code)
+
+    def list_statuses(self, owner: str, name: str, ref: str) -> tuple[str, list[StatusSpec]]:
+        repo = self.get_repo(owner, name)
+        sha = self._git.resolve_ref(repo, ref)
+        error = self._statuses.read_error(repo.full_name, sha)
+        if error is not None:
+            exc = ForgeError("Status read failed")
+            exc.status = error
+            raise exc
+        return sha, self._statuses.history(repo.full_name, sha)
 
     def _ref_checks(self, params: LeverParams) -> None:
         """Arm named check runs against the revision ``ref`` resolves to now: a run of an

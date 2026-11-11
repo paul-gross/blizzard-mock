@@ -31,6 +31,8 @@ _CATALOG: dict[str, str] = {
     LeverKind.CHECKS_PENDING.value: "state (per PR): mergeable_state=blocked, required checks/reviews not green yet",
     LeverKind.CHECKS_FAILED.value: "state (per PR): failed check run on the PR head; mergeable_state=blocked",
     LeverKind.BASE_CHECKS_FAILED.value: "state (per repo): one completed/failure check run on the default branch",
+    LeverKind.REF_STATUSES.value: "action: replace a revision's status history",
+    LeverKind.STATUS_READ_ERROR.value: "action: set or clear a revision's status read error",
     LeverKind.REF_CHECKS.value: "action: arm named check runs (pending/failed/success) against a ref, or none",
     LeverKind.BRANCH_PROTECTED.value: "state (per repo+branch): PATCH git/refs on the branch → 422 protected",
     LeverKind.RULESET.value: "state (per repo+pattern): POST git/refs and POST /merges on a matching branch → 422",

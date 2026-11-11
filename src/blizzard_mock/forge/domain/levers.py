@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from blizzard_mock.forge.domain.checks import CheckSpec
 from blizzard_mock.forge.domain.models import MergeableState, MergeMethod
+from blizzard_mock.forge.domain.statuses import StatusSpec
 
 
 class LeverKind(StrEnum):
@@ -41,6 +42,8 @@ class LeverKind(StrEnum):
     #: Action: arms named check runs against any revision or branch, each ``pending``,
     #: ``failed``, or ``success``, or arms none at all.
     REF_CHECKS = "ref_checks"
+    REF_STATUSES = "ref_statuses"
+    STATUS_READ_ERROR = "status_read_error"
     #: Per repo and branch: ``PATCH git/refs`` on the branch is refused as protected.
     BRANCH_PROTECTED = "branch_protected"
     #: Per repo and glob pattern: ``POST git/refs`` and ``POST /merges`` on a matching
@@ -128,6 +131,8 @@ ACTION_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.EXTERNALLY_MERGED,
         LeverKind.COMMENT_MIDFLIGHT,
         LeverKind.REF_CHECKS,
+        LeverKind.REF_STATUSES,
+        LeverKind.STATUS_READ_ERROR,
         LeverKind.RATE_BUDGET,
         *APP_ACTION_LEVERS,
     }
@@ -179,6 +184,8 @@ class LeverParams(BaseModel):
     #: ``ref_checks``: the branch or revision, and the named runs armed against it.
     ref: str | None = None
     checks: list[CheckSpec] | None = None
+    statuses: list[StatusSpec] | None = None
+    status_code: int | None = None
     #: ``branch_protected`` / ``ruleset``: the covered branch and glob pattern.
     branch: str | None = None
     pattern: str | None = None
