@@ -384,6 +384,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "open_prs",
                 "pause",
                 "pending",
+                "repository_targets",
                 # Fence-relevant on the real side — `Fenced.out` reads it — but the mock
                 # models the fence through `latest_epoch`, with no restart concept to fill it.
                 "requeues",
@@ -416,6 +417,7 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
     "QuestionView": ("QuestionView", frozenset()),
     "QueuePeekEntry": ("QueuePeekEntry", frozenset()),
     "QueuePeekResponse": ("QueuePeekResponse", frozenset()),
+    "RepositoryTarget": ("RepositoryTarget", frozenset()),
     "RotatePolicyView": ("RotatePolicyView", frozenset()),
     "RouteClaimResponse": ("RouteClaimResponse", frozenset()),
     "RouteTokenRekeyResponse": ("RouteTokenRekeyResponse", frozenset()),
@@ -458,6 +460,7 @@ _UNSCHEMAED = {"RouteClaimConflict"}
 #: Request-body mirrors, invisible to ``_mirror_models`` since they live in ``mock_hub.api.deps``.
 _MIRRORED_BODIES: dict[str, tuple[str, frozenset[str]]] = {
     "ArtifactCheckBody": ("ArtifactCheckRequest", frozenset()),
+    "ClaimedRepositoryTargetBody": ("ClaimedRepositoryTarget", frozenset()),
     "HostAddBody": ("HostAddRequest", frozenset()),
     "HostFactBatchBody": ("HostFactBatch", frozenset()),
     "HostFactBody": ("RunnerFact", frozenset()),
@@ -608,11 +611,11 @@ def test_claim_denial_reasons_match_the_real_vocabulary() -> None:
     real = _enum_values(_sibling(_CLAIM_DENIALS_SOURCE), "ClaimDenialReason")
     # The mock never denies a claim on binding.
     omitted = {"binding"}
-    assert {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT} | omitted == set(real.values()), (
-        "claim denial vocabulary differs"
-    )
+    mirrored = {hub_service.CLAIM_DENIED_CAPABILITY, hub_service.CLAIM_DENIED_PROJECT, hub_service.CLAIM_DENIED_TARGETS}
+    assert mirrored | omitted == set(real.values()), "claim denial vocabulary differs"
     assert real["CAPABILITY"] == hub_service.CLAIM_DENIED_CAPABILITY
     assert real["PROJECT"] == hub_service.CLAIM_DENIED_PROJECT
+    assert real["TARGETS"] == hub_service.CLAIM_DENIED_TARGETS
 
 
 @needs_blizzard

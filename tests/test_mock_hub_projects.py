@@ -331,6 +331,43 @@ def test_a_claim_refused_for_capabilities_names_the_capability_reason(client: Fl
     assert denied.json()["detail"] == "runner capabilities no longer satisfy the chunk's reachable lineage"
 
 
+def test_the_matched_peek_names_the_chunk_repository_targets(client: FleetClient) -> None:
+    """The mock models no project repositories, so the matched peek names an empty target list."""
+    seed_chunk(client)
+    register_runner(client.service, "r1")
+
+    [entry] = _peek(client)
+
+    assert entry["repository_targets"] == []
+
+
+def test_a_claim_echoing_targets_the_chunk_lacks_is_refused_with_the_targets_reason(client: FleetClient) -> None:
+    chunk_id = seed_chunk(client)
+    register_runner(client.service, "r1")
+
+    denied = client.post(
+        "/api/fleet/routes",
+        json={
+            "chunk_id": chunk_id,
+            "runner_id": "r1",
+            "repository_targets": [{"repository_id": "rp_stale", "base_branch": "main"}],
+        },
+    )
+
+    assert denied.status_code == 409, denied.text
+    assert denied.json()["reason"] == "targets"
+    assert client.get(f"/api/fleet/chunks/{chunk_id}").json()["route"] is None
+
+
+def test_a_claim_echoing_the_chunk_targets_mints_the_route(client: FleetClient) -> None:
+    chunk_id = seed_chunk(client)
+    register_runner(client.service, "r1")
+
+    claimed = client.post("/api/fleet/routes", json={"chunk_id": chunk_id, "runner_id": "r1", "repository_targets": []})
+
+    assert claimed.status_code == 201, claimed.text
+
+
 def test_a_claim_on_a_served_project_mints_the_route(client: FleetClient) -> None:
     web = seed_project(client, "web")
     chunk_id = seed_chunk(client, web)

@@ -66,6 +66,8 @@ class MockRunnerService:
         self._runner_id: str | None = None
         self._workspace_id = workspace_id
         self._held: dict[str, Held] = {}
+        #: The repository targets each matched-peeked chunk named, echoed on its claim as the ones prepared.
+        self._peeked_targets: dict[str, list[dict[str, Any]]] = {}
         #: The fact lane's one monotonic sequence, shared by every kind this driver pushes: the hub keeps
         #: one high-water mark per runner, so a second counter would replay as ``already_applied``.
         self._runner_seq = 0
@@ -136,18 +138,26 @@ class MockRunnerService:
         ``enrolled=False`` drives the tokenless case, which the hub refuses ``401``."""
         self._apply_delay(None)
         status, body = self._gw.peek_matched(enrolled=enrolled, capabilities=capabilities or [], policy=policy)
+        if status == 200:
+            for entry in body.get("entries", []):
+                if entry.get("repository_targets") is not None:
+                    self._peeked_targets[entry["chunk_id"]] = entry["repository_targets"]
         return self._observed(status, body)
 
     def claim(self, chunk_id: str, environment_ids: list[str]) -> dict[str, Any]:
         """Claim a chunk and record the held lease; report ``lease.minted`` (D-044)."""
         self._apply_delay(chunk_id)
-        status, body = self._gw.claim(
-            {
-                "chunk_id": chunk_id,
-                "workspace_id": self._workspace_id,
-                "environment_ids": environment_ids,
-            }
-        )
+        claim_body: dict[str, Any] = {
+            "chunk_id": chunk_id,
+            "workspace_id": self._workspace_id,
+            "environment_ids": environment_ids,
+        }
+        targets = self._peeked_targets.get(chunk_id)
+        if targets is not None:
+            claim_body["repository_targets"] = [
+                {"repository_id": t["repository_id"], "base_branch": t["base_branch"]} for t in targets
+            ]
+        status, body = self._gw.claim(claim_body)
         if status != 201:
             return {
                 "claimed": False,

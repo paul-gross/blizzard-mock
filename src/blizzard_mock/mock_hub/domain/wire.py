@@ -247,6 +247,16 @@ class BlockedView(BaseModel):
     prerequisite_chunk_id: str
 
 
+class RepositoryTarget(BaseModel):
+    repository_id: str
+    repository_slug: str
+    forge_host: str
+    owner: str
+    repo: str
+    base_branch: str
+    inherited: bool
+
+
 class QueuePeekEntry(BaseModel):
     chunk_id: str
     graph_id: str
@@ -259,6 +269,9 @@ class QueuePeekEntry(BaseModel):
     project_name: str | None = None
     # The urgency the chunk carries; the mock seeds none, so it reads as a hub predating the field.
     urgency: UrgencyRef | None = None
+    # The chunk's repository targets, named on the matched peek alone; the mock models no project repositories, so
+    # the matched peek names none.
+    repository_targets: list[RepositoryTarget] | None = None
 
 
 class QueuePeekResponse(BaseModel):

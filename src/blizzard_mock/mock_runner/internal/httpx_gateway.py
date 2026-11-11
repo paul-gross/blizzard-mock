@@ -102,7 +102,9 @@ class HttpxHubGateway:
         path = f"{_API}/queue/peek"
         headers = self._headers if enrolled else {}
         try:
-            resp = self._client.post(path, json={"capabilities": capabilities, "policy": policy}, headers=headers)
+            resp = self._client.post(
+                path, json={"capabilities": capabilities, "policy": policy, "repository_targets": True}, headers=headers
+            )
         except httpx.HTTPError as exc:
             self.response_headers = {}
             self.nonclaim_refusal = None
