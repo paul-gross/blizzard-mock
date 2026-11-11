@@ -189,6 +189,7 @@ class _ChunkStatusResponse(TypedDict):
 
 class _Declining(TypedDict):
     lever: str
+    lever_kind: str
     subscription: str | None
     until: str | None
 
