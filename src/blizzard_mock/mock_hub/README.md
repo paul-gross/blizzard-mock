@@ -110,7 +110,10 @@ names, by the entry or its resolved id, so an unserved or unresolved project is 
 claim rechecks the declaration after the dependency check and before the capability check: a
 chunk of a project the runner does not serve is refused with the incompatible **409**,
 `reason: "project"` and `detail` `runner does not serve project '<slug>'`. A capability
-refusal carries `reason: "capability"`.
+refusal carries `reason: "capability"`. The mock models no project repositories: the matched peek names each
+entry's `repository_targets` as an empty list, so the peek body's `repository_targets` opt-in skips nothing, and a
+claim echoing any `repository_targets` is refused with `reason: "targets"` as stale; a claim echoing none is never
+refused on targets.
 
 | Method + path | Purpose |
 |---------------|---------|
@@ -119,7 +122,7 @@ refusal carries `reason: "capability"`.
 | `GET /api/fleet/summary` | Tenant-wide fleet pulse: `ready`, `running` (including delivering), `waiting` (paused), and `needs` (needs human). The mock does not model `waiting_on_human`, which the real hub also counts as waiting. Counts include every project in the caller's tenant, not just projects it serves. Fleet authentication and tenant refusals use problem JSON, or detail-only JSON with `legacy_auth_refusals`. |
 | `GET /api/fleet/chunk-statuses` | Batch status read with required repeated `chunk_id` parameters; unknown and other-tenant chunks are omitted. Missing parameters return validation **422**. |
 | `POST /api/fleet/queue/peek` | The matched fleet peek — at most one entry of a project the caller serves, capability- and policy-filtered for the caller |
-| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or an incompatible runner (`{chunk_id, incompatible_runner_id, detail, reason}`, `reason` `project` or `capability`) |
+| `POST /api/fleet/routes` | Claim a chunk → 201 route + first envelope; **403** `{chunk_id, runner_id, detail}` for a caller never connected or paused at the hub; **409** `{chunk_id, status, detail}` for an ended chunk (`detail` `chunk is terminal`) or one not `ready` (`detail` `chunk <id> is <status>, not ready to claim`), then a held route, an unmet prerequisite, or an incompatible runner (`{chunk_id, incompatible_runner_id, detail, reason}`, `reason` `project`, `capability` or `targets`) |
 | `POST /api/fleet/chunks/{id}/route-token` | Rotate the chunk's live route capability token; **403** for a different runner, **404** with no live route, **409** when the route sits on an ended chunk |
 | `POST /api/fleet/chunks/{id}/release` | The holding runner gives the route back: the chunk returns `ready` at its current node and the write is recorded on the chunk; **403** when the caller does not hold the route, **409** `stale` for any epoch other than the latest or `not-running` when the chunk is not running, **404** for an unknown chunk |
 | `GET /api/fleet/chunks/{id}` | Chunk detail — derived status, current node, route, escalation, questions; a chunk outside the caller's tenant is refused as unknown (**404**), with detail-only JSON under `legacy_read_refusals`. The same boundary applies to envelope, work-items (and pm-items), chunk-scoped scopes, garden, analytics and answered-findings reads, and to claim, release, pause, resume, completion, decision and hub-advance mutations. Route-token rekey instead reports no live route, as for an unknown chunk. Other chunk routes do not yet consistently enforce this tenant boundary. |

@@ -260,6 +260,11 @@ def claim_route(
             runner_id=runner_id,
             workspace_id=body.workspace_id,
             environment_ids=body.environment_ids,
+            repository_targets=(
+                None
+                if body.repository_targets is None
+                else {t.repository_id: t.base_branch for t in body.repository_targets}
+            ),
         )
     except PinnedGraphMissing:
         return JSONResponse(

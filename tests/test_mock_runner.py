@@ -171,6 +171,24 @@ def test_drive_peek_matched_returns_the_capability_matched_entry(stack: tuple[Te
     assert [e["chunk_id"] for e in body["response"]["entries"]] == [workable]
 
 
+def test_drive_peek_matched_opts_in_to_targets_and_the_claim_echoes_them(
+    stack: tuple[TestClient, TestClient],
+) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    assert runner.post("/_drive/register", json={"capabilities": _DEFAULT_CAPABILITY}).json()["status"] == 201
+    hub.post("/_captured/reset")
+
+    runner.post("/_drive/peek-matched", json={"capabilities": _DEFAULT_CAPABILITY})
+    assert runner.post("/_drive/claim", json={"chunk_id": chunk_id}).json()["claimed"] is True
+
+    requests = hub.get("/_captured").json()["requests"]
+    [peek] = [r for r in requests if r["path"] == "/api/fleet/queue/peek"]
+    [claim] = [r for r in requests if r["path"] == "/api/fleet/routes"]
+    assert peek["body"]["repository_targets"] is True
+    assert claim["body"]["repository_targets"] == []
+
+
 def test_drive_peek_matched_hold_yields_nothing_at_an_unusable_head(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
     _seed_harness_chunk(hub, "special_harness")

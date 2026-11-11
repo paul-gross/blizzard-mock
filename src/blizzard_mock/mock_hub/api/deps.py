@@ -205,12 +205,22 @@ class QueuePeekBody(MirroredWireBody):
     policy: str = "pass-over"
     # Narrows the peek to these projects and scopes ``hold`` per project.
     projects: list[str] | None = None
+    # The runner prepares environments at the repository targets the peek names.
+    repository_targets: bool = False
+
+
+class ClaimedRepositoryTargetBody(MirroredWireBody):
+    """Mirrors ``blizzard.wire.route.ClaimedRepositoryTarget`` field-for-field."""
+
+    repository_id: str
+    base_branch: str
 
 
 class RouteClaimBody(BaseModel):
     chunk_id: str
     workspace_id: str = "workspace-mock"
     environment_ids: list[str] = Field(default_factory=list[str])
+    repository_targets: list[ClaimedRepositoryTargetBody] | None = None
 
 
 class ArtifactCheckBody(MirroredWireBody):

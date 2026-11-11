@@ -11,7 +11,7 @@ import json
 import random
 import secrets
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, TypedDict, cast
 
@@ -150,6 +150,9 @@ TOKEN_RETIRED = "retired"
 #: The reasons an incompatible claim ``409`` names — restated from the real ``ClaimDenialReason``.
 CLAIM_DENIED_CAPABILITY = "capability"
 CLAIM_DENIED_PROJECT = "project"
+CLAIM_DENIED_TARGETS = "targets"
+#: The incompatible ``409``'s ``detail`` when the echoed repository targets are not the chunk's.
+TARGETS_DENIAL_DETAIL = "the repository targets the runner prepared are not the chunk's"
 #: The incompatible ``409``'s ``detail`` when the runner's capabilities are what it lacks — the real body's default.
 CAPABILITY_DENIAL_DETAIL = "runner capabilities no longer satisfy the chunk's reachable lineage"
 
@@ -481,7 +484,8 @@ class ClaimIncompatible(Exception):
     :class:`DependencyUnmet`'s shape. ``reason`` says what it lacks: ``capability``, its
     *currently stored* capabilities no longer run every statically reachable runner-owned
     lineage from the chunk's current node (a registration reporting none is refused here
-    too); or ``project``, it does not serve the chunk's project, which ``detail`` names."""
+    too); ``project``, it does not serve the chunk's project, which ``detail`` names; or ``targets``, the repository
+    targets it echoed are not the chunk's."""
 
     def __init__(
         self, runner_id: str, *, reason: str = CLAIM_DENIED_CAPABILITY, detail: str = CAPABILITY_DENIAL_DETAIL
@@ -713,6 +717,7 @@ class MockHubService:
                             work_refs=[p.model_dump() for p in chunk.work_refs],
                             blocked=None,
                             **self._project_fields(chunk.project_id),
+                            repository_targets=[],
                         )
                     ]
                 )
@@ -741,8 +746,17 @@ class MockHubService:
         return refusal(name, content, chunk.artifact_formats.get(name, []))
 
     def claim(
-        self, chunk_id: str, *, runner_id: str, workspace_id: str, environment_ids: list[str]
+        self,
+        chunk_id: str,
+        *,
+        runner_id: str,
+        workspace_id: str,
+        environment_ids: list[str],
+        repository_targets: Mapping[str, str] | None = None,
     ) -> RouteClaimResponse:
+        """``repository_targets`` maps each repository the runner prepared to its branch, ``None`` from a runner that
+        predates them. The mock models no project repositories, so a chunk's targets are empty: any echoed target is
+        stale, and an absent echo is never refused since no target overrides its branch."""
         chunk = self._require(chunk_id)
         self._check_pinned_graph(chunk_id)
         self.refuse_retired_runner(runner_id, action="claim")
@@ -770,6 +784,8 @@ class MockHubService:
         node_id = chunk.current_node_id or chunk.entry
         if matching.capability_ineligible(chunk, node_id, registration.capabilities):
             raise ClaimIncompatible(runner_id)
+        if repository_targets:
+            raise ClaimIncompatible(runner_id, reason=CLAIM_DENIED_TARGETS, detail=TARGETS_DENIAL_DETAIL)
         chunk.claimed = True
         chunk.route_runner_id = runner_id
         chunk.route_workspace_id = workspace_id
