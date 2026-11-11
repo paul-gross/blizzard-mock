@@ -330,6 +330,7 @@ class RunnerDecliningView(BaseModel):
     """One throttle a runner reported as saying no — mirrors ``blizzard.wire.runner.RunnerDecliningView``."""
 
     lever: str
+    lever_kind: str
     detail: str
     subscription: str | None = None
     until: str | None = None

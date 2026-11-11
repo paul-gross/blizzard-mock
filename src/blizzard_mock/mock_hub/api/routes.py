@@ -873,6 +873,7 @@ def register_runner(
             declining=tuple(
                 RunnerDecliningView(
                     lever=d.lever,
+                    lever_kind=d.lever,
                     detail=d.detail,
                     subscription=d.subscription,
                     until=None if d.until is None else d.until.isoformat(),
