@@ -78,3 +78,78 @@ def test_status_scoped_read_errors_and_pagination(tmp_path: Path) -> None:
             ).status_code
             == 422
         )
+
+
+def test_combined_and_checks_page_boundaries(tmp_path: Path) -> None:
+    with forge(tmp_path) as client:
+        base = f"/repos/{REPO}/commits/main"
+        for count in (100, 101, 205):
+            statuses = [{"context": f"ci-{i}", "state": "success"} for i in range(count)]
+            statuses += [{"context": "ci-0", "state": "failure"}, {"context": "ci-0", "state": "error"}]
+            assert (
+                client.post(
+                    "/_levers/ref_statuses", json={"repo": REPO, "ref": "main", "statuses": statuses}
+                ).status_code
+                == 200
+            )
+            checks = [{"name": f"check-{i}", "status": "success"} for i in range(count)]
+            assert (
+                client.post("/_levers/ref_checks", json={"repo": REPO, "ref": "main", "checks": checks}).status_code
+                == 200
+            )
+            for endpoint, key in (("status", "statuses"), ("check-runs", "check_runs")):
+                assert len(client.get(f"{base}/{endpoint}").json()[key]) == 30
+                assert len(client.get(f"{base}/{endpoint}", params={"per_page": 1000}).json()[key]) == 100
+                beyond = client.get(f"{base}/{endpoint}", params={"per_page": 100, "page": 99})
+                assert beyond.json()["total_count"] == count
+                assert beyond.json()[key] == []
+                assert 'rel="prev"' in beyond.headers["link"]
+                invalid = client.get(f"{base}/{endpoint}", params={"per_page": 0, "page": 0})
+                assert invalid.json()["total_count"] == count
+                assert len(invalid.json()[key]) == 1
+                assert "page=2&per_page=1" in invalid.headers["link"]
+                assert 'rel="next"' in invalid.headers["link"]
+                collected: list[str] = []
+                for page in range(1, (count + 99) // 100 + 1):
+                    response = client.get(f"{base}/{endpoint}", params={"per_page": 100, "page": page})
+                    body = response.json()
+                    assert body["total_count"] == count
+                    if endpoint == "status":
+                        assert body["state"] == "success"
+                    collected.extend(item["context" if endpoint == "status" else "name"] for item in body[key])
+                    assert ('rel="next"' in response.headers.get("link", "")) == (page * 100 < count)
+                assert len(collected) == count
+                assert len(set(collected)) == count
+                if endpoint == "status":
+                    assert collected == [f"ci-{i}" for i in range(count)]
+
+
+def test_empty_pages_and_aggregate_state_across_pages(tmp_path: Path) -> None:
+    with forge(tmp_path) as client:
+        base = f"/repos/{REPO}/commits/main"
+        assert client.post("/_levers/ref_checks", json={"repo": REPO, "ref": "main", "checks": []}).status_code == 200
+        for endpoint, key in (("status", "statuses"), ("check-runs", "check_runs")):
+            response = client.get(f"{base}/{endpoint}")
+            assert response.json()[key] == []
+            assert response.json()["total_count"] == 0
+            assert "link" not in response.headers
+            if endpoint == "status":
+                assert response.json()["state"] == "pending"
+
+        statuses = [
+            {"context": "first", "state": "success"},
+            {"context": "second", "state": "failure"},
+            {"context": "second", "state": "success"},
+        ]
+        assert (
+            client.post("/_levers/ref_statuses", json={"repo": REPO, "ref": "main", "statuses": statuses}).status_code
+            == 200
+        )
+        for page in (1, 2, 3):
+            response = client.get(f"{base}/status", params={"page": page, "per_page": 1})
+            assert response.json()["state"] == "failure"
+            assert response.json()["total_count"] == 2
+            links = response.links
+            assert ("prev" in links) == (page > 1)
+            assert ("next" in links) == (page < 2)
+            assert len(response.json()["statuses"]) == (1 if page <= 2 else 0)

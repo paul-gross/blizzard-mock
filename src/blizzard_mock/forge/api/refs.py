@@ -22,8 +22,29 @@ from blizzard_mock.forge.api.deps import (
 )
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.service import ForgeService
+from blizzard_mock.forge.domain.statuses import combined_status as combine_statuses
 
 router = APIRouter(tags=["git"])
+
+
+def _page[T](items: list[T], page: int, per_page: int, request: Request, response: Response) -> list[T]:
+    page = max(page, 1)
+    per_page = min(max(per_page, 1), 100)
+    last = max(1, (len(items) + per_page - 1) // per_page)
+    links: list[str] = []
+    if page > 1:
+        links.extend(
+            f'<{request.url.include_query_params(page=number, per_page=per_page)}>; rel="{rel}"'
+            for rel, number in (("prev", min(page - 1, last)), ("first", 1))
+        )
+    if page < last:
+        links.extend(
+            f'<{request.url.include_query_params(page=number, per_page=per_page)}>; rel="{rel}"'
+            for rel, number in (("next", page + 1), ("last", last))
+        )
+    if links:
+        response.headers["Link"] = ", ".join(links)
+    return items[(page - 1) * per_page : page * per_page]
 
 
 @router.get("/repos/{owner}/{repo}/commits/{ref}", dependencies=[requires("contents", "read")])
@@ -44,12 +65,18 @@ def list_check_runs(
     ref: str,
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
+    request: Request,
+    response: Response,
+    page: int = 1,
+    per_page: int = 30,
 ) -> dict[str, Any]:
     runs = service.list_check_runs(owner, repo, ref)
     repo_full = f"{owner}/{repo}"
     return {
         "total_count": len(runs),
-        "check_runs": [ser.check_run_json(repo_full, run, base_url) for run in runs],
+        "check_runs": [
+            ser.check_run_json(repo_full, run, base_url) for run in _page(runs, page, per_page, request, response)
+        ],
     }
 
 
@@ -65,14 +92,7 @@ def list_statuses(
     per_page: int = 30,
 ) -> list[dict[str, Any]]:
     _, statuses = service.list_statuses(owner, repo, ref)
-    page = max(page, 1)
-    per_page = min(max(per_page, 1), 100)
-    last = max(1, (len(statuses) + per_page - 1) // per_page)
-    if page < last:
-        next_url = request.url.include_query_params(page=page + 1, per_page=per_page)
-        last_url = request.url.include_query_params(page=last, per_page=per_page)
-        response.headers["Link"] = f'<{next_url}>; rel="next", <{last_url}>; rel="last"'
-    return [status.model_dump() for status in statuses[(page - 1) * per_page : page * per_page]]
+    return [status.model_dump() for status in _page(statuses, page, per_page, request, response)]
 
 
 @router.get("/repos/{owner}/{repo}/commits/{ref}/status", dependencies=[requires("statuses", "read")])
@@ -81,22 +101,18 @@ def combined_status(
     repo: str,
     ref: str,
     service: Annotated[ForgeService, Depends(get_service)],
+    request: Request,
+    response: Response,
+    page: int = 1,
+    per_page: int = 30,
 ) -> dict[str, Any]:
     sha, history = service.list_statuses(owner, repo, ref)
-    latest: dict[str, Any] = {}
-    for status in history:
-        latest.setdefault(status.context, status)
-    states = [status.state for status in latest.values()]
-    state = (
-        "failure"
-        if any(s in ("failure", "error") for s in states)
-        else ("pending" if not states or "pending" in states else "success")
-    )
+    state, latest = combine_statuses(history)
     return {
         "state": state,
         "sha": sha,
         "total_count": len(latest),
-        "statuses": [status.model_dump() for status in latest.values()],
+        "statuses": [status.model_dump() for status in _page(latest, page, per_page, request, response)],
     }
 
 
