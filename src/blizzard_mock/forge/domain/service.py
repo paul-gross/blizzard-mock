@@ -61,7 +61,7 @@ from blizzard_mock.forge.domain.models import (
 )
 from blizzard_mock.forge.domain.rate import IRateLedger
 from blizzard_mock.forge.domain.state import IWriteForgeState
-from blizzard_mock.forge.domain.statuses import IStatusStore, StatusSpec
+from blizzard_mock.forge.domain.statuses import IStatusStore, Status
 
 #: GitHub's account and repository name rules, which ``create_repository`` holds a new name to.
 _OWNER_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
@@ -517,7 +517,7 @@ class ForgeService:
                 raise ValidationError("status_code must be 401, 403, 500, 503, or null")
             self._statuses.set_read_error(repo.full_name, sha, params.status_code)
 
-    def list_statuses(self, owner: str, name: str, ref: str) -> tuple[str, list[StatusSpec]]:
+    def list_statuses(self, owner: str, name: str, ref: str) -> tuple[str, list[Status]]:
         repo = self.get_repo(owner, name)
         sha = self._git.resolve_ref(repo, ref)
         error = self._statuses.read_error(repo.full_name, sha)

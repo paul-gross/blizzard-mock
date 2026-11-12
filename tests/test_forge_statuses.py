@@ -25,9 +25,29 @@ def test_status_history_and_combined_status(tmp_path: Path) -> None:
         combined = client.get(f"{path}/status").json()
         assert combined["state"] == "pending"
         assert combined["total_count"] == 2
+        ids = [status["id"] for status in history]
+        assert all(isinstance(status_id, int) and status_id > 0 for status_id in ids)
+        assert len(set(ids)) == 3
+        assert ids == sorted(ids, reverse=True)
+        assert combined["statuses"] == [history[0], history[2]]
+        assert client.get(f"/repos/{REPO}/commits/{sha}/status").json() == combined
+        assert client.get(f"{path}/statuses").json() == history
+        assert (
+            client.post("/_levers/ref_statuses", json={"repo": REPO, "ref": "main", "statuses": statuses}).status_code
+            == 200
+        )
+        replacement = client.get(f"{path}/statuses").json()
+        assert set(ids).isdisjoint(status["id"] for status in replacement)
         assert client.get(f"/repos/{REPO}/commits/ahead/statuses").json() == []
         assert client.post("/_levers/reset").status_code == 200
         assert client.get(f"{path}/statuses").json() == []
+        assert (
+            client.post("/_levers/ref_statuses", json={"repo": REPO, "ref": "main", "statuses": statuses}).status_code
+            == 200
+        )
+        assert set(ids + [status["id"] for status in replacement]).isdisjoint(
+            status["id"] for status in client.get(f"{path}/statuses").json()
+        )
 
 
 def test_status_scoped_read_errors_and_pagination(tmp_path: Path) -> None:
@@ -51,6 +71,7 @@ def test_status_scoped_read_errors_and_pagination(tmp_path: Path) -> None:
         lever = {"repo": REPO, "ref": "main", "status_code": None}
         assert client.post("/_levers/status_read_error", json=lever).status_code == 200
         assert client.get(path).status_code == 200
+        assert client.get(f"/repos/{REPO}/commits/main/status").json()["total_count"] == 101
         assert (
             client.post(
                 "/_levers/status_read_error", json={"repo": REPO, "ref": "main", "status_code": 200}
