@@ -1,7 +1,6 @@
 """End-to-end acceptance proof for the blizzard-mock fleet.
 
-The bootstrap plan's exit criterion
-(``blizzard-discovery:/implementation/bootstrap.md``):
+The bootstrap exit criterion:
 
     a scripted prompt, run through the mock harness in a fixture-workspace env,
     lands a commit that the mock forge merges to bare ``main`` — no blizzard code
