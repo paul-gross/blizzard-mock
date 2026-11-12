@@ -4,6 +4,9 @@
 # (`needs_blizzard`) run in separate jobs. No upper tier here: this repo has none of its own —
 # `blizzard`'s service and crash-sweep tiers exercise this repo's code from `blizzard`'s
 # own CI, not from here.
+#
+# A pull request into `master` from a `hotfix/` branch of this repository is the operator's fast lane: it sets the
+# gate's `lint-only`, so only ruff + pyright and the process-reference lint run.
 name: pr
 
 on:
@@ -20,3 +23,5 @@ concurrency:
 jobs:
   gate:
     uses: ./.github/workflows/gate.yml
+    with:
+      lint-only: ${{ github.base_ref == 'master' && startsWith(github.head_ref, 'hotfix/') && github.event.pull_request.head.repo.full_name == github.repository }}

@@ -15,6 +15,13 @@ on:
         description: Explicit blizzard branch or tag for the scheduled parity check.
         type: string
         default: ""
+      lint-only:
+        description: >-
+          Run only the lint-class jobs (ruff + pyright, the process-reference lint) and skip the
+          test jobs by condition, as `pr.yml` asks for a `hotfix/` pull request into `master`. A
+          skipped job still reports its check name, so the required set passes on both paths.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,6 +57,7 @@ jobs:
 
   test:
     name: pytest (sans needs_blizzard)
+    if: ${{ !inputs.lint-only }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +78,7 @@ jobs:
 
   parity:
     name: wire parity (needs_blizzard)
+    if: ${{ !inputs.lint-only }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
