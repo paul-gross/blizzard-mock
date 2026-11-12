@@ -79,8 +79,10 @@ otherwise the target line (`master` or `release/X.Y`), and `master` on a master 
 The resolver logs the selected ref and commit. `.github/workflows/nightly.yml` calls the
 same gate on a schedule with an explicit blizzard `master` ref. The check names are
 `gate / ruff + pyright`, `gate / pytest (sans needs_blizzard)`,
-`gate / process-reference lint`, and `gate / wire parity (needs_blizzard)`; parity is
-optional until a green run supports requiring it in branch protection.
+`gate / process-reference lint`, and `gate / wire parity (needs_blizzard)`, and all four
+are required on `master`. A pull request into `master` from a `hotfix/` branch of this
+repository is the operator's lint-only lane: the gate's `lint-only` input skips `test` and
+`parity`, which still report their check names, skipped.
 
 ## Acceptance proof
 
