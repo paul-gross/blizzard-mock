@@ -422,6 +422,7 @@ class HostReportBody(MirroredWireBody):
     name: str | None = None
     url: str | None = None
     redirect_uris: list[str] = Field(default_factory=list[str])
+    urls: list[str] | None = None
     workspaces: list[HostWorkspaceBody] = Field(default_factory=list[HostWorkspaceBody])
     subscriptions: list[RunnerSubscriptionDeclarationBody] = Field(
         default_factory=list[RunnerSubscriptionDeclarationBody]
