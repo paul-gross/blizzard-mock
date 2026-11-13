@@ -11,13 +11,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from blizzard_mock.forge.api import serialization as ser
-from blizzard_mock.forge.api.deps import CreateLabelBody, get_service
+from blizzard_mock.forge.api.deps import CreateLabelBody, get_service, requires
 from blizzard_mock.forge.domain.service import ForgeService
 
 router = APIRouter(tags=["labels"])
 
 
-@router.get("/repos/{owner}/{repo}/labels")
+@router.get("/repos/{owner}/{repo}/labels", dependencies=[requires("issues", "read")])
 def list_labels(
     owner: str,
     repo: str,
@@ -26,7 +26,7 @@ def list_labels(
     return [ser.label_json(label) for label in service.list_labels(owner, repo)]
 
 
-@router.post("/repos/{owner}/{repo}/labels", status_code=201)
+@router.post("/repos/{owner}/{repo}/labels", dependencies=[requires("issues", "write")], status_code=201)
 def create_label(
     owner: str,
     repo: str,
@@ -37,7 +37,7 @@ def create_label(
     return ser.label_json(label)
 
 
-@router.get("/repos/{owner}/{repo}/issues/{number}/labels")
+@router.get("/repos/{owner}/{repo}/issues/{number}/labels", dependencies=[requires("issues", "read")])
 def list_issue_labels(
     owner: str,
     repo: str,
@@ -48,7 +48,7 @@ def list_issue_labels(
     return ser.issue_labels_json(issue.labels)
 
 
-@router.post("/repos/{owner}/{repo}/issues/{number}/labels")
+@router.post("/repos/{owner}/{repo}/issues/{number}/labels", dependencies=[requires("issues", "write")])
 def add_issue_labels(
     owner: str,
     repo: str,
@@ -60,7 +60,7 @@ def add_issue_labels(
     return ser.issue_labels_json(issue.labels)
 
 
-@router.delete("/repos/{owner}/{repo}/issues/{number}/labels/{name}")
+@router.delete("/repos/{owner}/{repo}/issues/{number}/labels/{name}", dependencies=[requires("issues", "write")])
 def remove_issue_label(
     owner: str,
     repo: str,

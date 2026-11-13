@@ -17,6 +17,7 @@ window and carries ``X-RateLimit-*``.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import AsyncIterable
 from typing import cast
 
@@ -25,6 +26,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.types import ASGIApp
 
+from blizzard_mock.forge.domain.app_service import AppService
+from blizzard_mock.forge.domain.errors import BadCredentials
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
@@ -75,10 +78,11 @@ async def _read_body(response: Response) -> bytes:
 class LeverMiddleware(BaseHTTPMiddleware):
     """Applies the request-scoped levers held in ``app.state.levers``."""
 
-    def __init__(self, app: ASGIApp, levers: ILeverStore, rate: IRateLedger) -> None:
+    def __init__(self, app: ASGIApp, levers: ILeverStore, rate: IRateLedger, apps: AppService) -> None:
         super().__init__(app)
         self._levers = levers
         self._rate = rate
+        self._apps = apps
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
@@ -92,6 +96,15 @@ class LeverMiddleware(BaseHTTPMiddleware):
 
         if self._levers.find(LeverKind.TOKEN_REJECTED, repo, None) is not None:
             return _error(401, "Bad credentials", headers={"WWW-Authenticate": "Bearer"})
+
+        scopes: str | None = None
+        if path == "/graphql" or path.startswith("/repos/"):
+            try:
+                token = self._apps.authenticate(request.headers.get("authorization"))
+            except BadCredentials as exc:
+                return _error(exc.status, exc.message, headers=exc.headers)
+            if token is not None and token.kind == "classic":
+                scopes = ", ".join(token.scopes)
 
         window = self._rate.peek(_bucket(request))
 
@@ -107,7 +120,20 @@ class LeverMiddleware(BaseHTTPMiddleware):
             headers = {**_rate_headers(window), "Retry-After": "60"}
             return _error(403, secondary.message or _SECONDARY_LIMIT_MESSAGE, headers=headers)
 
-        return await call_next(request)
+        response = await call_next(request)
+        if scopes is not None:
+            response.headers["X-OAuth-Scopes"] = scopes
+        return response
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Stamps ``X-GitHub-Request-Id`` on every answer. Added last, so it is outermost and reaches
+    lever refusals, ``304``s, and the exempt routes too."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        response.headers["X-GitHub-Request-Id"] = uuid.uuid4().hex.upper()
+        return response
 
 
 class RateHeaderMiddleware(BaseHTTPMiddleware):

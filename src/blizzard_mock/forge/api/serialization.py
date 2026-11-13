@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from blizzard_mock.forge.domain.apps import MockInstallation, MockToken
 from blizzard_mock.forge.domain.git import GitCommit, GitCompare
 from blizzard_mock.forge.domain.levers import Lever
 from blizzard_mock.forge.domain.models import CheckRun, Comment, Issue, Label, Repo
@@ -28,14 +29,14 @@ def error_json(message: str) -> dict[str, Any]:
     return {"message": message, "documentation_url": "https://docs.github.com/rest"}
 
 
-def repo_json(repo: Repo, base_url: str) -> dict[str, Any]:
+def repo_json(repo: Repo, base_url: str, *, private: bool = False) -> dict[str, Any]:
     full = repo.full_name
     return {
         "id": abs(hash(full)) % (10**8),
         "name": repo.name,
         "full_name": full,
         "owner": _user(repo.owner),
-        "private": False,
+        "private": private,
         "default_branch": repo.default_branch,
         "html_url": f"{base_url}/{full}",
         "url": f"{base_url}/repos/{full}",
@@ -196,4 +197,23 @@ def lever_json(lever: Lever) -> dict[str, Any]:
         "branch": lever.branch,
         "pattern": lever.pattern,
         "state": lever.state.value if lever.state is not None else None,
+    }
+
+
+def installation_json(installation: MockInstallation) -> dict[str, Any]:
+    suspended = installation.suspended_at
+    return {
+        "id": installation.installation_id,
+        "app_id": installation.app_id,
+        "permissions": installation.permissions,
+        "suspended_at": _ts(suspended) if suspended is not None else None,
+    }
+
+
+def access_token_json(token: MockToken) -> dict[str, Any]:
+    expires = token.expires_at
+    return {
+        "token": token.value,
+        "expires_at": _ts(expires) if expires is not None else None,
+        "permissions": token.permissions,
     }

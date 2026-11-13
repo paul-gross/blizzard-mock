@@ -18,13 +18,14 @@ from blizzard_mock.forge.api.deps import (
     UpdateIssueStateBody,
     get_base_url,
     get_service,
+    requires,
 )
 from blizzard_mock.forge.domain.service import ForgeService
 
 router = APIRouter(tags=["issues"])
 
 
-@router.get("/repos/{owner}/{repo}/issues")
+@router.get("/repos/{owner}/{repo}/issues", dependencies=[requires("issues", "read")])
 def list_issues(
     owner: str,
     repo: str,
@@ -38,7 +39,7 @@ def list_issues(
     return [ser.issue_json(f"{owner}/{repo}", issue, base_url) for issue in issues]
 
 
-@router.get("/repos/{owner}/{repo}/issues/{number}")
+@router.get("/repos/{owner}/{repo}/issues/{number}", dependencies=[requires("issues", "read")])
 def get_issue(
     owner: str,
     repo: str,
@@ -49,7 +50,7 @@ def get_issue(
     return ser.issue_json(f"{owner}/{repo}", service.get_issue(owner, repo, number), base_url)
 
 
-@router.post("/repos/{owner}/{repo}/issues", status_code=201)
+@router.post("/repos/{owner}/{repo}/issues", dependencies=[requires("issues", "write")], status_code=201)
 def create_issue(
     owner: str,
     repo: str,
@@ -61,7 +62,7 @@ def create_issue(
     return JSONResponse(status_code=201, content=ser.issue_json(f"{owner}/{repo}", issue, base_url))
 
 
-@router.patch("/repos/{owner}/{repo}/issues/{number}")
+@router.patch("/repos/{owner}/{repo}/issues/{number}", dependencies=[requires("issues", "write")])
 def update_issue_state(
     owner: str,
     repo: str,
@@ -74,7 +75,7 @@ def update_issue_state(
     return ser.issue_json(f"{owner}/{repo}", issue, base_url)
 
 
-@router.get("/repos/{owner}/{repo}/issues/{number}/comments")
+@router.get("/repos/{owner}/{repo}/issues/{number}/comments", dependencies=[requires("issues", "read")])
 def list_comments(
     owner: str,
     repo: str,
@@ -86,7 +87,9 @@ def list_comments(
     return [ser.comment_json(f"{owner}/{repo}", number, c, base_url) for c in comments]
 
 
-@router.post("/repos/{owner}/{repo}/issues/{number}/comments", status_code=201)
+@router.post(
+    "/repos/{owner}/{repo}/issues/{number}/comments", dependencies=[requires("issues", "write")], status_code=201
+)
 def create_comment(
     owner: str,
     repo: str,

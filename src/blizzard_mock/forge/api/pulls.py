@@ -20,6 +20,7 @@ from blizzard_mock.forge.api.deps import (
     UpdatePullBody,
     get_base_url,
     get_service,
+    requires,
 )
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.models import State
@@ -28,7 +29,7 @@ from blizzard_mock.forge.domain.service import ForgeService, PullPage
 router = APIRouter(tags=["pulls"])
 
 
-@router.get("/repos/{owner}/{repo}/pulls")
+@router.get("/repos/{owner}/{repo}/pulls", dependencies=[requires("pull_requests", "read")])
 def list_pulls(
     owner: str,
     repo: str,
@@ -71,7 +72,7 @@ def _link_header(url: str, query: dict[str, str], result: PullPage) -> str:
     return ", ".join(f'<{page_url(number)}>; rel="{rel}"' for rel, number in rels)
 
 
-@router.post("/repos/{owner}/{repo}/pulls", status_code=201)
+@router.post("/repos/{owner}/{repo}/pulls", dependencies=[requires("pull_requests", "write")], status_code=201)
 def create_pull(
     owner: str,
     repo: str,
@@ -85,7 +86,7 @@ def create_pull(
     return JSONResponse(status_code=201, content=ser.pull_json(f"{owner}/{repo}", view, base_url))
 
 
-@router.get("/repos/{owner}/{repo}/pulls/{number}")
+@router.get("/repos/{owner}/{repo}/pulls/{number}", dependencies=[requires("pull_requests", "read")])
 def get_pull(
     owner: str,
     repo: str,
@@ -96,7 +97,7 @@ def get_pull(
     return ser.pull_json(f"{owner}/{repo}", service.get_pull(owner, repo, number), base_url)
 
 
-@router.patch("/repos/{owner}/{repo}/pulls/{number}")
+@router.patch("/repos/{owner}/{repo}/pulls/{number}", dependencies=[requires("pull_requests", "write")])
 def update_pull(
     owner: str,
     repo: str,
@@ -111,7 +112,7 @@ def update_pull(
     return ser.pull_json(f"{owner}/{repo}", view, base_url)
 
 
-@router.put("/repos/{owner}/{repo}/pulls/{number}/merge")
+@router.put("/repos/{owner}/{repo}/pulls/{number}/merge", dependencies=[requires("contents", "write")])
 def merge_pull(
     owner: str,
     repo: str,
@@ -131,7 +132,11 @@ def merge_pull(
     return ser.merge_result_json(result)
 
 
-@router.put("/repos/{owner}/{repo}/pulls/{number}/update-branch", status_code=202)
+@router.put(
+    "/repos/{owner}/{repo}/pulls/{number}/update-branch",
+    dependencies=[requires("pull_requests", "write")],
+    status_code=202,
+)
 def update_branch(
     owner: str,
     repo: str,
@@ -143,7 +148,7 @@ def update_branch(
     return JSONResponse(status_code=202, content={"message": message})
 
 
-@router.get("/repos/{owner}/{repo}/pulls/{number}/merge")
+@router.get("/repos/{owner}/{repo}/pulls/{number}/merge", dependencies=[requires("pull_requests", "read")])
 def is_merged(
     owner: str,
     repo: str,

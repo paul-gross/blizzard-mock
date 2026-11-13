@@ -13,9 +13,11 @@ class ForgeError(Exception):
 
     status: int = 500
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, headers: dict[str, str] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        #: Response headers the error carries beyond the body (e.g. ``X-Accepted-GitHub-Permissions``).
+        self.headers = headers
 
 
 class RepoNotFound(ForgeError):
@@ -155,3 +157,53 @@ class RefMissing(ForgeError):
     ``Reference does not exist``)."""
 
     status = 422
+
+
+class BadCredentials(ForgeError):
+    """The credential does not authenticate — unregistered, absent, revoked, expired, or a bad
+    App JWT (GitHub 401, ``Bad credentials``)."""
+
+    status = 401
+
+    def __init__(self, message: str = "Bad credentials") -> None:
+        super().__init__(message, {"WWW-Authenticate": "Bearer"})
+
+
+class InstallationNotFound(ForgeError):
+    """No such installation for the calling App (GitHub 404)."""
+
+    status = 404
+
+
+class InstallationSuspended(ForgeError):
+    """The installation is suspended, so it mints no token (GitHub 403)."""
+
+    status = 403
+
+
+class PermissionNotGranted(ForgeError):
+    """A mint asked for a permission the installation was not granted at that level (GitHub 422)."""
+
+    status = 422
+
+
+class IntegrationForbidden(ForgeError):
+    """An installation token lacks the permission the route needs (GitHub 403,
+    ``Resource not accessible by integration``), naming the permission it accepts."""
+
+    status = 403
+
+    def __init__(self, permission: str, level: str) -> None:
+        super().__init__(
+            "Resource not accessible by integration", {"X-Accepted-GitHub-Permissions": f"{permission}={level}"}
+        )
+
+
+class PersonalTokenForbidden(ForgeError):
+    """A fine-grained personal access token reached a route GitHub withholds from it (403,
+    ``Resource not accessible by personal access token``)."""
+
+    status = 403
+
+    def __init__(self) -> None:
+        super().__init__("Resource not accessible by personal access token")

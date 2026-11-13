@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from blizzard_mock.fixture_workspace.seed import TOY_REPOS
 from blizzard_mock.forge.api import serialization as ser
-from blizzard_mock.forge.api.deps import CreateRepoBody, get_base_url, get_service
+from blizzard_mock.forge.api.deps import CreateRepoBody, get_base_url, get_service, requires
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.service import ForgeService
 
@@ -19,14 +19,15 @@ router = APIRouter(tags=["repos"])
 _SEEDS = {seed.name: seed.files for seed in TOY_REPOS}
 
 
-@router.get("/repos/{owner}/{repo}")
+@router.get("/repos/{owner}/{repo}", dependencies=[requires("metadata", "read")])
 def get_repo(
     owner: str,
     repo: str,
     service: Annotated[ForgeService, Depends(get_service)],
     base_url: Annotated[str, Depends(get_base_url)],
 ) -> dict[str, Any]:
-    return ser.repo_json(service.get_repo(owner, repo), base_url)
+    found = service.get_repo(owner, repo)
+    return ser.repo_json(found, base_url, private=service.is_private(found.full_name))
 
 
 @router.post("/_repos", status_code=201)

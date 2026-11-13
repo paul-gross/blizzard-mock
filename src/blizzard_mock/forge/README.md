@@ -84,6 +84,8 @@ armed.
 | `PATCH /repos/{o}/{r}/git/refs/{ref}` | Fast-forward a ref (`force` skips the check); 422 when not a fast-forward |
 | `DELETE /repos/{o}/{r}/git/refs/heads/{b}` | Delete a branch → 204; 422 `Reference does not exist`. Open pulls headed or based on it close |
 | `POST /repos/{o}/{r}/merges` | Merge branch `head` into `base` outside any PR → 201 with the merge commit (first parent is the base), 204 when the base already holds the head, 409 on conflict, 404 when a side is missing |
+| `GET /app/installations/{id}` | App JWT (`Bearer`, RS256 over the App's registered key). `200 {id, app_id, permissions, suspended_at}`; `401` bad JWT; `404` unknown installation or another App's |
+| `POST /app/installations/{id}/access_tokens` | App JWT; body `{permissions?}`. `201 {token, expires_at, permissions}` — a `ghs_` token; `401` bad JWT; `404` unknown; `403` suspended; `422` a requested permission not granted |
 | `GET /healthz` | Liveness |
 
 ## Conditional reads and rate headers
@@ -104,8 +106,65 @@ browser pages carry neither):
   error and the window's `X-RateLimit-Reset`, spending nothing, as GitHub's GraphQL does.
   `rate_budget` with no `token` reaches this window too; a named token reaches only its
   `core` window.
+- Every answer, the exempt routes and lever refusals included, carries a unique
+  `X-GitHub-Request-Id`.
 - Counting down never refuses. Only `rate_limited` and `secondary_rate_limited` do,
   and a lever refusal is answered before anything is counted.
+
+## Strict tokens and App installations
+
+Every addition here is off by default: with `strict_tokens` unarmed, any `Authorization`
+header (or none) reaches every route, and `/repos/…` routes enforce nothing.
+
+Arming `strict_tokens` makes `/repos/…` and `/graphql` authenticate (`/_*`, `/healthz`, the docs,
+the browser pages, and `/app/…` stay outside it). A credential is a registered PAT
+(`register_token`) or a minted installation token; an unregistered, absent, revoked, or expired
+one — or one minted under a suspended or deleted installation — answers `401 Bad credentials`,
+before anything is counted. Three kinds of credential:
+
+- **classic** — reaches every route; `X-OAuth-Scopes` echoes its `scopes`.
+- **fine-grained** — reaches every route except the permissions GitHub withholds from
+  fine-grained tokens on a private repository (`FINE_GRAINED_WITHHELD`, today `checks: read`,
+  held in `domain/apps.py`): `403 Resource not accessible by personal access token`. A
+  repository is private while `private_repository` holds for it (its JSON then says
+  `"private": true`).
+- **installation** — the permissions it was minted with, capped by the installation's current
+  grant (so `set_permissions` refuses tokens already minted), plus `metadata: read`. A route it
+  does not cover answers `403 Resource not accessible by integration` with
+  `X-Accepted-GitHub-Permissions: <name>=<level>`; a repository the installation no longer lists
+  answers `404`.
+
+Each `/repos/…` route declares its permission (`write` covers `read`):
+
+| Permission | Routes |
+|------------|--------|
+| `metadata: read` | `GET /repos/{o}/{r}` |
+| `issues: read` / `write` | `GET` / `POST`, `PATCH` on issues, comments, repo labels, an issue's labels |
+| `pull_requests: read` / `write` | `GET` pulls, a pull, `GET …/merge` / `POST`, `PATCH` pulls, `PUT …/update-branch` |
+| `contents: read` / `write` | `GET` commits, compare, `git/ref` / `PUT …/merge`, `git/refs` writes, `POST merges` |
+| `checks: read` / `write` | `GET …/check-runs` / `POST …/rerequest` |
+| `actions: write` | `POST …/actions/jobs/{id}/rerun` |
+
+`/graphql` authenticates but does not authorize. A minted token lives `token_lifetime` seconds
+(default 3600) on the forge's clock.
+
+| Lever | Shape | Effect |
+|-------|-------|--------|
+| `strict_tokens` | state (global) | Authentication and per-route permissions, as above |
+| `private_repository` | state (per repo) | The repository answers `private: true`; fine-grained withholdings apply |
+| `register_token` | action (`token`, `token_kind` `classic`/`fine-grained`, `scopes`) | Registers a PAT |
+| `register_app` | action (`app_id`, `public_key` PEM) | Registers an App |
+| `register_installation` | action (`installation_id`, `app_id`, `repositories`, `permissions`) | Registers an installation, replacing one of the same id — the way to restore a suspended one |
+| `token_lifetime` | action (`seconds`) | Lifetime of tokens minted from then on |
+| `revoke_token` | action (`token`) | The token answers `401` from then on |
+| `suspend_installation` | action (`installation_id`) | Mint → `403`, `GET` shows `suspended_at`, its tokens → `401` |
+| `delete_installation` | action (`installation_id`) | Mint and `GET` → `404`, its tokens → `401` |
+| `remove_repository` | action (`installation_id`, `repo`) | The installation's tokens → `404` on that repository |
+| `set_permissions` | action (`installation_id`, `permissions`) | Replaces the installation's grant |
+
+The App JWT's `exp`, `iat`, and the minted token's expiry are judged on the injected clock; `exp`
+must be in the future and at most ten minutes ahead, `iat` no more than a minute ahead.
+`POST /_levers/reset` clears the registry and restores the default lifetime.
 
 ## Browser destinations
 
@@ -132,7 +191,7 @@ hidden from OpenAPI and bypass request levers.
 
 `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm / fire),
 `DELETE /_levers/{kind}?repo=&number=&branch=&pattern=` (clear), `POST /_levers/reset`
-(which also clears the armed check runs and the rate windows). The
+(which also clears the armed check runs, the rate windows, and the App registry). The
 `/_levers` surface is exempt from the request-scoped levers so a test can always
 clear one it armed.
 
@@ -196,12 +255,16 @@ clear one it armed.
 - `internal/` — package-private adapters (`bzh:dependency-inversion`): the
   GitPython git backend, in-memory state, lever, check-run and rate-ledger stores,
   git-error factory.
+- `domain/apps.py`, `domain/app_service.py` — the credential and App model (`MockApp`,
+  `MockInstallation`, `MockToken`, the `IAppRegistry` seam) and `AppService`, the rules for
+  authentication, JWT checks, mint, and per-route authorization; `internal/app_registry.py`
+  holds them in memory.
 - `api/` — GitHub-shaped routers (controllers hold only `ForgeService`,
   `bzh:controller-read-only`) + serialization + the request-lever middleware and the conditional/rate middleware
   inside it.
 - `app.py` — the composition root wiring it all (`bzh:dependency-injection`).
 
 Owns `tests/test_forge_smoke.py`, `tests/test_forge_refs.py`,
-`tests/test_forge_listing.py`, `tests/test_forge_levers_policies.py`, and
+`tests/test_forge_listing.py`, `tests/test_forge_levers_policies.py`, `tests/test_forge_apps.py`, and
 `tests/test_forge_rate.py` — unit + component coverage (`blizzard-mock:unit-test`),
 real bare repos in tmp dirs.
