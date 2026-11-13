@@ -77,7 +77,9 @@ armed.
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
 | `POST /repos/{o}/{r}/check-runs/{id}/rerequest` | Acknowledge a check-run re-request with `201 {}` — runs are derived live, so nothing is reset |
 | `POST /repos/{o}/{r}/actions/jobs/{id}/rerun` | Acknowledge an Actions job re-run with `201 {}` — a check run's id is its job id; nothing is reset |
-| `GET /repos/{o}/{r}/commits/{ref}/check-runs` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`; the runs `ref_checks` armed against its revision, else derived live from the lever set |
+| `GET /repos/{o}/{r}/commits/{ref}/statuses?page=&per_page=` | Commit status history, newest first, empty by default; paginated with a `Link` header |
+| `GET /repos/{o}/{r}/commits/{ref}/status?page=&per_page=` | Combined status: latest entry per context, `pending` for an empty history; paged with a `Link` header and a total over all contexts |
+| `GET /repos/{o}/{r}/commits/{ref}/check-runs?page=&per_page=` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`; paged with a `Link` header and a total over all runs. The runs `ref_checks` armed against its revision, else derived live from the lever set |
 | `GET /repos/{o}/{r}/compare/{base}...{head}` | Compare two refs (slashed branch names allowed) — `status` (`identical`/`ahead`/`behind`/`diverged`), `ahead_by`, `behind_by`, `merge_base_commit`, `commits` (`base..head`, oldest first, with `parents`), `files` (merge base → head diff: `filename`, `status`, `sha`, `additions`, `deletions`, `patch`, `previous_filename` on rename); 404 if either side does not resolve |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `POST /repos/{o}/{r}/git/refs` | Create a branch (`{"ref": "refs/heads/x", "sha"}`) → 201; 422 `Reference already exists` |
@@ -191,7 +193,7 @@ hidden from OpenAPI and bypass request levers.
 
 `GET /_levers` (catalog + active), `POST /_levers/{kind}` (arm / fire),
 `DELETE /_levers/{kind}?repo=&number=&branch=&pattern=` (clear), `POST /_levers/reset`
-(which also clears the armed check runs, the rate windows, and the App registry). The
+(which also clears the armed check runs, status histories and read errors, the rate windows, and the App registry). The
 `/_levers` surface is exempt from the request-scoped levers so a test can always
 clear one it armed.
 
@@ -206,6 +208,8 @@ clear one it armed.
 | `checks_failed` | state (per PR) | One `completed`/`failure` check run on the PR head; also forces `mergeable_state=blocked` — an armed PR is never green with a red check |
 | `base_checks_failed` | state (per repo) | One `completed`/`failure` check run read against the revision the default branch resolves to — "the base gate was already red", independent of any PR |
 | `ref_checks` | action (repo, ref, checks) | Arms named runs (`{name, status}`, status `pending`, `failed`, or `success`) against the revision `ref` resolves to. A run of an existing name replaces it, a new name adds a run beside the others, an empty list arms "no runs". Armed runs are answered as they are; any other revision keeps the derived run |
+| `ref_statuses` | action (repo, ref, statuses) | Replaces the status history of the revision `ref` resolves to. Supply newest-first entries `{context, state, description?, target_url?}`; states are `error`, `failure`, `pending`, `success`. An empty list clears the history. |
+| `status_read_error` | action (repo, ref, status_code) | Status reads for the resolved revision return 401, 403, 500, or 503; null clears the error. Other revisions and check-run reads are unaffected. |
 | `branch_protected` | state (repo, branch) | `PATCH git/refs` on the branch → 422 `Protected branch update failed…`. Scoped by branch, so several coexist; clear with `?branch=` |
 | `ruleset` | state (repo, pattern) | `POST git/refs` and `POST /merges` (by base) on a branch matching the glob → 422 `Repository rule violations found…`. Scoped by pattern; clear with `?pattern=` |
 | `merge_commits_disallowed` | state (per repo) | `PUT .../merge` with the `merge` method → 405 `Merge commits are not allowed on this repository`; `squash` and `rebase` are admitted |

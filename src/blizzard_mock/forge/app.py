@@ -36,6 +36,7 @@ from blizzard_mock.forge.internal.git_backend import GitBackend
 from blizzard_mock.forge.internal.lever_store import InMemoryLeverStore
 from blizzard_mock.forge.internal.rate_ledger import InMemoryRateLedger
 from blizzard_mock.forge.internal.state_store import InMemoryForgeState
+from blizzard_mock.forge.internal.status_store import InMemoryStatusStore
 
 
 def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
@@ -49,7 +50,7 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     checks = InMemoryCheckRunStore()
     rate = InMemoryRateLedger(the_clock)
     apps = AppService(InMemoryAppRegistry(), levers, the_clock)
-    service = ForgeService(git, state, levers, the_clock, checks, rate, apps)
+    service = ForgeService(git, state, levers, the_clock, checks, rate, apps, InMemoryStatusStore())
 
     app = FastAPI(title="blizzard-mock forge", version="0.1.0")
     if isinstance(the_clock, ControlledClock):

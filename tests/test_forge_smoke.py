@@ -571,6 +571,8 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "checks_failed",
         "base_checks_failed",
         "ref_checks",
+        "ref_statuses",
+        "status_read_error",
         "branch_protected",
         "ruleset",
         "merge_commits_disallowed",
