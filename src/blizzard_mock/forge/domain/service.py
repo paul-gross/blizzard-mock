@@ -61,7 +61,7 @@ from blizzard_mock.forge.domain.models import (
 )
 from blizzard_mock.forge.domain.rate import IRateLedger
 from blizzard_mock.forge.domain.state import IWriteForgeState
-from blizzard_mock.forge.domain.statuses import IStatusStore, Status
+from blizzard_mock.forge.domain.statuses import IWriteStatusStore, Status
 
 #: GitHub's account and repository name rules, which ``create_repository`` holds a new name to.
 _OWNER_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
@@ -127,7 +127,7 @@ class ForgeService:
         checks: ICheckRunStore,
         rate: IRateLedger,
         apps: AppService,
-        statuses: IStatusStore,
+        statuses: IWriteStatusStore,
     ) -> None:
         self._git = git
         self._state = state
