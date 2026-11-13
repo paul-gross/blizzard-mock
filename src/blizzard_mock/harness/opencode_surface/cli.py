@@ -141,7 +141,7 @@ def _cmd_run(args: list[str], levers: frozenset[Lever]) -> int:
     if run.is_sleep5_turn(args):
         state_store.write_state(paths.state_path(), state_domain.running_state())
         print(json.dumps(run.sleep5_step_start(sid)), flush=True)
-        time.sleep(1.0)
+        time.sleep(5.0)
         state_store.write_state(paths.state_path(), state_domain.done_state())
     print("\n".join(json.dumps(event) for event in run.default_turn_events(sid)))
     exit_code = run.fresh_nonzero_exit(args, levers)
