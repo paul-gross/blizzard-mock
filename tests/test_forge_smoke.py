@@ -578,6 +578,17 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "secondary_rate_limited",
         "mergeable_state",
         "checks_startup_failure",
+        "strict_tokens",
+        "private_repository",
+        "register_token",
+        "register_app",
+        "register_installation",
+        "token_lifetime",
+        "revoke_token",
+        "suspend_installation",
+        "delete_installation",
+        "remove_repository",
+        "set_permissions",
     }
 
 

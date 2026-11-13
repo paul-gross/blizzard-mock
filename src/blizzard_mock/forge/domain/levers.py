@@ -8,7 +8,7 @@ once and mutate state immediately.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -58,6 +58,30 @@ class LeverKind(StrEnum):
     #: Per PR: the head carries one completed check run concluded ``startup_failure``;
     #: also forces ``mergeable_state: blocked``.
     CHECKS_STARTUP_FAILURE = "checks_startup_failure"
+    #: Global: only registered tokens and minted installation tokens authenticate, and each
+    #: route's permission is enforced against the credential.
+    STRICT_TOKENS = "strict_tokens"
+    #: Per repo: the repository answers ``private: true``, and GitHub's fine-grained-token
+    #: withholdings apply to it.
+    PRIVATE_REPOSITORY = "private_repository"
+    #: Action: registers a personal access token with a ``token_kind`` and ``scopes``.
+    REGISTER_TOKEN = "register_token"
+    #: Action: registers an App's id and public key.
+    REGISTER_APP = "register_app"
+    #: Action: registers (or replaces) an installation: its App, repositories, and permissions.
+    REGISTER_INSTALLATION = "register_installation"
+    #: Action: seconds a minted token lives.
+    TOKEN_LIFETIME = "token_lifetime"
+    #: Action: the token answers 401 from then on.
+    REVOKE_TOKEN = "revoke_token"
+    #: Action: the installation's mint answers 403 and its tokens 401.
+    SUSPEND_INSTALLATION = "suspend_installation"
+    #: Action: the installation's mint answers 404 and its tokens 401.
+    DELETE_INSTALLATION = "delete_installation"
+    #: Action: the installation's tokens answer 404 on one repository.
+    REMOVE_REPOSITORY = "remove_repository"
+    #: Action: replaces an installation's granted permissions.
+    SET_PERMISSIONS = "set_permissions"
 
 
 #: Levers that persist as request-bending state until explicitly cleared.
@@ -78,6 +102,23 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.SECONDARY_RATE_LIMITED,
         LeverKind.MERGEABLE_STATE,
         LeverKind.CHECKS_STARTUP_FAILURE,
+        LeverKind.STRICT_TOKENS,
+        LeverKind.PRIVATE_REPOSITORY,
+    }
+)
+
+#: The action levers that steer the App and token registry.
+APP_ACTION_LEVERS: frozenset[LeverKind] = frozenset(
+    {
+        LeverKind.REGISTER_TOKEN,
+        LeverKind.REGISTER_APP,
+        LeverKind.REGISTER_INSTALLATION,
+        LeverKind.TOKEN_LIFETIME,
+        LeverKind.REVOKE_TOKEN,
+        LeverKind.SUSPEND_INSTALLATION,
+        LeverKind.DELETE_INSTALLATION,
+        LeverKind.REMOVE_REPOSITORY,
+        LeverKind.SET_PERMISSIONS,
     }
 )
 
@@ -88,6 +129,7 @@ ACTION_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.COMMENT_MIDFLIGHT,
         LeverKind.REF_CHECKS,
         LeverKind.RATE_BUDGET,
+        *APP_ACTION_LEVERS,
     }
 )
 
@@ -146,6 +188,20 @@ class LeverParams(BaseModel):
     #: to set, and the reset as epoch seconds — the same unit as ``X-RateLimit-Reset``.
     token: str | None = None
     reset: int | None = None
+    #: ``register_token``: ``classic`` or ``fine-grained``, and a classic token's scopes.
+    token_kind: Literal["classic", "fine-grained"] | None = None
+    scopes: list[str] = Field(default_factory=list)
+    #: ``register_app``: the App id and its public key (PEM). ``register_installation``: the
+    #: installation, its App, repositories (``owner/repo``), and permissions (GitHub's names).
+    #: ``set_permissions`` replaces the permissions; ``suspend_installation``,
+    #: ``delete_installation``, and ``remove_repository`` (with ``repo``) address the installation.
+    app_id: int | None = None
+    public_key: str | None = None
+    installation_id: int | None = None
+    repositories: list[str] = Field(default_factory=list)
+    permissions: dict[str, str] = Field(default_factory=dict)
+    #: ``token_lifetime``: seconds a minted token lives.
+    seconds: int | None = None
 
 
 def _scope_key(repo: str | None, number: int | None, branch: str | None = None, pattern: str | None = None) -> str:

@@ -13,6 +13,7 @@ import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from blizzard_mock.forge.domain.app_service import AppService
 from blizzard_mock.forge.domain.checks import CHECK_STATUSES, CheckSpec, ICheckRunStore
 from blizzard_mock.forge.domain.clock import Clock
 from blizzard_mock.forge.domain.errors import (
@@ -38,6 +39,7 @@ from blizzard_mock.forge.domain.errors import (
 from blizzard_mock.forge.domain.git import GitCommit, GitCompare, IWriteGitBackend
 from blizzard_mock.forge.domain.levers import (
     ACTION_LEVERS,
+    APP_ACTION_LEVERS,
     STATE_LEVERS,
     ILeverStore,
     Lever,
@@ -122,6 +124,7 @@ class ForgeService:
         clock: Clock,
         checks: ICheckRunStore,
         rate: IRateLedger,
+        apps: AppService,
     ) -> None:
         self._git = git
         self._state = state
@@ -129,6 +132,7 @@ class ForgeService:
         self._clock = clock
         self._checks = checks
         self._rate = rate
+        self._apps = apps
 
     # -- repositories ------------------------------------------------------
 
@@ -435,6 +439,9 @@ class ForgeService:
     def arm_lever(self, kind: LeverKind, params: LeverParams) -> Lever | None:
         """Arm a state lever, or fire an action lever immediately. Returns the
         armed ``Lever`` for state levers; ``None`` for action levers."""
+        if kind in APP_ACTION_LEVERS:
+            self._apps.fire(kind, params)
+            return None
         if kind in ACTION_LEVERS:
             self._fire_action_lever(kind, params)
             return None
@@ -465,10 +472,15 @@ class ForgeService:
         self._levers.clear(kind, repo, number, branch, pattern)
 
     def clear_all_levers(self) -> None:
-        """Clear every lever, and with them the armed check runs and the rate windows."""
+        """Clear every lever, and with them the armed check runs, the rate windows, and the App registry."""
         self._levers.clear_all()
         self._checks.clear_all()
         self._rate.clear()
+        self._apps.reset()
+
+    def is_private(self, full_name: str) -> bool:
+        """Whether ``private_repository`` holds for the repository."""
+        return self._levers.find(LeverKind.PRIVATE_REPOSITORY, full_name, None) is not None
 
     def list_levers(self) -> list[Lever]:
         return self._levers.active()
@@ -721,6 +733,8 @@ def _require_scope(kind: LeverKind, params: LeverParams) -> None:
         raise ValidationError("branch_protected requires repo and branch")
     if kind is LeverKind.RULESET and (params.repo is None or params.pattern is None):
         raise ValidationError("ruleset requires repo and pattern")
+    if kind is LeverKind.PRIVATE_REPOSITORY and params.repo is None:
+        raise ValidationError("private_repository requires repo")
     if kind is LeverKind.MERGE_COMMITS_DISALLOWED and params.repo is None:
         raise ValidationError("merge_commits_disallowed requires repo")
     if kind is LeverKind.MERGEABLE_STATE and (

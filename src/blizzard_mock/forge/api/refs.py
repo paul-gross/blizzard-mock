@@ -12,14 +12,21 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from blizzard_mock.forge.api import serialization as ser
-from blizzard_mock.forge.api.deps import CreateRefBody, MergeBranchesBody, UpdateRefBody, get_base_url, get_service
+from blizzard_mock.forge.api.deps import (
+    CreateRefBody,
+    MergeBranchesBody,
+    UpdateRefBody,
+    get_base_url,
+    get_service,
+    requires,
+)
 from blizzard_mock.forge.domain.errors import ValidationError
 from blizzard_mock.forge.domain.service import ForgeService
 
 router = APIRouter(tags=["git"])
 
 
-@router.get("/repos/{owner}/{repo}/commits/{ref}")
+@router.get("/repos/{owner}/{repo}/commits/{ref}", dependencies=[requires("contents", "read")])
 def get_commit(
     owner: str,
     repo: str,
@@ -30,7 +37,7 @@ def get_commit(
     return ser.commit_json(f"{owner}/{repo}", service.commit(owner, repo, ref), base_url)
 
 
-@router.get("/repos/{owner}/{repo}/commits/{ref}/check-runs")
+@router.get("/repos/{owner}/{repo}/commits/{ref}/check-runs", dependencies=[requires("checks", "read")])
 def list_check_runs(
     owner: str,
     repo: str,
@@ -46,19 +53,25 @@ def list_check_runs(
     }
 
 
-@router.post("/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest", status_code=201)
+@router.post(
+    "/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest",
+    dependencies=[requires("checks", "write")],
+    status_code=201,
+)
 def rerequest_check_run(owner: str, repo: str, check_run_id: int) -> dict[str, Any]:
     # Derived check runs have nothing to reset; acknowledge with GitHub's empty 201.
     return {}
 
 
-@router.post("/repos/{owner}/{repo}/actions/jobs/{job_id}/rerun", status_code=201)
+@router.post(
+    "/repos/{owner}/{repo}/actions/jobs/{job_id}/rerun", dependencies=[requires("actions", "write")], status_code=201
+)
 def rerun_job(owner: str, repo: str, job_id: int) -> dict[str, Any]:
     # A check run's id doubles as its Actions job id; derived runs have nothing to reset.
     return {}
 
 
-@router.get("/repos/{owner}/{repo}/compare/{basehead:path}")
+@router.get("/repos/{owner}/{repo}/compare/{basehead:path}", dependencies=[requires("contents", "read")])
 def compare(
     owner: str,
     repo: str,
@@ -73,7 +86,7 @@ def compare(
     return ser.compare_json(f"{owner}/{repo}", service.compare(owner, repo, base, head), base_url)
 
 
-@router.get("/repos/{owner}/{repo}/git/ref/{ref:path}")
+@router.get("/repos/{owner}/{repo}/git/ref/{ref:path}", dependencies=[requires("contents", "read")])
 def get_ref(
     owner: str,
     repo: str,
@@ -86,7 +99,7 @@ def get_ref(
     return ser.ref_json(f"{owner}/{repo}", f"refs/{ref}", sha, base_url)
 
 
-@router.patch("/repos/{owner}/{repo}/git/refs/{ref:path}")
+@router.patch("/repos/{owner}/{repo}/git/refs/{ref:path}", dependencies=[requires("contents", "write")])
 def update_ref(
     owner: str,
     repo: str,
@@ -101,7 +114,7 @@ def update_ref(
     return ser.ref_json(f"{owner}/{repo}", f"refs/{ref}", sha, base_url)
 
 
-@router.post("/repos/{owner}/{repo}/git/refs", status_code=201)
+@router.post("/repos/{owner}/{repo}/git/refs", dependencies=[requires("contents", "write")], status_code=201)
 def create_ref(
     owner: str,
     repo: str,
@@ -113,7 +126,9 @@ def create_ref(
     return JSONResponse(status_code=201, content=ser.ref_json(f"{owner}/{repo}", body.ref, sha, base_url))
 
 
-@router.delete("/repos/{owner}/{repo}/git/refs/heads/{branch:path}", status_code=204)
+@router.delete(
+    "/repos/{owner}/{repo}/git/refs/heads/{branch:path}", dependencies=[requires("contents", "write")], status_code=204
+)
 def delete_ref(
     owner: str,
     repo: str,
@@ -124,7 +139,7 @@ def delete_ref(
     return Response(status_code=204)
 
 
-@router.post("/repos/{owner}/{repo}/merges", status_code=201)
+@router.post("/repos/{owner}/{repo}/merges", dependencies=[requires("contents", "write")], status_code=201)
 def merge_branches(
     owner: str,
     repo: str,

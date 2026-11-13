@@ -7,9 +7,13 @@ constructing collaborators themselves (``bzh:dependency-injection``).
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Depends, Request
+from fastapi.params import Depends as DependsMarker
 from pydantic import BaseModel, Field
 
+from blizzard_mock.forge.domain.app_service import AppService
 from blizzard_mock.forge.domain.models import MergeMethod
 from blizzard_mock.forge.domain.service import ForgeService
 
@@ -17,6 +21,25 @@ from blizzard_mock.forge.domain.service import ForgeService
 def get_service(request: Request) -> ForgeService:
     service: ForgeService = request.app.state.service
     return service
+
+
+def get_app_service(request: Request) -> AppService:
+    apps: AppService = request.app.state.apps
+    return apps
+
+
+def requires(permission: str, level: str) -> DependsMarker:
+    """A route's declared permission: under ``strict_tokens`` the credential must hold
+    ``permission: level`` on the route's repository. Every ``/repos/{owner}/{repo}/…`` route
+    declares one; the declaration is readable off the dependency as ``.requires``."""
+
+    def dependency(
+        owner: str, repo: str, request: Request, apps: Annotated[AppService, Depends(get_app_service)]
+    ) -> None:
+        apps.authorize(request.headers.get("authorization"), f"{owner}/{repo}", permission, level)
+
+    setattr(dependency, "requires", (permission, level))  # noqa: B010
+    return Depends(dependency)
 
 
 def get_base_url(request: Request) -> str:
@@ -88,3 +111,7 @@ class CreateRepoBody(BaseModel):
     owner: str
     name: str
     seed: str = "toy-api"
+
+
+class AppTokenBody(BaseModel):
+    permissions: dict[str, str] | None = None

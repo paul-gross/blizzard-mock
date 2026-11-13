@@ -39,6 +39,17 @@ _CATALOG: dict[str, str] = {
     LeverKind.SECONDARY_RATE_LIMITED.value: "state (global/repo): requests → 403 secondary rate limit, remaining kept",
     LeverKind.MERGEABLE_STATE.value: "state (per PR): mergeable_state forced to `state` (unstable/has_hooks/draft)",
     LeverKind.CHECKS_STARTUP_FAILURE.value: "state (per PR): startup_failure check run on the PR head; blocked",
+    LeverKind.STRICT_TOKENS.value: "state (global): only registered/minted tokens authenticate; permissions enforced",
+    LeverKind.PRIVATE_REPOSITORY.value: "state (per repo): private: true; fine-grained withholdings apply",
+    LeverKind.REGISTER_TOKEN.value: "action: register a PAT (token, token_kind classic/fine-grained, scopes)",
+    LeverKind.REGISTER_APP.value: "action: register an App (app_id, public_key PEM)",
+    LeverKind.REGISTER_INSTALLATION.value: "action: register/replace an installation (App, repos, permissions)",
+    LeverKind.TOKEN_LIFETIME.value: "action: seconds a minted token lives (default 3600)",
+    LeverKind.REVOKE_TOKEN.value: "action: the token answers 401 from then on",
+    LeverKind.SUSPEND_INSTALLATION.value: "action: mint → 403, minted tokens → 401",
+    LeverKind.DELETE_INSTALLATION.value: "action: mint → 404, minted tokens → 401",
+    LeverKind.REMOVE_REPOSITORY.value: "action: the installation's tokens → 404 on repo",
+    LeverKind.SET_PERMISSIONS.value: "action: replace an installation's granted permissions",
 }
 
 
