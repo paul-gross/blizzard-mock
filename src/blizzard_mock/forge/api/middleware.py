@@ -12,6 +12,9 @@ window per credential and answers an exhausted one ``200`` with a ``RATE_LIMITED
 200 ``GET`` answers a strong ``ETag`` and a matching ``If-None-Match`` answers ``304``, uncounted;
 every other answer that reaches a route spends one request from the credential's
 window and carries ``X-RateLimit-*``.
+
+Being outermost, ``LeverMiddleware`` also stamps every answer, a lever refusal included, with a unique
+``X-GitHub-Request-Id``, as GitHub does.
 """
 
 from __future__ import annotations
@@ -34,6 +37,8 @@ from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateW
 _EXEMPT_PREFIXES = ("/_clock", "/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
 
 _GRAPHQL_BUCKET_PREFIX = "graphql:"
+
+REQUEST_ID_HEADER = "X-GitHub-Request-Id"
 
 _SECONDARY_LIMIT_MESSAGE = "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
 
@@ -85,6 +90,11 @@ class LeverMiddleware(BaseHTTPMiddleware):
         self._apps = apps
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await self._apply_levers(request, call_next)
+        response.headers[REQUEST_ID_HEADER] = uuid.uuid4().hex.upper()
+        return response
+
+    async def _apply_levers(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
             return await call_next(request)
