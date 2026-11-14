@@ -54,7 +54,7 @@ def provider_refusal_event(sid: str) -> dict[str, object]:
 
 
 def sleep5_step_start(sid: str) -> dict[str, object]:
-    """The step-start event printed before the observable one-second sleep."""
+    """The step-start event printed before the observable five-second sleep."""
     return {
         "type": "step_start",
         "sessionID": sid,

@@ -23,6 +23,7 @@ from typing import TypedDict
 import pytest
 
 from blizzard_mock.harness.opencode_surface import _baked
+from blizzard_mock.harness.opencode_surface import cli as surface_cli
 from blizzard_mock.harness.opencode_surface import emit as surface_emit
 from blizzard_mock.harness.opencode_surface import levers as surface_levers
 
@@ -195,6 +196,23 @@ def test_default_emission_completes_a_fresh_turn_cleanly_with_no_misbehaviour(tm
     # No denial, refusal, or wrong-session behavior anywhere in the turn.
     assert "error" not in " ".join(json.dumps(e) for e in events)
     assert "ses_wrong" not in proc.stdout
+
+
+def test_sleep5_turn_keeps_the_running_state_for_the_requested_duration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    sleeps: list[float] = []
+
+    def observe_sleep(seconds: float) -> None:
+        state = json.loads((tmp_path / "fake-opencode-state.json").read_text())
+        assert state["phase"] == "running"
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(surface_cli.time, "sleep", observe_sleep)
+    assert surface_cli.main(["run", "--session", "ses_fake", "sleep 5"]) == 0
+    assert sleeps == [5.0]
+    assert json.loads((tmp_path / "fake-opencode-state.json").read_text())["phase"] == "done"
 
 
 # --------------------------------------------------------------------------- #
