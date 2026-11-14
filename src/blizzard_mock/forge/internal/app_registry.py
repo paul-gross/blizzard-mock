@@ -35,6 +35,9 @@ class InMemoryAppRegistry:
     def get_token(self, value: str) -> MockToken | None:
         return self._tokens.get(value)
 
+    def installation_tokens(self, installation_id: int) -> list[MockToken]:
+        return [t for t in self._tokens.values() if t.installation_id == installation_id]
+
     def token_lifetime(self) -> int:
         return self._lifetime
 
