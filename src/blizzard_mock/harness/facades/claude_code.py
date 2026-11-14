@@ -25,9 +25,12 @@ _USAGE = """\
 mock-claude-code — mock Claude Code coding-harness facade
 
 Usage:
-  mock-claude-code -p [--output-format text|json] [--session-id <uuid>]
+  mock-claude-code -p [--output-format text|json|stream-json [--verbose]] [--session-id <uuid>]
     [--settings <path>] [--permission-mode <mode>] [--permission-prompts <target>] "<script>"
   mock-claude-code -p --resume <session-id> [--settings <path>] "<resume-script>"
+
+--output-format stream-json needs --verbose, as in the real CLI: one JSON event per
+line, a system/init event first and the result envelope last.
 
 --settings names a Claude Code settings document; its PostToolUse and SessionEnd
 hook commands are executed as real subprocesses.
@@ -41,34 +44,62 @@ See src/blizzard_mock/harness/README.md for the full contract.
 """
 
 # The real shape, so the health probe's real normalizer gets exercised.
-_MOCK_VERSION = "2.1.278 (Claude Code)"
+_MOCK_VERSION_NUMBER = "2.1.278"
+_MOCK_VERSION = f"{_MOCK_VERSION_NUMBER} (Claude Code)"
+
+_STREAM_JSON = "stream-json"
 
 
 class ClaudeCodeWire:
     """Render a :class:`RunResult` as Claude Code's headless output.
 
-    ``--output-format json`` -> the ``result`` envelope; ``text`` -> the message.
+    ``--output-format json`` -> the ``result`` envelope; ``stream-json`` -> a ``system/init``
+    event before the script runs, then the assistant's message and the same ``result``
+    envelope, one event per line; ``text`` -> the message.
     """
 
     def __init__(self, output_format: str = "text") -> None:
         self._format = output_format
 
     def render_identity(self, session_id: str) -> str | None:
-        """Claude Code's real handshake carries no separate identity preamble — its
-        session id arrives only on ``render``'s own final record."""
-        return None
+        """A stream opens with its ``system/init`` event, naming the session and the
+        version; ``json`` and ``text`` carry no preamble, their session id arriving only
+        on ``render``'s own final record."""
+        if self._format != _STREAM_JSON:
+            return None
+        init = {
+            "type": "system",
+            "subtype": "init",
+            "session_id": session_id,
+            "model": MOCK_MODEL,
+            "claude_code_version": _MOCK_VERSION_NUMBER,
+        }
+        return json.dumps(init) + "\n"
 
     def render(self, result: RunResult) -> str:
         text = render_ask_text(result) if result.subtype == "ask" else result.text
-        if self._format != "json":
+        if self._format not in ("json", _STREAM_JSON):
             return f"{text}\n"
+        envelope = self._envelope(result, text)
+        if self._format == "json" or not text:
+            return json.dumps(envelope) + "\n"
+        message = {
+            "type": "assistant",
+            "message": {"model": MOCK_MODEL, "role": "assistant", "content": [{"type": "text", "text": text}]},
+            "parent_tool_use_id": None,
+            "session_id": result.session_id,
+        }
+        return json.dumps(message) + "\n" + json.dumps(envelope) + "\n"
+
+    @staticmethod
+    def _envelope(result: RunResult, text: str) -> dict[str, object]:
         # Claude Code has no "ask" result subtype; a parked worker simply ends its
         # turn successfully, the ask riding the result text.
         subtype = "success" if result.subtype == "ask" else result.subtype
         # A realistic `usage` + `total_cost_usd` (blizzard epic #57): deterministic,
         # not tied to any real pricing (`_usage.py`).
         usage = synthesize_usage_tokens(text)
-        envelope = {
+        envelope: dict[str, object] = {
             "type": "result",
             "subtype": subtype,
             "is_error": result.is_error,
@@ -84,14 +115,15 @@ class ClaudeCodeWire:
             # The real CLI's crash envelope (e.g. a SIGINT-interrupted turn) carries no
             # `result` key at all, only its cost and usage.
             del envelope["result"]
-        return json.dumps(envelope) + "\n"
+        return envelope
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mock-claude-code", add_help=True)
     parser.add_argument("prompt", nargs="?", default=None)
     parser.add_argument("-p", "--print", action="store_true", dest="print_mode")
-    parser.add_argument("--output-format", choices=["text", "json"], default="text")
+    parser.add_argument("--output-format", choices=["text", "json", _STREAM_JSON], default="text")
+    parser.add_argument("--verbose", action="store_true", help="required by --output-format stream-json")
     parser.add_argument("--session-id", default=None)
     parser.add_argument("--resume", default=None, metavar="SESSION_ID")
     parser.add_argument(
@@ -138,7 +170,10 @@ def main(argv: list[str] | None = None) -> None:
         # before argparse ever sees it — mirrors `opencode.py`'s own interception.
         print(_MOCK_VERSION)
         raise SystemExit(0)
-    args = _parser().parse_args(args_list)
+    parser = _parser()
+    args = parser.parse_args(args_list)
+    if args.output_format == _STREAM_JSON and args.print_mode and not args.verbose:
+        parser.error("--output-format=stream-json requires --verbose")
     script = _common.read_script(args.prompt)
     if script is None:
         print(_USAGE)
