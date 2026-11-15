@@ -325,6 +325,86 @@ def test_claude_facade_json_envelope(
     assert "<Choice>approve</Choice>" in envelope["result"]
 
 
+def _claude_stream(cwd: Path, env: dict[str, str], *flags: str, script: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "blizzard_mock.harness.facades.claude_code", "-p", *flags, script],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_claude_facade_stream_json_opens_with_init_and_ends_in_the_result(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
+    cwd, env = fenced_repo
+    proc = _claude_stream(
+        cwd, env, "--output-format", "stream-json", "--verbose", "--session-id", "abc-123", script="verdict('approve')"
+    )
+
+    assert proc.returncode == 0
+    events = [json.loads(line) for line in proc.stdout.splitlines()]
+    assert [(event["type"], event.get("subtype")) for event in events] == [
+        ("system", "init"),
+        ("assistant", None),
+        ("result", "success"),
+    ]
+    init, message, result = events
+    assert init["session_id"] == "abc-123"
+    assert init["claude_code_version"] == "2.1.278"
+    assert "<Choice>approve</Choice>" in message["message"]["content"][0]["text"]
+    assert result["session_id"] == "abc-123"
+    assert "<Choice>approve</Choice>" in result["result"]
+    assert result["total_cost_usd"] > 0
+
+
+def test_claude_facade_stream_json_init_lands_before_the_script_runs(
+    fenced_repo: tuple[Path, dict[str, str]],
+) -> None:
+    """A worker still running has already written its ``init`` — what a reader of a live stream sees first."""
+    cwd, env = fenced_repo
+    started = cwd / "started"
+    script = f"open({str(started)!r}, 'w').close()\nhang()"
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "blizzard_mock.harness.facades.claude_code",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--session-id",
+            "live-1",
+            script,
+        ],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        ready, _, _ = select.select([proc.stdout], [], [], 10)
+        assert ready, "no init event before the script ran"
+        init = json.loads(proc.stdout.readline())
+        assert (init["type"], init["subtype"], init["session_id"]) == ("system", "init", "live-1")
+    finally:
+        proc.kill()
+        proc.communicate(timeout=10)
+
+
+def test_claude_facade_stream_json_requires_verbose(fenced_repo: tuple[Path, dict[str, str]]) -> None:
+    cwd, env = fenced_repo
+    proc = _claude_stream(cwd, env, "--output-format", "stream-json", script="verdict('approve')")
+
+    assert proc.returncode != 0
+    assert "requires --verbose" in proc.stderr
+    assert proc.stdout == ""
+
+
 def test_claude_facade_accepts_the_runner_permission_flags(fenced_repo: tuple[Path, dict[str, str]]) -> None:
     """The runner appends ``--permission-mode`` and ``--permission-prompts`` to every
     unattended invocation; the facade accepts both and acts on neither."""

@@ -83,6 +83,9 @@ HUB_GLOBAL_TABLES: frozenset[str] = frozenset(
         "trace_cursor",
         "egress_cursor",
         "hub_locks",
+        "hub_settings",
+        "hub_setting_entries",
+        "hub_setting_changes",
     }
 )
 
