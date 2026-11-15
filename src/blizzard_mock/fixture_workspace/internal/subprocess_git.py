@@ -47,9 +47,9 @@ class SubprocessGit:
         log.debug("fixture.git.seed_repo", bare=str(bare), files=len(files))
 
     def clone_local(self, source: Path, dest: Path) -> None:
-        # --local clones committed state via cheap hardlinks; a disposable fixture
+        # Local-path clones use cheap hardlinks where possible; a disposable fixture
         # never mutates the shared objects, so hardlinks are safe here.
-        self._git(["clone", "--local", "--quiet", str(source), str(dest)])
+        self._git(["clone", "--quiet", str(source), str(dest)])
         log.debug("fixture.git.clone_local", source=str(source), dest=str(dest))
 
     def _git(self, args: list[str], *, identity: bool = False) -> None:

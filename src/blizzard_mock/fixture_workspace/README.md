@@ -28,7 +28,7 @@ is a real merge into bare `main`. The origins directory is exposed by
 `blizzard-mock-fixture path --part origins` for exactly this wiring.
 
 **No network — a local winter framework.** In winter mode the framework is cloned
-(`git clone --local`) from a **local winter source's committed master** (a
+(`git clone`) from a **local winter source's committed master** (a
 workspace whose `tools/winter-cli/` ships the CLI, e.g. the blizzard workspace).
 Nothing is fetched from a remote forge. A winter source is never discovered
 implicitly: a cwd inside a winter workspace does not make a fixture winter-bound.
