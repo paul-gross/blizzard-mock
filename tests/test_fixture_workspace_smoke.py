@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -105,6 +106,35 @@ def test_render_config_toml_declares_file_origins() -> None:
 # --------------------------------------------------------------------------- #
 # unit: minting structure (real git, fake winter)
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux LD_PRELOAD")
+def test_clone_local_copies_when_hardlinks_cross_devices(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = _make_winter_source(tmp_path)
+    shim_source = tmp_path / "exdev.c"
+    shim = tmp_path / "exdev.so"
+    shim_source.write_text(
+        "#include <errno.h>\nint link(const char *oldpath, const char *newpath) { errno = EXDEV; return -1; }\n"
+    )
+    subprocess.run(["cc", "-shared", "-fPIC", "-o", str(shim), str(shim_source)], check=True)
+    monkeypatch.setenv("LD_PRELOAD", str(shim))
+    monkeypatch.setenv("LC_ALL", "C")
+
+    # Confirm the fault is active and distinguishes the explicit local mode.
+    forced = subprocess.run(
+        ["git", "clone", "--local", "--quiet", str(source), str(tmp_path / "forced")],
+        capture_output=True,
+        text=True,
+    )
+    assert forced.returncode != 0
+    assert "Invalid cross-device link" in forced.stderr
+
+    dest = tmp_path / "clone"
+    SubprocessGit().clone_local(source, dest)
+    assert (dest / "tools/winter-cli/pyproject.toml").read_text() == "[project]\nname='winter-cli'\n"
+    source_head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True)
+    dest_head = subprocess.check_output(["git", "-C", str(dest), "rev-parse", "HEAD"], text=True)
+    assert dest_head == source_head
 
 
 def test_mint_materializes_bare_origins_and_workspace(tmp_path: Path) -> None:
