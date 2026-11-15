@@ -47,7 +47,7 @@ _CATALOG: dict[str, str] = {
     LeverKind.REGISTER_APP.value: "action: register an App (app_id, public_key PEM)",
     LeverKind.REGISTER_INSTALLATION.value: "action: register/replace an installation (App, repos, permissions)",
     LeverKind.TOKEN_LIFETIME.value: "action: seconds a minted token lives (default 3600)",
-    LeverKind.REVOKE_TOKEN.value: "action: the token answers 401 from then on",
+    LeverKind.REVOKE_TOKEN.value: "action: the token, or every installation_id token so far, answers 401 from then on",
     LeverKind.SUSPEND_INSTALLATION.value: "action: mint → 403, minted tokens → 401",
     LeverKind.DELETE_INSTALLATION.value: "action: mint → 404, minted tokens → 401",
     LeverKind.REMOVE_REPOSITORY.value: "action: the installation's tokens → 404 on repo",

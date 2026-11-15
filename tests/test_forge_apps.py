@@ -306,6 +306,18 @@ def test_a_revoked_minted_token_answers_401(world: tuple[TestClient, FixedClock]
     assert client.get(URL, headers=_tok(token)).status_code == 401
 
 
+def test_revoking_an_installation_revokes_every_token_minted_for_it_so_far(
+    world: tuple[TestClient, FixedClock],
+) -> None:
+    client, clock = world
+    _install(client)
+    _lever(client, "strict_tokens")
+    tokens = [_mint(client, clock), _mint(client, clock)]
+    _lever(client, "revoke_token", installation_id=INSTALLATION)
+    assert [client.get(URL, headers=_tok(t)).status_code for t in tokens] == [401, 401]
+    assert client.get(URL, headers=_tok(_mint(client, clock))).status_code == 200
+
+
 def test_reset_clears_the_registry_and_the_lifetime(world: tuple[TestClient, FixedClock]) -> None:
     client, clock = world
     _install(client)

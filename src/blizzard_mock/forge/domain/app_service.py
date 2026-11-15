@@ -68,10 +68,7 @@ class AppService:
                 raise ValidationError("token_lifetime requires seconds")
             self._registry.set_token_lifetime(params.seconds)
         elif kind is LeverKind.REVOKE_TOKEN:
-            token = self._registry.get_token(params.token or "")
-            if token is None:
-                raise ValidationError("revoke_token requires a registered token")
-            token.revoked = True
+            self._revoke(params)
         elif kind is LeverKind.SUSPEND_INSTALLATION:
             self._installation(params).suspended_at = self._clock.now()
         elif kind is LeverKind.DELETE_INSTALLATION:
@@ -84,6 +81,16 @@ class AppService:
             self._installation(params).repositories.discard(params.repo)
         elif kind is LeverKind.SET_PERMISSIONS:
             self._installation(params).permissions = _checked_permissions(params.permissions)
+
+    def _revoke(self, params: LeverParams) -> None:
+        if params.token is None and params.installation_id is not None:
+            for minted in self._registry.installation_tokens(params.installation_id):
+                minted.revoked = True
+            return
+        token = self._registry.get_token(params.token or "")
+        if token is None:
+            raise ValidationError("revoke_token requires a registered token or an installation_id")
+        token.revoked = True
 
     def reset(self) -> None:
         self._registry.clear()

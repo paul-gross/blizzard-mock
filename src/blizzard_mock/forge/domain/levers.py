@@ -75,7 +75,7 @@ class LeverKind(StrEnum):
     REGISTER_INSTALLATION = "register_installation"
     #: Action: seconds a minted token lives.
     TOKEN_LIFETIME = "token_lifetime"
-    #: Action: the token answers 401 from then on.
+    #: Action: the token, or every token minted so far for an installation, answers 401 from then on.
     REVOKE_TOKEN = "revoke_token"
     #: Action: the installation's mint answers 403 and its tokens 401.
     SUSPEND_INSTALLATION = "suspend_installation"
