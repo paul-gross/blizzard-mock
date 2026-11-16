@@ -43,6 +43,8 @@ _CATALOG: dict[str, str] = {
     LeverKind.CHECKS_STARTUP_FAILURE.value: "state (per PR): startup_failure check run on the PR head; blocked",
     LeverKind.STRICT_TOKENS.value: "state (global): only registered/minted tokens authenticate; permissions enforced",
     LeverKind.PRIVATE_REPOSITORY.value: "state (per repo): private: true; fine-grained withholdings apply",
+    LeverKind.SSO_REQUIRED.value: "state (global/repo): /repos/ requests → 403 SAML enforcement, X-GitHub-SSO",
+    LeverKind.LATENCY.value: "state (global/repo): each request waits `seconds` before it is answered",
     LeverKind.REGISTER_TOKEN.value: "action: register a PAT (token, token_kind classic/fine-grained, scopes)",
     LeverKind.REGISTER_APP.value: "action: register an App (app_id, public_key PEM)",
     LeverKind.REGISTER_INSTALLATION.value: "action: register/replace an installation (App, repos, permissions)",

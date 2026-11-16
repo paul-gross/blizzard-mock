@@ -566,6 +566,8 @@ def test_lever_catalog_lists_every_kind(client: TestClient) -> None:
         "rate_limited",
         "token_rejected",
         "unreachable",
+        "sso_required",
+        "latency",
         "stale_branch",
         "checks_pending",
         "checks_failed",

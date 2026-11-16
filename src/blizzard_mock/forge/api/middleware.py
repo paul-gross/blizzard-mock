@@ -1,10 +1,12 @@
 """Request-scoped middleware — the network/auth/rate edge states, conditional reads,
 and the rate headers.
 
-``LeverMiddleware`` is the outer layer. Four state levers bend a request before it
-reaches a route: ``unreachable`` (503), ``token_rejected`` (401), ``rate_limited``
-(403), and ``secondary_rate_limited`` (403). ``/_levers`` and the health check are
-exempt, so a test can always clear a lever it armed.
+``LeverMiddleware`` is the outer layer. ``latency`` delays a request by its ``seconds``, and
+five state levers bend a request before it reaches a route: ``unreachable`` (503),
+``token_rejected`` (401), ``sso_required`` (403, ``/repos/`` only), ``rate_limited`` (403), and
+``secondary_rate_limited`` (403). ``/_levers``, ``/_journal``, and the health check are exempt, so a
+test can always clear a lever it armed. Every other request is appended to the request journal with
+the status it was answered.
 
 ``RateHeaderMiddleware`` sits inside it, so a lever refusal short-circuits before
 anything is counted or hashed. It owns the ``/repos/`` surface and ``/graphql``, which draws from its own
@@ -19,6 +21,7 @@ Being outermost, ``LeverMiddleware`` also stamps every answer, a lever refusal i
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 from collections.abc import AsyncIterable
@@ -31,14 +34,20 @@ from starlette.types import ASGIApp
 
 from blizzard_mock.forge.domain.app_service import AppService
 from blizzard_mock.forge.domain.errors import BadCredentials
+from blizzard_mock.forge.domain.journal import IRequestJournal, JournalEntry
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
-_EXEMPT_PREFIXES = ("/_clock", "/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
+_EXEMPT_PREFIXES = ("/_clock", "/_journal", "/_levers", "/_repos", "/healthz", "/docs", "/openapi.json", "/redoc")
 
 _GRAPHQL_BUCKET_PREFIX = "graphql:"
 
 REQUEST_ID_HEADER = "X-GitHub-Request-Id"
+
+_SSO_MESSAGE = (
+    "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this"
+    " organization."
+)
 
 _SECONDARY_LIMIT_MESSAGE = "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
 
@@ -83,29 +92,43 @@ async def _read_body(response: Response) -> bytes:
 class LeverMiddleware(BaseHTTPMiddleware):
     """Applies the request-scoped levers held in ``app.state.levers``."""
 
-    def __init__(self, app: ASGIApp, levers: ILeverStore, rate: IRateLedger, apps: AppService) -> None:
+    def __init__(
+        self, app: ASGIApp, levers: ILeverStore, rate: IRateLedger, apps: AppService, journal: IRequestJournal
+    ) -> None:
         super().__init__(app)
         self._levers = levers
         self._rate = rate
         self._apps = apps
+        self._journal = journal
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        response = await self._apply_levers(request, call_next)
+        path = request.url.path
+        if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
+            response = await call_next(request)
+        else:
+            response = await self._apply_levers(request, call_next)
+            self._journal.record(JournalEntry(method=request.method, path=path, status=response.status_code))
         response.headers[REQUEST_ID_HEADER] = uuid.uuid4().hex.upper()
         return response
 
     async def _apply_levers(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
-        if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
-            return await call_next(request)
-
         repo = _repo_from_path(path)
+
+        latency = self._levers.find(LeverKind.LATENCY, repo, None)
+        if latency is not None and latency.seconds:
+            await asyncio.sleep(latency.seconds)
 
         if self._levers.find(LeverKind.UNREACHABLE, repo, None) is not None:
             return _error(503, "the forge is unreachable")
 
         if self._levers.find(LeverKind.TOKEN_REJECTED, repo, None) is not None:
             return _error(401, "Bad credentials", headers={"WWW-Authenticate": "Bearer"})
+
+        if repo is not None and self._levers.find(LeverKind.SSO_REQUIRED, repo, None) is not None:
+            owner = repo.partition("/")[0]
+            url = f"{request.app.state.base_url}/orgs/{owner}/sso?authorization_request=mock"
+            return _error(403, _SSO_MESSAGE, headers={"X-GitHub-SSO": f"required; url={url}"})
 
         scopes: str | None = None
         if path == "/graphql" or path.startswith("/repos/"):

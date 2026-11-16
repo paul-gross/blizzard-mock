@@ -218,6 +218,14 @@ clear one it armed.
 | `secondary_rate_limited` | state (global/repo) | 403 whose message names a secondary rate limit, with `Retry-After` and the bucket's live `Remaining` untouched; optional `remaining` self-expiry |
 | `token_rejected` | state (global/repo) | 401 `Bad credentials` |
 | `unreachable` | state (global/repo) | 503 |
+| `sso_required` | state (global/repo) | `/repos/…` requests → 403 `Resource protected by organization SAML enforcement…` with `X-GitHub-SSO: required; url=…` |
+| `latency` | state (global/repo, `seconds`) | Each matching request waits `seconds` before it is answered; `seconds` is required |
+
+## Request journal (`/_journal`)
+
+Every request outside the exempt routes (`/_levers`, `/_journal`, `/_repos`, `/_clock`, `/healthz`, the docs routes)
+is appended, in arrival order, as `{method, path, status}` — the status it was answered, a lever refusal included.
+`GET /_journal` answers `{"entries": [...]}`; `DELETE /_journal` clears it. `POST /_levers/reset` leaves it alone.
 
 ## Recorded decisions (corpus was silent)
 

@@ -461,6 +461,7 @@ class ForgeService:
             branch=params.branch,
             pattern=params.pattern,
             state=params.state,
+            seconds=params.seconds,
         )
         self._levers.arm(lever)
         return lever
@@ -769,6 +770,8 @@ def _require_scope(kind: LeverKind, params: LeverParams) -> None:
         raise ValidationError("private_repository requires repo")
     if kind is LeverKind.MERGE_COMMITS_DISALLOWED and params.repo is None:
         raise ValidationError("merge_commits_disallowed requires repo")
+    if kind is LeverKind.LATENCY and (params.seconds is None or params.seconds < 0):
+        raise ValidationError("latency requires a non-negative seconds")
     if kind is LeverKind.MERGEABLE_STATE and (
         params.repo is None or params.number is None or params.state not in FORCEABLE_MERGEABLE_STATES
     ):

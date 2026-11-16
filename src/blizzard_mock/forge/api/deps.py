@@ -14,6 +14,7 @@ from fastapi.params import Depends as DependsMarker
 from pydantic import BaseModel, Field
 
 from blizzard_mock.forge.domain.app_service import AppService
+from blizzard_mock.forge.domain.journal import IRequestJournal
 from blizzard_mock.forge.domain.models import MergeMethod
 from blizzard_mock.forge.domain.service import ForgeService
 
@@ -26,6 +27,11 @@ def get_service(request: Request) -> ForgeService:
 def get_app_service(request: Request) -> AppService:
     apps: AppService = request.app.state.apps
     return apps
+
+
+def get_journal(request: Request) -> IRequestJournal:
+    journal: IRequestJournal = request.app.state.journal
+    return journal
 
 
 def requires(permission: str, level: str) -> DependsMarker:
