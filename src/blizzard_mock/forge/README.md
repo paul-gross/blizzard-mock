@@ -224,7 +224,9 @@ clear one it armed.
 ## Request journal (`/_journal`)
 
 Every request outside the exempt routes (`/_levers`, `/_journal`, `/_repos`, `/_clock`, `/healthz`, the docs routes)
-is appended, in arrival order, as `{method, path, status}` — the status it was answered, a lever refusal included.
+is journaled in arrival order as `{method, path, status}` — the status it was answered, a lever refusal included. A
+request takes its place when it arrives, so a `latency`-delayed request keeps its position; a read lists only answered
+requests. The journal holds the latest 10,000 entries (`JOURNAL_CAPACITY`); past that, the oldest is dropped.
 `GET /_journal` answers `{"entries": [...]}`; `DELETE /_journal` clears it. `POST /_levers/reset` leaves it alone.
 
 ## Recorded decisions (corpus was silent)

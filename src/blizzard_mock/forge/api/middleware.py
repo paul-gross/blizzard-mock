@@ -5,8 +5,8 @@ and the rate headers.
 five state levers bend a request before it reaches a route: ``unreachable`` (503),
 ``token_rejected`` (401), ``sso_required`` (403, ``/repos/`` only), ``rate_limited`` (403), and
 ``secondary_rate_limited`` (403). ``/_levers``, ``/_journal``, and the health check are exempt, so a
-test can always clear a lever it armed. Every other request is appended to the request journal with
-the status it was answered.
+test can always clear a lever it armed. Every other request takes its place in the request journal on
+arrival and gets the status it was answered on completion.
 
 ``RateHeaderMiddleware`` sits inside it, so a lever refusal short-circuits before
 anything is counted or hashed. It owns the ``/repos/`` surface and ``/graphql``, which draws from its own
@@ -34,7 +34,7 @@ from starlette.types import ASGIApp
 
 from blizzard_mock.forge.domain.app_service import AppService
 from blizzard_mock.forge.domain.errors import BadCredentials
-from blizzard_mock.forge.domain.journal import IRequestJournal, JournalEntry
+from blizzard_mock.forge.domain.journal import IRequestJournal
 from blizzard_mock.forge.domain.levers import ILeverStore, LeverKind
 from blizzard_mock.forge.domain.rate import ANONYMOUS_BUCKET, IRateLedger, RateWindow
 
@@ -106,8 +106,9 @@ class LeverMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
             response = await call_next(request)
         else:
+            slot = self._journal.arrive(request.method, path)
             response = await self._apply_levers(request, call_next)
-            self._journal.record(JournalEntry(method=request.method, path=path, status=response.status_code))
+            slot.answer(response.status_code)
         response.headers[REQUEST_ID_HEADER] = uuid.uuid4().hex.upper()
         return response
 

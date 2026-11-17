@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from blizzard_mock.forge.domain.journal import JournalEntry
+from blizzard_mock.forge.internal.journal_store import InMemoryRequestJournal
 from tests.forge_world import REPO, forge
 
 
@@ -56,3 +58,23 @@ def test_delete_clears_the_journal(client: TestClient) -> None:
     assert client.delete("/_journal").json() == {"cleared": True}
 
     assert _entries(client) == []
+
+
+def test_a_delayed_request_keeps_its_arrival_position() -> None:
+    journal = InMemoryRequestJournal()
+    slow = journal.arrive("GET", "/repos/a/slow")
+    fast = journal.arrive("GET", "/repos/a/fast")
+    fast.answer(200)
+
+    assert journal.entries() == [JournalEntry(method="GET", path="/repos/a/fast", status=200)]
+
+    slow.answer(200)
+    assert [e.path for e in journal.entries()] == ["/repos/a/slow", "/repos/a/fast"]
+
+
+def test_the_journal_drops_its_oldest_entry_past_capacity() -> None:
+    journal = InMemoryRequestJournal(capacity=2)
+    for name in ("one", "two", "three"):
+        journal.arrive("GET", f"/repos/a/{name}").answer(200)
+
+    assert [e.path for e in journal.entries()] == ["/repos/a/two", "/repos/a/three"]
