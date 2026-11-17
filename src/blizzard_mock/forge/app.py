@@ -1,7 +1,7 @@
 """Composition root — wire the forge and build the FastAPI app.
 
 The single place collaborators are constructed (``bzh:dependency-injection``):
-the GitPython backend, the in-memory state and lever stores, the clock, and the
+the GitPython backend, the in-memory state and lever stores, the request journal, the clock, and the
 ``ForgeService`` are bound here and stashed on ``app.state`` for the routers.
 """
 
@@ -17,6 +17,7 @@ from blizzard_mock.forge.api import serialization as ser
 from blizzard_mock.forge.api.apps import router as apps_router
 from blizzard_mock.forge.api.graphql import router as graphql_router
 from blizzard_mock.forge.api.issues import router as issues_router
+from blizzard_mock.forge.api.journal import router as journal_router
 from blizzard_mock.forge.api.labels import router as labels_router
 from blizzard_mock.forge.api.levers import router as levers_router
 from blizzard_mock.forge.api.middleware import LeverMiddleware, RateHeaderMiddleware, RequestIdMiddleware
@@ -33,6 +34,7 @@ from blizzard_mock.forge.internal.app_registry import InMemoryAppRegistry
 from blizzard_mock.forge.internal.check_store import InMemoryCheckRunStore
 from blizzard_mock.forge.internal.errors import GitErrorFactory
 from blizzard_mock.forge.internal.git_backend import GitBackend
+from blizzard_mock.forge.internal.journal_store import InMemoryRequestJournal
 from blizzard_mock.forge.internal.lever_store import InMemoryLeverStore
 from blizzard_mock.forge.internal.rate_ledger import InMemoryRateLedger
 from blizzard_mock.forge.internal.state_store import InMemoryForgeState
@@ -47,6 +49,7 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     git = GitBackend(config.repos_dir, GitErrorFactory(log))
     state = InMemoryForgeState()
     levers = InMemoryLeverStore()
+    journal = InMemoryRequestJournal()
     checks = InMemoryCheckRunStore()
     rate = InMemoryRateLedger(the_clock)
     apps = AppService(InMemoryAppRegistry(), levers, the_clock)
@@ -58,11 +61,12 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     app.state.service = service
     app.state.levers = levers
     app.state.apps = apps
+    app.state.journal = journal
     app.state.base_url = config.base_url
 
     # Added first, so it sits inside LeverMiddleware: a lever refusal is never counted or hashed.
     app.add_middleware(RateHeaderMiddleware, rate=rate)
-    app.add_middleware(LeverMiddleware, levers=levers, rate=rate, apps=apps)
+    app.add_middleware(LeverMiddleware, levers=levers, rate=rate, apps=apps, journal=journal)
     # Added last, so it is outermost and stamps every answer.
     app.add_middleware(RequestIdMiddleware)
 
@@ -82,6 +86,7 @@ def create_app(config: ForgeConfig, *, clock: Clock | None = None) -> FastAPI:
     app.include_router(pulls_router)
     app.include_router(refs_router)
     app.include_router(levers_router)
+    app.include_router(journal_router)
     app.include_router(web_router)
 
     log.info("forge app created", repos_dir=str(config.repos_dir), base_url=config.base_url)

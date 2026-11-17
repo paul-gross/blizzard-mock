@@ -67,6 +67,10 @@ class LeverKind(StrEnum):
     #: Per repo: the repository answers ``private: true``, and GitHub's fine-grained-token
     #: withholdings apply to it.
     PRIVATE_REPOSITORY = "private_repository"
+    #: Global/repo: ``/repos/…`` requests → 403 behind organization SAML enforcement, with ``X-GitHub-SSO``.
+    SSO_REQUIRED = "sso_required"
+    #: Global/repo: each request waits ``seconds`` before it is answered.
+    LATENCY = "latency"
     #: Action: registers a personal access token with a ``token_kind`` and ``scopes``.
     REGISTER_TOKEN = "register_token"
     #: Action: registers an App's id and public key.
@@ -107,6 +111,8 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.CHECKS_STARTUP_FAILURE,
         LeverKind.STRICT_TOKENS,
         LeverKind.PRIVATE_REPOSITORY,
+        LeverKind.SSO_REQUIRED,
+        LeverKind.LATENCY,
     }
 )
 
@@ -157,6 +163,8 @@ class Lever(BaseModel):
     pattern: str | None = None
     #: ``mergeable_state``: the state forced onto the pull request.
     state: MergeableState | None = None
+    #: ``latency``: seconds each matching request waits before it is answered.
+    seconds: int | None = None
 
     def scope_key(self) -> str:
         return _scope_key(self.repo, self.number, self.branch, self.pattern)
@@ -207,7 +215,7 @@ class LeverParams(BaseModel):
     installation_id: int | None = None
     repositories: list[str] = Field(default_factory=list)
     permissions: dict[str, str] = Field(default_factory=dict)
-    #: ``token_lifetime``: seconds a minted token lives.
+    #: ``token_lifetime``: seconds a minted token lives. ``latency``: seconds each request waits.
     seconds: int | None = None
 
 

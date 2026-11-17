@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
@@ -136,3 +137,32 @@ def test_scoped_levers_require_their_scope(client: TestClient) -> None:
     assert client.post("/_levers/branch_protected", json={"repo": REPO}).status_code == 422
     assert client.post("/_levers/ruleset", json={"repo": REPO}).status_code == 422
     assert client.post("/_levers/merge_commits_disallowed", json={}).status_code == 422
+    assert client.post("/_levers/latency", json={}).status_code == 422
+
+
+def test_sso_required_refuses_repository_requests_with_the_sso_header(client: TestClient) -> None:
+    assert client.post("/_levers/sso_required", json={"repo": REPO}).status_code == 200
+
+    refused = client.get(f"/repos/{REPO}")
+    assert refused.status_code == 403
+    assert "SAML enforcement" in refused.json()["message"]
+    assert refused.headers["X-GitHub-SSO"].startswith("required; url=")
+    assert client.get("/repos/someone/else").status_code != 403
+
+    client.delete("/_levers/sso_required", params={"repo": REPO})
+    assert client.get(f"/repos/{REPO}").status_code == 200
+
+
+def test_latency_delays_each_request_by_its_seconds(client: TestClient) -> None:
+    assert client.post("/_levers/latency", json={"repo": REPO, "seconds": 1}).status_code == 200
+    armed = client.get("/_levers").json()["active"]
+    assert [(lever["kind"], lever["seconds"]) for lever in armed] == [("latency", 1)]
+
+    started = time.monotonic()
+    assert client.get(f"/repos/{REPO}").status_code == 200
+    assert time.monotonic() - started >= 1
+
+    client.delete("/_levers/latency", params={"repo": REPO})
+    started = time.monotonic()
+    client.get(f"/repos/{REPO}")
+    assert time.monotonic() - started < 1
