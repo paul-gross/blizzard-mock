@@ -28,7 +28,9 @@ class InMemoryLeverStore:
         pattern: str | None = None,
     ) -> None:
         scope = Lever(kind=kind, repo=repo, number=number, branch=branch, pattern=pattern).scope_key()
-        self._levers.pop((kind, scope), None)
+        for key in list(self._levers):
+            if key[0] is kind and (key[1] == scope or key[1].startswith(scope + "!")):
+                self._levers.pop(key)
 
     def clear_all(self) -> None:
         self._levers.clear()

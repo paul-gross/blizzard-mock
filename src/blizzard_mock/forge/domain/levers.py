@@ -51,6 +51,9 @@ class LeverKind(StrEnum):
     RULESET = "ruleset"
     #: Per repo: ``PUT .../merge`` refuses the ``merge`` method.
     MERGE_COMMITS_DISALLOWED = "merge_commits_disallowed"
+    REBASE_MERGE_DISALLOWED = "rebase_merge_disallowed"
+    SQUASH_MERGE_DISALLOWED = "squash_merge_disallowed"
+    MERGE_METHOD_REFUSED = "merge_method_refused"
     #: Action: sets the remaining and the reset of one token's rate window, or of every
     #: token's.
     RATE_BUDGET = "rate_budget"
@@ -106,6 +109,9 @@ STATE_LEVERS: frozenset[LeverKind] = frozenset(
         LeverKind.BRANCH_PROTECTED,
         LeverKind.RULESET,
         LeverKind.MERGE_COMMITS_DISALLOWED,
+        LeverKind.REBASE_MERGE_DISALLOWED,
+        LeverKind.SQUASH_MERGE_DISALLOWED,
+        LeverKind.MERGE_METHOD_REFUSED,
         LeverKind.SECONDARY_RATE_LIMITED,
         LeverKind.MERGEABLE_STATE,
         LeverKind.CHECKS_STARTUP_FAILURE,
@@ -161,13 +167,16 @@ class Lever(BaseModel):
     branch: str | None = None
     #: ``ruleset``: the glob over branch names the rule covers. Part of the scope.
     pattern: str | None = None
+    method: MergeMethod | None = None
     #: ``mergeable_state``: the state forced onto the pull request.
     state: MergeableState | None = None
     #: ``latency``: seconds each matching request waits before it is answered.
     seconds: int | None = None
 
     def scope_key(self) -> str:
-        return _scope_key(self.repo, self.number, self.branch, self.pattern)
+        return _scope_key(self.repo, self.number, self.branch, self.pattern) + (
+            f"!{self.method}" if self.method else ""
+        )
 
     def matches(self, repo: str | None, number: int | None) -> bool:
         """A global lever (no repo) matches everything; a repo-scoped lever

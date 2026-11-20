@@ -15,10 +15,23 @@ from pathlib import Path
 from typing import cast
 
 from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
+from git.exc import BadName, GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
-from blizzard_mock.forge.domain.errors import BranchNotFound, RepoAlreadyExists, RepoNotFound
-from blizzard_mock.forge.domain.git import GitAuthor, GitCommit, GitCompare, GitCompareCommit, GitCompareFile
+from blizzard_mock.forge.domain.errors import (
+    BranchNotFound,
+    CompareRefNotFound,
+    HeadMismatch,
+    RepoAlreadyExists,
+    RepoNotFound,
+)
+from blizzard_mock.forge.domain.git import (
+    GitAuthor,
+    GitCommit,
+    GitCompare,
+    GitCompareCommit,
+    GitCompareFile,
+    GitTreeEntry,
+)
 from blizzard_mock.forge.domain.models import Repo as RepoModel
 from blizzard_mock.forge.internal.errors import GitErrorFactory
 
@@ -121,7 +134,36 @@ class GitBackend:
             message=str(commit.message),
             author=author,
             parents=[p.hexsha for p in commit.parents],
+            tree=commit.tree.hexsha,
         )
+
+    def tree(self, repo: RepoModel, sha: str, *, recursive: bool) -> list[GitTreeEntry]:
+        git = self._open(repo.owner, repo.name)
+        try:
+            args = ["-r", "-t", "-l"] if recursive else ["-l"]
+            text = git.git.ls_tree(*args, "-z", sha)
+            result: list[GitTreeEntry] = []
+            for line in text.split("\0"):
+                if not line:
+                    continue
+                metadata, path = line.split("\t", 1)
+                mode, kind, oid, size = metadata.split()
+                result.append(
+                    GitTreeEntry(path=path, mode=mode, type=kind, sha=oid, size=None if size == "-" else int(size))
+                )
+            return result
+        except (BadName, ValueError, GitCommandError) as exc:
+            raise CompareRefNotFound(f"tree not found: {sha}") from exc
+
+    def blob(self, repo: RepoModel, sha: str) -> bytes:
+        git = self._open(repo.owner, repo.name)
+        try:
+            obj = git.rev_parse(sha)
+            if obj.type != "blob":
+                raise ValueError("not a blob")
+            return cast(bytes, obj.data_stream.read())
+        except (BadName, ValueError, GitCommandError) as exc:
+            raise CompareRefNotFound(f"blob not found: {sha}") from exc
 
     def compare(self, repo: RepoModel, base: str, head: str) -> GitCompare:
         git = self._open(repo.owner, repo.name)
@@ -273,6 +315,29 @@ class GitBackend:
                 )
             new_sha = work.git.rev_parse("HEAD")
         git.git.update_ref(f"refs/heads/{base}", new_sha)
+        return new_sha
+
+    def rebase_update(self, repo: RepoModel, base: str, head: str, expected_sha: str) -> str:
+        git = self._open(repo.owner, repo.name)
+        base_sha = self.resolve_ref(repo, base)
+        with (
+            self._throwaway_worktree(repo, checkout_ref=expected_sha, detach=True) as work,
+            work.git.custom_environment(
+                GIT_COMMITTER_NAME=_MERGE_IDENTITY["GIT_COMMITTER_NAME"],
+                GIT_COMMITTER_EMAIL=_MERGE_IDENTITY["GIT_COMMITTER_EMAIL"],
+            ),
+        ):
+            try:
+                work.git.rebase(base_sha)
+            except GitCommandError as exc:
+                self._raise_op_error(
+                    exc, work, repo, base, head, op="rebase", conflict_markers=("CONFLICT", "could not apply")
+                )
+            new_sha = work.git.rev_parse("HEAD")
+        try:
+            git.git.update_ref(f"refs/heads/{head}", new_sha, expected_sha)
+        except GitCommandError as exc:
+            raise HeadMismatch("Head branch was modified. Review and try the update again.") from exc
         return new_sha
 
     def squash(self, repo: RepoModel, base: str, head: str, message: str) -> str:
