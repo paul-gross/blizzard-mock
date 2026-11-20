@@ -37,7 +37,7 @@ from blizzard_mock.forge.domain.errors import (
     UpdateConflict,
     ValidationError,
 )
-from blizzard_mock.forge.domain.git import GitCommit, GitCompare, IWriteGitBackend
+from blizzard_mock.forge.domain.git import GitCommit, GitCompare, GitTreeEntry, IWriteGitBackend
 from blizzard_mock.forge.domain.levers import (
     ACTION_LEVERS,
     APP_ACTION_LEVERS,
@@ -143,6 +143,16 @@ class ForgeService:
     def get_repo(self, owner: str, name: str) -> Repo:
         """Resolve a backing repo (raises ``RepoNotFound``)."""
         return self._git.get_repo(owner, name)
+
+    def allowed_methods(self, repo: Repo) -> dict[MergeMethod, bool]:
+        return {
+            method: self._levers.find(kind, repo.full_name, None) is None
+            for method, kind in (
+                (MergeMethod.MERGE, LeverKind.MERGE_COMMITS_DISALLOWED),
+                (MergeMethod.REBASE, LeverKind.REBASE_MERGE_DISALLOWED),
+                (MergeMethod.SQUASH, LeverKind.SQUASH_MERGE_DISALLOWED),
+            )
+        }
 
     def create_repository(self, owner: str, name: str, files: Mapping[str, str]) -> Repo:
         """Create a bare repo seeded with ``files`` on ``main``. Issues, pulls, and
@@ -349,8 +359,27 @@ class ForgeService:
         pull = self._require_pull(repo, number)
         if pull.merged or pull.state is State.CLOSED:
             raise NotMergeable(f"pull request #{number} is not mergeable")
-        if method is MergeMethod.MERGE and self._levers.find(LeverKind.MERGE_COMMITS_DISALLOWED, repo.full_name, None):
-            raise MergeMethodNotAllowed("Merge commits are not allowed on this repository")
+        if not self.allowed_methods(repo)[method]:
+            label = {
+                MergeMethod.MERGE: "Merge commits",
+                MergeMethod.REBASE: "Rebase merges",
+                MergeMethod.SQUASH: "Squash merges",
+            }[method]
+            raise MergeMethodNotAllowed(f"{label} are not allowed on this repository")
+        for lever in self._levers.active():
+            if (
+                lever.kind is LeverKind.MERGE_METHOD_REFUSED
+                and lever.matches(repo.full_name, number)
+                and lever.method is method
+            ):
+                label = {
+                    MergeMethod.MERGE: "Merge commits",
+                    MergeMethod.REBASE: "Rebase merges",
+                    MergeMethod.SQUASH: "Squash merges",
+                }[method]
+                raise MergeMethodNotAllowed(
+                    f"{label} are not allowed: {lever.message or 'method is not usable for this pull request'}"
+                )
         if self._levers.find(LeverKind.MERGE_REJECTED, repo.full_name, number) is not None:
             lever = self._levers.find(LeverKind.MERGE_REJECTED, repo.full_name, number)
             reason = (lever.message if lever else None) or "merge was rejected by branch policy"
@@ -398,7 +427,9 @@ class ForgeService:
         repo = self.get_repo(owner, name)
         return self._require_pull(repo, number).merged
 
-    def update_branch(self, owner: str, name: str, number: int, *, expected_head_sha: str | None = None) -> str:
+    def update_branch(
+        self, owner: str, name: str, number: int, *, expected_head_sha: str | None = None, rebase: bool = False
+    ) -> str:
         """Merge base into the PR's head branch (``PUT .../update-branch``);
         self-heals a ``behind`` PR. A mismatched ``expected_head_sha`` is a 409
         (pinned by tests/test_forge_smoke.py::test_update_branch_stale_expected_head_is_409).
@@ -414,7 +445,10 @@ class ForgeService:
         if self._levers.find(LeverKind.MERGE_CONFLICT, repo.full_name, number) is not None:
             raise conflict
         try:
-            self._git.merge(repo, pull.head, pull.base, f"Merge branch '{pull.base}' into {pull.head}")
+            if rebase:
+                self._git.rebase_update(repo, pull.base, pull.head, head_sha)
+            else:
+                self._git.merge(repo, pull.head, pull.base, f"Merge branch '{pull.base}' into {pull.head}")
         except NotMergeable as exc:
             raise conflict from exc
         lever = self._levers.find(LeverKind.STALE_BRANCH, repo.full_name, number)
@@ -460,6 +494,7 @@ class ForgeService:
             message=params.message,
             branch=params.branch,
             pattern=params.pattern,
+            method=params.method,
             state=params.state,
             seconds=params.seconds,
         )
@@ -687,6 +722,12 @@ class ForgeService:
         repo = self.get_repo(owner, name)
         return self._git.get_commit(repo, ref)
 
+    def tree(self, owner: str, name: str, sha: str, *, recursive: bool) -> list[GitTreeEntry]:
+        return self._git.tree(self.get_repo(owner, name), sha, recursive=recursive)
+
+    def blob(self, owner: str, name: str, sha: str) -> bytes:
+        return self._git.blob(self.get_repo(owner, name), sha)
+
     def compare(self, owner: str, name: str, base: str, head: str) -> GitCompare:
         repo = self.get_repo(owner, name)
         try:
@@ -770,6 +811,10 @@ def _require_scope(kind: LeverKind, params: LeverParams) -> None:
         raise ValidationError("private_repository requires repo")
     if kind is LeverKind.MERGE_COMMITS_DISALLOWED and params.repo is None:
         raise ValidationError("merge_commits_disallowed requires repo")
+    if kind in (LeverKind.REBASE_MERGE_DISALLOWED, LeverKind.SQUASH_MERGE_DISALLOWED) and params.repo is None:
+        raise ValidationError(f"{kind} requires repo")
+    if kind is LeverKind.MERGE_METHOD_REFUSED and (params.repo is None or params.method is None):
+        raise ValidationError("merge_method_refused requires repo and method")
     if kind is LeverKind.LATENCY and (params.seconds is None or params.seconds < 0):
         raise ValidationError("latency requires a non-negative seconds")
     if kind is LeverKind.MERGEABLE_STATE and (

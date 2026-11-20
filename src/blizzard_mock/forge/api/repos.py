@@ -27,7 +27,14 @@ def get_repo(
     base_url: Annotated[str, Depends(get_base_url)],
 ) -> dict[str, Any]:
     found = service.get_repo(owner, repo)
-    return ser.repo_json(found, base_url, private=service.is_private(found.full_name))
+    result = ser.repo_json(found, base_url, private=service.is_private(found.full_name))
+    result.update(
+        {
+            ("allow_merge_commit" if method.value == "merge" else f"allow_{method.value}_merge"): allowed
+            for method, allowed in service.allowed_methods(found).items()
+        }
+    )
+    return result
 
 
 @router.post("/_repos", status_code=201)

@@ -6,6 +6,8 @@ are acknowledged without resetting anything.
 
 from __future__ import annotations
 
+import base64
+from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -147,6 +149,37 @@ def compare(
     if not sep or not base or not head:
         raise ValidationError(f"compare expects base...head, got {basehead!r}")
     return ser.compare_json(f"{owner}/{repo}", service.compare(owner, repo, base, head), base_url)
+
+
+@router.get("/repos/{owner}/{repo}/git/commits/{sha}", dependencies=[requires("contents", "read")])
+def git_commit(
+    owner: str, repo: str, sha: str, service: Annotated[ForgeService, Depends(get_service)]
+) -> dict[str, Any]:
+    commit = service.commit(owner, repo, sha)
+    return {
+        "sha": commit.sha,
+        "tree": {"sha": commit.tree},
+        "parents": [{"sha": p} for p in commit.parents],
+        "message": commit.message,
+        "author": asdict(commit.author),
+    }
+
+
+@router.get("/repos/{owner}/{repo}/git/trees/{sha}", dependencies=[requires("contents", "read")])
+def git_tree(
+    owner: str, repo: str, sha: str, service: Annotated[ForgeService, Depends(get_service)], recursive: str = ""
+) -> dict[str, Any]:
+    return {
+        "sha": sha,
+        "tree": [asdict(e) for e in service.tree(owner, repo, sha, recursive=bool(recursive))],
+        "truncated": False,
+    }
+
+
+@router.get("/repos/{owner}/{repo}/git/blobs/{sha}", dependencies=[requires("contents", "read")])
+def git_blob(owner: str, repo: str, sha: str, service: Annotated[ForgeService, Depends(get_service)]) -> dict[str, Any]:
+    content = service.blob(owner, repo, sha)
+    return {"sha": sha, "size": len(content), "encoding": "base64", "content": base64.b64encode(content).decode()}
 
 
 @router.get("/repos/{owner}/{repo}/git/ref/{ref:path}", dependencies=[requires("contents", "read")])
