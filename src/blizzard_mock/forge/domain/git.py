@@ -116,10 +116,9 @@ class IWriteGitBackend(IReadGitBackend, Protocol):
         ...
 
     def rebase(self, repo: Repo, base: str, head: str, message: str) -> str:
-        """Replay ``head``'s commits onto ``base`` as new commits and advance
-        ``base`` to the new tip, leaving ``head`` untouched — GitHub's
-        rebase-merge. Always rewrites: even a head already descending from ``base`` lands
-        as new commits. Raises ``NotMergeable`` on real conflict."""
+        """Force replay of ``head``'s commits onto ``base`` and advance ``base``
+        to the resulting tip, leaving ``head`` untouched. Identical commit content
+        and metadata can yield the same SHA. Raises ``NotMergeable`` on real conflict."""
         ...
 
     def rebase_update(self, repo: Repo, base: str, head: str, expected_sha: str) -> str: ...

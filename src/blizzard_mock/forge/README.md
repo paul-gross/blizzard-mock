@@ -71,7 +71,7 @@ armed.
 | `POST /repos/{o}/{r}/pulls` | Create PR (`head`/`base` branches); 422 if an open PR already exists for the same `head`/`base` |
 | `GET /repos/{o}/{r}/pulls/{n}` | Get PR — live `mergeable`/`mergeable_state`, `merged` |
 | `PATCH /repos/{o}/{r}/pulls/{n}` | Close a PR without merge (D-065 terminal) |
-| `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base` by `merge_method` — a merge commit, one squash commit on the base tip, or a rebase that always lands new commits; 405 conflict, 409 stale-sha |
+| `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base` by `merge_method` — a merge commit, one squash commit on the base tip, or a forced rebase; 405 conflict, 409 stale-sha |
 | `PUT /repos/{o}/{r}/pulls/{n}/update-branch` | Merge `base` into head (advances `head.sha`), clears `stale_branch` → 202; 409 stale `expected_head_sha` |
 | `GET /repos/{o}/{r}/pulls/{n}/merge` | Merged-check → 204 / 404 |
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
@@ -202,7 +202,7 @@ clear one it armed.
 
 | Lever | Shape | Effect |
 |-------|-------|--------|
-| `externally_merged` | action (repo, number, `method`) | Real merge of head→base outside the PR flow by `method` (`merge` by default, `squash`, or `rebase` — each lands a revision that is neither the head nor, for squash and rebase, a merge of it); marks PR `merged_by: external` — the direct push a polling delivery flow must detect (D-065) |
+| `externally_merged` | action (repo, number, `method`) | Real merge of head→base outside the PR flow by `method` (`merge` by default, `squash`, or `rebase`); marks PR `merged_by: external` — the direct push a polling delivery flow must detect (D-065) |
 | `comment_midflight` | action (repo, number, body) | Appends a comment to a live thread (D-074) |
 | `merge_conflict` | state (per PR) | `mergeable=false`/`dirty`; merge → 405 |
 | `merge_rejected` | state (per PR) | Merge → 405 with an optional `message` (branch policy) |
@@ -251,9 +251,9 @@ requests. The journal holds the latest 10,000 entries (`JOURNAL_CAPACITY`); past
 - **A closed pull freezes its head.** Closing, merging, or deleting the head branch pins
   the pull's `head.sha`, so a pull whose branch is gone still lists; deleting a branch
   closes the open pulls it heads or is based on.
-- **Every merge method rewrites.** A rebase always lands new commits, even when the head
-  already descends from the base, and a squash is one commit whose only parent is the
-  base tip.
+- **Rebase and squash landings.** The mock forces a rebase replay even when the head already descends from the base.
+  Unlike GitHub's rebase-and-merge, which always creates new commit SHAs, Git can reproduce the same SHA in the mock
+  when a replayed commit's content and metadata are identical. A squash is one commit whose only parent is the base tip.
 - **GraphQL branch updates** accept `updatePullRequestBranch` with `input` variables `pullRequestId`, `expectedHeadOid`, and `updateMethod` (`REBASE` or `MERGE`). Pull node IDs appear as REST `node_id` or in `repository { pullRequest(number:) { id } }`. Rebase updates the head ref only, guarded by the expected head; REST update continues to merge.
 - **`/graphql` parses a restricted shape** rather than running a GraphQL engine: it reads the
   `owner` and `name` variables and the aliased `issueOrPullRequest(number:)` fields by pattern, and
