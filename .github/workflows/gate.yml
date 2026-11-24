@@ -31,8 +31,8 @@ jobs:
     name: ruff + pyright
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           # Pinned to match mise.toml's [tools] uv version: `mise run lint`/`typecheck`
           # below resolve uv through mise's own shim, not this step's — an unpinned
@@ -42,7 +42,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync
       - name: install mise (runs the mise.toml task definitions, not their tools)
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v4
         with:
           # Pinned: mise's VERSION endpoint can advertise a release before that
           # release's assets exist, and the unpinned action then 404s fetching one.
@@ -60,8 +60,8 @@ jobs:
     if: ${{ !inputs.lint-only }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           # Pinned to match mise.toml's [tools] uv version — see the quality job's comment.
           version: "0.13.6"
@@ -69,7 +69,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync
       - name: install mise (runs the mise.toml task definitions, not their tools)
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v4
         with:
           version: 2026.9.2
           install: false
@@ -81,7 +81,7 @@ jobs:
     if: ${{ !inputs.lint-only }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: blizzard-mock
           persist-credentials: false
@@ -90,7 +90,7 @@ jobs:
         uses: ./blizzard-mock/.github/actions/resolve-blizzard-ref
         with:
           explicit-ref: ${{ inputs.blizzard-ref }}
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.6"
           python-version: "3.12"
@@ -101,7 +101,7 @@ jobs:
         run: uv sync
         working-directory: blizzard-mock
       - name: install mise
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v4
         with:
           version: 2026.9.2
           install: false
@@ -116,9 +116,9 @@ jobs:
     name: process-reference lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: install mise + vale
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v4
         with:
           version: 2026.9.2
       - name: process-reference prose lint (mise run process-ref-lint)

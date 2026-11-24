@@ -34,7 +34,7 @@ runs:
         "$GITHUB_ACTION_PATH/resolve-blizzard-ref.sh" >> "$GITHUB_OUTPUT"
         sed 's/^/resolved blizzard: /' "$GITHUB_OUTPUT" | tail -2
     - name: checkout blizzard
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: paul-gross/blizzard
         path: ${{ inputs.path }}
