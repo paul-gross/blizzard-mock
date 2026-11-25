@@ -36,7 +36,10 @@ from blizzard_mock.mock_data.domain.hub.graph_seed import DELIVER_NODE_NAME, com
 from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
 from blizzard_mock.mock_data.domain.seeding import (
     HUB_GLOBAL_TABLES,
+    KeepRule,
+    KeptReference,
     ProjectResolutionError,
+    ResetBoundary,
     RunnerResolutionError,
     SeedIntegrityError,
     TenantResolutionError,
@@ -758,10 +761,59 @@ def test_reset_leaves_the_migration_tracking_table_alone(tmp_path: Path) -> None
 # --- reset keeps the tenant boundary ---------------------------------------------
 
 
+_URGENCIES = (
+    ("urg_a_standard", _TENANT_A, "standard"),
+    ("urg_a_urgent", _TENANT_A, "urgent"),
+    ("urg_b_standard", _TENANT_B, "standard"),
+)
+
+
+def _config_changes_table(meta: MetaData) -> Table:
+    return Table(
+        "config_changes",
+        meta,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("record_kind", String, nullable=False),
+        Column("record_key", String, nullable=False),
+        Column("tenant_id", String, nullable=False),
+    )
+
+
+def _urgency_tables(meta: MetaData) -> tuple[Table, Table, Table, Table, Table]:
+    """``urgencies``, ``tenant_settings``, ``urgency_positions``, ``urgency_lifecycle_facts``
+    and ``config_changes``, with the foreign keys the hub declares between them."""
+    urgencies = Table(
+        "urgencies",
+        meta,
+        Column("urgency_id", String, primary_key=True),
+        Column("tenant_id", String, nullable=False),
+        Column("slug", String, nullable=False),
+    )
+    settings = Table(
+        "tenant_settings",
+        meta,
+        Column("tenant_id", String, primary_key=True),
+        Column("default_urgency_id", String, ForeignKey("urgencies.urgency_id"), nullable=False),
+    )
+    positions, lifecycle = (
+        Table(
+            name,
+            meta,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("urgency_id", String, ForeignKey("urgencies.urgency_id"), nullable=False),
+            Column("tenant_id", String, nullable=False),
+        )
+        for name in ("urgency_positions", "urgency_lifecycle_facts")
+    )
+    return urgencies, settings, positions, lifecycle, _config_changes_table(meta)
+
+
 def _tenant_boundary_store(tmp_path: Path) -> tuple[str, MetaData]:
     """``_tenanted_hub_store`` of two tenants, each holding the rows a tenant starts
     with — a ``default`` project and a ``work_item_sequence`` row — plus a second
-    project, a registered runner, a signed-up user, and the migration stamp."""
+    project, a registered runner, a signed-up user, and the migration stamp. Tenant A has
+    moved its default off ``standard`` to ``urgent``; every urgency has a position, a
+    lifecycle fact and a change row, as do the settings and both of A's projects."""
     url, meta = _tenanted_hub_store(tmp_path, _TENANT_A, _TENANT_B)
     engine = create_engine(url)
     extra = MetaData()
@@ -781,6 +833,7 @@ def _tenant_boundary_store(tmp_path: Path) -> tuple[str, MetaData]:
         Column("next_ref", Integer, nullable=False),
     )
     alembic = Table("alembic_version", extra, Column("version_num", String, primary_key=True))
+    urgencies, settings, positions, lifecycle, changes = _urgency_tables(extra)
     extra.create_all(engine)
     with engine.begin() as conn:
         for tenant_id in (_TENANT_A, _TENANT_B):
@@ -789,6 +842,24 @@ def _tenant_boundary_store(tmp_path: Path) -> tuple[str, MetaData]:
         conn.execute(projects.insert().values(project_id="proj_other", tenant_id=_TENANT_A, slug="other"))
         conn.execute(alembic.insert().values(version_num="some_revision"))
         conn.execute(meta.tables["users"].insert().values(user_id="usr_1", email="a@example.com"))
+        for urgency_id, tenant_id, slug in _URGENCIES:
+            conn.execute(urgencies.insert().values(urgency_id=urgency_id, tenant_id=tenant_id, slug=slug))
+            conn.execute(positions.insert().values(urgency_id=urgency_id, tenant_id=tenant_id))
+            conn.execute(lifecycle.insert().values(urgency_id=urgency_id, tenant_id=tenant_id))
+        for tenant_id, default in ((_TENANT_A, "urg_a_urgent"), (_TENANT_B, "urg_b_standard")):
+            conn.execute(settings.insert().values(tenant_id=tenant_id, default_urgency_id=default))
+        for kind, key, tenant_id in (
+            ("project", f"proj_{_TENANT_A}", _TENANT_A),
+            ("project", "proj_other", _TENANT_A),
+            ("urgency", "urg_a_standard", _TENANT_A),
+            ("urgency", "urg_a_urgent", _TENANT_A),
+            ("urgency", "urg_b_standard", _TENANT_B),
+            ("tenant_settings", _TENANT_A, _TENANT_A),
+            ("tenant_settings", _TENANT_B, _TENANT_B),
+            # a kept record's key under another kind names no kept record
+            ("scope", f"proj_{_TENANT_A}", _TENANT_A),
+        ):
+            conn.execute(changes.insert().values(record_kind=kind, record_key=key, tenant_id=tenant_id))
     _store(url, tenant=_TENANT_A).write([_registration("r1"), FactRow(table="scopes", values={"slug": "core"})])
     return url, extra
 
@@ -810,10 +881,84 @@ def test_hub_reset_keeps_each_tenants_starting_rows_and_the_global_tables(tmp_pa
     assert _rows(url, "alembic_version", "version_num") == [("some_revision",)]
     assert _rows(url, "runner_registrations", "runner_id") == []
     assert _rows(url, "scopes", "scope_id") == []
-    # the registered runner, the scope, and the other project
-    assert summary.rows_deleted == 3
-    assert summary.table_count == 4  # projects is deleted from, though its default rows stay
-    assert summary.tables_kept == 3  # tenants, users, work_item_sequence
+    # the registered runner, the scope, the other project, A's non-default urgency with its
+    # position and lifecycle fact, and three change rows
+    assert summary.rows_deleted == 9
+    assert summary.table_count == 8  # the filtered tables are deleted from, though their kept rows stay
+    assert summary.tables_kept == 4  # tenants, tenant_settings, users, work_item_sequence
+
+
+def test_hub_reset_keeps_the_urgency_each_tenants_settings_name(tmp_path: Path) -> None:
+    """The settings row's reference decides which urgency survives, not its slug: an
+    operator may have moved the default."""
+    url, _meta = _tenant_boundary_store(tmp_path)
+
+    _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    kept = [("urg_a_urgent",), ("urg_b_standard",)]
+    assert _rows(url, "urgencies", "urgency_id") == kept
+    assert _rows(url, "urgency_positions", "urgency_id") == kept
+    assert _rows(url, "urgency_lifecycle_facts", "urgency_id") == kept
+    assert _rows(url, "tenant_settings", "tenant_id", "default_urgency_id") == [
+        (_TENANT_A, "urg_a_urgent"),
+        (_TENANT_B, "urg_b_standard"),
+    ]
+
+
+def test_hub_reset_keeps_the_change_history_of_the_kept_records_only(tmp_path: Path) -> None:
+    url, _meta = _tenant_boundary_store(tmp_path)
+
+    _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    assert sorted(_rows(url, "config_changes", "record_kind", "record_key")) == [
+        ("project", f"proj_{_TENANT_A}"),
+        ("tenant_settings", _TENANT_A),
+        ("tenant_settings", _TENANT_B),
+        ("urgency", "urg_a_urgent"),
+        ("urgency", "urg_b_standard"),
+    ]
+
+
+def test_hub_reset_of_a_store_from_before_urgencies_keeps_its_projects_history(tmp_path: Path) -> None:
+    """A rule referencing a table the store lacks matches no row, without error."""
+    url, _meta = _tenanted_hub_store(tmp_path, _TENANT_A)
+    engine = create_engine(url)
+    meta = MetaData()
+    projects = Table(
+        "projects",
+        meta,
+        Column("project_id", String, primary_key=True),
+        Column("tenant_id", String, nullable=False),
+        Column("slug", String, nullable=False),
+    )
+    changes = _config_changes_table(meta)
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(projects.insert().values(project_id="proj_1", tenant_id=_TENANT_A, slug="default"))
+        for kind, key in (("project", "proj_1"), ("urgency", "urg_gone"), ("tenant_settings", _TENANT_A)):
+            conn.execute(changes.insert().values(record_kind=kind, record_key=key, tenant_id=_TENANT_A))
+
+    _store(url).reset(hub_reset_boundary(HUB_GLOBAL_TABLES))
+
+    assert _rows(url, "config_changes", "record_kind", "record_key") == [("project", "proj_1")]
+
+
+def test_reset_refuses_a_store_lacking_a_column_a_keep_rule_names(tmp_path: Path) -> None:
+    url, _meta = _tenant_boundary_store(tmp_path)
+    boundary = ResetBoundary(
+        kept_rows={"projects": (KeepRule(equals={"nickname": "default"}),)},
+    )
+
+    with pytest.raises(SchemaDriftError, match="nickname"):
+        _store(url).reset(boundary)
+
+    assert _rows(url, "runner_registrations", "runner_id") == [("r1",)]  # nothing was deleted
+
+
+def test_a_boundary_refuses_a_rule_referencing_a_table_it_does_not_keep() -> None:
+    reference = KeptReference(column="project_id", table="projects", in_column="project_id")
+    with pytest.raises(ValueError, match="projects"):
+        ResetBoundary(kept_rows={"config_changes": (KeepRule(references=(reference,)),)})
 
 
 def test_hub_reset_keeps_memberships_hub_admins_and_the_hub_event_log(tmp_path: Path) -> None:
@@ -890,7 +1035,7 @@ def test_default_reset_still_empties_every_table(tmp_path: Path) -> None:
     url, _meta = _tenant_boundary_store(tmp_path)
     summary = _store(url).reset()
     assert summary.tables_kept == 0
-    for table in ("tenants", "projects", "work_item_sequence", "users", "runner_registrations"):
+    for table in ("tenants", "projects", "work_item_sequence", "users", "runner_registrations", "urgencies"):
         assert _rows(url, table, "*") == []
     assert _rows(url, "alembic_version", "version_num") == [("some_revision",)]
 

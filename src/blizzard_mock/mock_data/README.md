@@ -79,8 +79,14 @@ before.
   `--store hub` against a store with a `tenants` table keeps the tenant boundary,
   since nothing re-creates a tenant once its rows are gone: the global tables stay
   whole, and so does each tenant's starting state — its `tenants` row, its
-  `work_item_sequence` row, and its `default`-slug project (`domain/seeding.py`'s
-  `hub_reset_boundary`). The global list is the hub schema module's own
+  `work_item_sequence` row, its `tenant_settings` row, its `default`-slug
+  project, the urgency its settings name as default (with that urgency's
+  positions and lifecycle facts), and the `config_changes` rows of that project,
+  urgency and settings (`domain/seeding.py`'s `hub_reset_boundary`).
+  `tests/test_mock_data_hub_reset_against_real_hub.py` fails when a reset drops a
+  row a real `blizzard-hub init` wrote; it does not see state that only creating
+  a further tenant writes, such as its packaged graphs, which a reset deletes.
+  The global list is the hub schema module's own
   `GLOBAL_TABLES` when `blizzard` is importable, else `HUB_GLOBAL_TABLES`, kept in
   step with it by hand and compared against it by `tests/test_wire_parity.py`. A boundary table the store lacks is skipped. A hub from
   before tenancy has no `tenants` table, so it is emptied whole, exactly as

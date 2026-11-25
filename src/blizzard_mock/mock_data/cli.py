@@ -481,12 +481,9 @@ _DIR_HELP = (
 def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
     """Return a store to a known-clean state — delete its rows, FK-safe.
 
-    Reflects the live schema and deletes in reverse dependency order; the
-    tables (facts-only schema) survive, only the rows go. A hub store with a
-    ``tenants`` table keeps its tenant boundary: the global tables whole, and
-    each tenant's own row, ``work_item_sequence`` row, and ``default``
-    project. Any other store is emptied whole.
-    """
+    A hub store with tenants keeps the global tables and each tenant's starting
+    state: its row, counter, settings, default project and urgency, and their
+    change history. Any other store is emptied whole."""
     service = _seed_service(_resolve_url(store, url, runtime_dir))  # a reset stamps nothing
     boundary = hub_reset_boundary(_hub_global_tables()) if store == HUB else CLEAR_EVERYTHING
     try:

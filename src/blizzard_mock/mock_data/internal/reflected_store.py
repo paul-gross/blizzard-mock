@@ -23,15 +23,19 @@ from sqlalchemy import (
     create_engine,
     delete,
     event,
+    false,
     func,
     insert,
     not_,
+    or_,
     select,
+    true,
     update,
 )
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.dml import Delete
+from sqlalchemy.sql.elements import ColumnElement
 
 from blizzard_mock.clock import SystemClock
 from blizzard_mock.mock_data.domain.facts import FactRow
@@ -54,6 +58,7 @@ from blizzard_mock.mock_data.domain.seeding import (
     TENANT_COLUMN,
     TENANTS_TABLE,
     ISeedStore,
+    KeepRule,
     ProjectRecord,
     ProjectResolutionError,
     ResetBoundary,
@@ -132,16 +137,42 @@ def _snapshot(meta: MetaData) -> dict[str, ReflectedTable]:
     return snapshot
 
 
-def _delete_outside(table: Table, keep: Mapping[str, object] | None) -> Delete:
-    """A delete of ``table``'s every row but those matching ``keep``'s equality filter."""
-    if not keep:
-        return delete(table)
-    absent = sorted(set(keep) - set(table.c.keys()))
-    if absent:
+def _kept_column(table: Table, name: str) -> Column[Any]:
+    """``table``'s column ``name``, which a keep rule reads."""
+    if name not in table.c:
         raise SchemaDriftError(
-            f"schema drift: table {table.name!r} has no column(s) {absent} to tell the rows a reset keeps — see {GUIDE}"
+            f"schema drift: table {table.name!r} has no column(s) {[name]} to tell the rows a reset keeps — see {GUIDE}"
         )
-    return delete(table).where(not_(and_(*(table.c[column] == value for column, value in keep.items()))))
+    return table.c[name]
+
+
+def _kept_predicate(table: Table, meta: MetaData, boundary: ResetBoundary) -> ColumnElement[bool]:
+    """Matches the rows of ``table`` that any of its keep rules keeps."""
+    return or_(false(), *(_rule_predicate(table, rule, meta, boundary) for rule in boundary.kept_rows[table.name]))
+
+
+def _rule_predicate(table: Table, rule: KeepRule, meta: MetaData, boundary: ResetBoundary) -> ColumnElement[bool]:
+    conditions: list[ColumnElement[bool]] = [_kept_column(table, name) == value for name, value in rule.equals.items()]
+    for reference in rule.references:
+        column = _kept_column(table, reference.column)
+        referenced = meta.tables.get(reference.table)
+        if referenced is None:
+            conditions.append(false())
+            continue
+        # Select the referenced table's *kept* rows, not its live ones, so what is kept never
+        # depends on which table the reset has deleted from already.
+        kept = select(_kept_column(referenced, reference.in_column))
+        if referenced.name not in boundary.kept_tables:
+            kept = kept.where(_kept_predicate(referenced, meta, boundary))
+        conditions.append(column.in_(kept))
+    return and_(true(), *conditions)
+
+
+def _delete_outside(table: Table, meta: MetaData, boundary: ResetBoundary) -> Delete:
+    """A delete of ``table``'s every row but those ``boundary``'s rules keep."""
+    if table.name not in boundary.kept_rows:
+        return delete(table)
+    return delete(table).where(not_(_kept_predicate(table, meta, boundary)))
 
 
 def _allocate_outbox_seqs(conn: Connection, meta: MetaData, rows: Sequence[FactRow]) -> list[FactRow]:
@@ -309,7 +340,7 @@ class ReflectedStore:
         deleted = 0
         with self._engine.begin() as conn:
             for table in reversed(reset_tables):  # children before parents (FK-safe)
-                deleted += conn.execute(_delete_outside(table, boundary.kept_rows.get(table.name))).rowcount or 0
+                deleted += conn.execute(_delete_outside(table, meta, boundary)).rowcount or 0
         return ResetSummary(rows_deleted=deleted, table_count=len(reset_tables), tables_kept=len(kept))
 
     def query(self, table: str, where: Mapping[str, object] | None = None) -> list[Mapping[str, object]]:
