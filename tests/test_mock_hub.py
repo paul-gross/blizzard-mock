@@ -4308,6 +4308,22 @@ def test_analytics_serves_the_seeded_rows_whatever_the_window(client: TestClient
         assert rolled_body[envelope_key] == [row]
 
 
+def test_analytics_counts_files_serves_the_first_limit_seeded_rows(client: TestClient) -> None:
+    rows = [{"key": key, "count": count, "graph_name": None, "node_name": None} for key, count in (("a", 3), ("b", 2))]
+    spec = _analytics_spec(
+        garden_run={"routine_name": "nightly", "scope_slug": "blizzard"}, analytics={"counts_files": rows}
+    )
+    seeded: _SeedResponse = client.post("/_seed/chunk", json=spec).json()
+    path = f"/api/fleet/chunks/{seeded['chunk_id']}/analytics/counts/files"
+    since = {"since": "2020-01-01T00:00:00Z"}
+
+    limited = client.get(path, params={**since, "limit": "1"})
+    assert limited.status_code == 200, limited.text
+    assert limited.json()["counts"] == rows[:1]
+    assert client.get(path, params=since).json()["counts"] == rows
+    assert client.get(path, params={**since, "limit": "0"}).status_code == 422
+
+
 # --- answered findings (worker-scoped per-chunk read) -------------------------
 
 

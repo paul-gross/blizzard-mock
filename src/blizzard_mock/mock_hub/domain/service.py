@@ -1105,11 +1105,11 @@ class MockHubService:
             raise NoRunContext(f"chunk {chunk_id} carries no run context — not a routine run")
         return chunk
 
-    def analytics_counts_files(self, chunk_id: str) -> AnalyticsCountsResponse:
+    def analytics_counts_files(self, chunk_id: str, limit: int | None = None) -> AnalyticsCountsResponse:
         """Mirrors ``GET /api/fleet/chunks/{id}/analytics/counts/files`` — the chunk's
-        own seeded rows, served as-is (the mock does not aggregate)."""
+        own seeded rows, served as-is (the mock does not aggregate), the first ``limit`` when given."""
         chunk = self._garden_run_or_404(chunk_id)
-        return _counts_response(chunk.analytics.counts_files)
+        return _counts_response(chunk.analytics.counts_files[:limit])
 
     def analytics_counts_skills(self, chunk_id: str) -> AnalyticsCountsResponse:
         chunk = self._garden_run_or_404(chunk_id)

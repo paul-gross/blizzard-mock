@@ -629,13 +629,15 @@ def get_chunk_analytics_counts_files(
     since: Annotated[str, Query()],
     request: Request,
     service: Annotated[MockHubService, Depends(get_service)],
+    limit: Annotated[int | None, Query(ge=1)] = None,
 ) -> object:
     """A worker-scoped read of the chunk's own seeded counts-by-file rows — mirrors the
     real hub's ``GET /api/fleet/chunks/{id}/analytics/counts/files``.
     ``since`` is required for wire-contract fidelity with the real hub; the mock ignores
-    its value and serves the seeded rows regardless (``bzh:wire-change-extends-mock``)."""
+    its value and serves the seeded rows regardless (``bzh:wire-change-extends-mock``). ``limit``
+    keeps the first N seeded rows: the mock does not aggregate, so seeded order stands in for count order."""
     try:
-        return service.analytics_counts_files(chunk_id)
+        return service.analytics_counts_files(chunk_id, limit)
     except ChunkNotFound as exc:
         return read_refusal(service, chunk_id, "chunk-not-found", "Chunk not found", str(exc), request)
     except NoRunContext as exc:
