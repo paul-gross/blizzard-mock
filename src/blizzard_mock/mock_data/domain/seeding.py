@@ -131,12 +131,9 @@ class KeepRule:
 
 @dataclass(frozen=True)
 class ResetBoundary:
-    """What a ``reset`` leaves standing. ``kept_tables`` are left whole; each table in
-    ``kept_rows`` keeps only the rows matching any of its rules and loses the rest.
-    Every other table is emptied. A name the store has no table for is ignored. When
-    ``requires_table`` is set, the boundary holds only in a store that has that table;
-    a store without it is emptied whole. A rule may reference only a table the boundary
-    itself keeps rows of — anything else is a ``ValueError`` at construction."""
+    """What a ``reset`` leaves standing: ``kept_tables`` whole, and of each ``kept_rows`` table the rows
+    matching any of its rules. Other tables are emptied, and a store lacking ``requires_table`` is
+    emptied whole. A rule may reference only a table the boundary keeps rows of, else ``ValueError``."""
 
     kept_tables: frozenset[str] = frozenset()
     kept_rows: Mapping[str, tuple[KeepRule, ...]] = field(default_factory=dict[str, tuple[KeepRule, ...]])
@@ -173,15 +170,9 @@ def _change_history_of(record_kind: str, table: str, key_column: str) -> KeepRul
 
 
 def hub_reset_boundary(global_tables: frozenset[str]) -> ResetBoundary:
-    """The hub store's reset boundary: ``global_tables`` stay whole, and so does each
-    tenant's starting state — its ``tenants`` row, its ``work_item_sequence`` row, its
-    ``tenant_settings`` row, its ``default`` project, the urgency its settings name as
-    default (with that urgency's positions and lifecycle facts), and the change history
-    of the kept project, urgency and settings — so the hub is still a usable hub of the
-    same tenants once every other row is gone. Nothing re-creates a tenant after a reset
-    (the hub's own migration inserts the first one), so deleting these would strand the
-    store. A hub from before tenancy has no ``tenants`` table and no boundary: it is
-    emptied whole."""
+    """The hub store's reset boundary: ``global_tables`` stay whole, and so does each tenant's
+    starting state, since nothing re-creates a tenant after a reset. A hub from before
+    tenancy has no ``tenants`` table and is emptied whole."""
     of_a_kept_urgency = (
         KeepRule(references=(KeptReference(column="urgency_id", table=URGENCIES_TABLE, in_column="urgency_id"),)),
     )

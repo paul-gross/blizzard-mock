@@ -1,13 +1,8 @@
-"""``reset --store hub`` against a store a real ``blizzard-hub init`` wrote — the guard that
-the hub's reset boundary keeps every row a fresh init seeds (``blizzard-mock:unit-test``).
+"""Guards that ``reset --store hub`` keeps every row a fresh, real ``blizzard-hub init`` wrote
+(``blizzard-mock:unit-test``) — a synthetic schema cannot know what the hub's migrations seed.
 
-A tenant's starting state is whatever the hub's migrations write for it, which this repo's
-synthetic schemas cannot know. So the store here comes from the sibling ``blizzard`` checkout's
-own binary, and any row the reset drops fails the test, naming its table.
-
-Its reach is the ``init`` path only. What creating a further tenant writes — the work-item
-counter, covered by ``test_mock_data_reflected_store.py``, and the packaged graphs, which a
-reset deletes — is not seen here."""
+Its reach is the ``init`` path only: what creating a further tenant writes, such as the
+packaged graphs a reset deletes, is not seen here."""
 
 from __future__ import annotations
 
