@@ -63,6 +63,17 @@ SERVED_PROJECTS_COLUMN = "projects"
 #: The hub's built-in work source's per-tenant counter, seeded when a tenant is created.
 WORK_ITEM_SEQUENCE_TABLE = "work_item_sequence"
 
+#: One row per tenant, naming the urgency that is the tenant's default.
+TENANT_SETTINGS_TABLE = "tenant_settings"
+
+#: A tenant's urgencies, with each one's placement in their order and its retire/enable history.
+URGENCIES_TABLE = "urgencies"
+URGENCY_POSITIONS_TABLE = "urgency_positions"
+URGENCY_LIFECYCLE_FACTS_TABLE = "urgency_lifecycle_facts"
+
+#: The hub's change history: one row per write of a configuration record, naming it by kind and key.
+CONFIG_CHANGES_TABLE = "config_changes"
+
 #: The hub tables that carry no tenant key, kept in step by hand with the ``GLOBAL_TABLES``
 #: the hub's schema module declares — the list a ``reset`` falls back to when that module
 #: can't be imported, which is the usual case: this tool never depends on ``blizzard``.
@@ -101,16 +112,46 @@ class ResetSummary:
 
 
 @dataclass(frozen=True)
+class KeptReference:
+    """``column``'s value is among those ``in_column`` holds in the rows a reset keeps of ``table``."""
+
+    column: str
+    table: str
+    in_column: str
+
+
+@dataclass(frozen=True)
+class KeepRule:
+    """Picks out rows a reset keeps: those matching every ``equals`` condition and every
+    one of ``references``. A reference into a table the store lacks matches no row."""
+
+    equals: Mapping[str, object] = field(default_factory=dict[str, object])
+    references: tuple[KeptReference, ...] = ()
+
+
+@dataclass(frozen=True)
 class ResetBoundary:
     """What a ``reset`` leaves standing. ``kept_tables`` are left whole; each table in
-    ``kept_rows`` keeps only the rows matching its equality filter and loses the rest.
+    ``kept_rows`` keeps only the rows matching any of its rules and loses the rest.
     Every other table is emptied. A name the store has no table for is ignored. When
     ``requires_table`` is set, the boundary holds only in a store that has that table;
-    a store without it is emptied whole."""
+    a store without it is emptied whole. A rule may reference only a table the boundary
+    itself keeps rows of — anything else is a ``ValueError`` at construction."""
 
     kept_tables: frozenset[str] = frozenset()
-    kept_rows: Mapping[str, Mapping[str, object]] = field(default_factory=dict[str, Mapping[str, object]])
+    kept_rows: Mapping[str, tuple[KeepRule, ...]] = field(default_factory=dict[str, tuple[KeepRule, ...]])
     requires_table: str | None = None
+
+    def __post_init__(self) -> None:
+        keeping = self.kept_tables | self.kept_rows.keys()
+        for table, rules in self.kept_rows.items():
+            for rule in rules:
+                for reference in rule.references:
+                    if reference.table not in keeping:
+                        raise ValueError(
+                            f"a keep rule of {table!r} references {reference.table!r}, "
+                            "a table this boundary keeps no rows of"
+                        )
 
     def for_store(self, store_tables: Collection[str]) -> ResetBoundary:
         """The boundary a store holding ``store_tables`` is reset to."""
@@ -123,16 +164,41 @@ class ResetBoundary:
 CLEAR_EVERYTHING = ResetBoundary()
 
 
+def _change_history_of(record_kind: str, table: str, key_column: str) -> KeepRule:
+    """The ``config_changes`` rows recording the kept ``table`` rows, keyed by ``key_column``."""
+    return KeepRule(
+        equals={"record_kind": record_kind},
+        references=(KeptReference(column="record_key", table=table, in_column=key_column),),
+    )
+
+
 def hub_reset_boundary(global_tables: frozenset[str]) -> ResetBoundary:
     """The hub store's reset boundary: ``global_tables`` stay whole, and so does each
-    tenant's starting state — its ``tenants`` row, its ``work_item_sequence`` row, and
-    its ``default`` project — so the hub is still a usable hub of the same tenants once
-    every other row is gone. Nothing re-creates a tenant after a reset (the hub's own
-    migration inserts the first one), so deleting these would strand the store. A hub
-    from before tenancy has no ``tenants`` table and no boundary: it is emptied whole."""
+    tenant's starting state — its ``tenants`` row, its ``work_item_sequence`` row, its
+    ``tenant_settings`` row, its ``default`` project, the urgency its settings name as
+    default (with that urgency's positions and lifecycle facts), and the change history
+    of the kept project, urgency and settings — so the hub is still a usable hub of the
+    same tenants once every other row is gone. Nothing re-creates a tenant after a reset
+    (the hub's own migration inserts the first one), so deleting these would strand the
+    store. A hub from before tenancy has no ``tenants`` table and no boundary: it is
+    emptied whole."""
+    of_a_kept_urgency = (
+        KeepRule(references=(KeptReference(column="urgency_id", table=URGENCIES_TABLE, in_column="urgency_id"),)),
+    )
+    default_urgency = KeptReference(column="urgency_id", table=TENANT_SETTINGS_TABLE, in_column="default_urgency_id")
     return ResetBoundary(
-        kept_tables=global_tables | {TENANTS_TABLE, WORK_ITEM_SEQUENCE_TABLE},
-        kept_rows={PROJECTS_TABLE: {"slug": DEFAULT_PROJECT_SLUG}},
+        kept_tables=global_tables | {TENANTS_TABLE, WORK_ITEM_SEQUENCE_TABLE, TENANT_SETTINGS_TABLE},
+        kept_rows={
+            PROJECTS_TABLE: (KeepRule(equals={"slug": DEFAULT_PROJECT_SLUG}),),
+            URGENCIES_TABLE: (KeepRule(references=(default_urgency,)),),
+            URGENCY_POSITIONS_TABLE: of_a_kept_urgency,
+            URGENCY_LIFECYCLE_FACTS_TABLE: of_a_kept_urgency,
+            CONFIG_CHANGES_TABLE: (
+                _change_history_of("project", PROJECTS_TABLE, "project_id"),
+                _change_history_of("urgency", URGENCIES_TABLE, "urgency_id"),
+                _change_history_of("tenant_settings", TENANT_SETTINGS_TABLE, TENANT_COLUMN),
+            ),
+        },
         requires_table=TENANTS_TABLE,
     )
 

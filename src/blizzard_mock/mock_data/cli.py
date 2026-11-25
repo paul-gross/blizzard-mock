@@ -484,8 +484,10 @@ def reset(store: str, url: str | None, runtime_dir: str | None) -> None:
     Reflects the live schema and deletes in reverse dependency order; the
     tables (facts-only schema) survive, only the rows go. A hub store with a
     ``tenants`` table keeps its tenant boundary: the global tables whole, and
-    each tenant's own row, ``work_item_sequence`` row, and ``default``
-    project. Any other store is emptied whole.
+    each tenant's starting state — its own row, ``work_item_sequence`` row,
+    ``tenant_settings`` row, ``default`` project, default urgency, and the
+    change history of that project, urgency and settings. Any other store is
+    emptied whole.
     """
     service = _seed_service(_resolve_url(store, url, runtime_dir))  # a reset stamps nothing
     boundary = hub_reset_boundary(_hub_global_tables()) if store == HUB else CLEAR_EVERYTHING
