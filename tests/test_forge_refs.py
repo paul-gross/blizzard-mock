@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from blizzard_mock.forge.internal import git_backend
 from tests.forge_world import REPO, bare_git, forge, open_pull, sha_of
 
 
@@ -97,13 +98,22 @@ def test_external_rebase_merge_replays_commits(world: tuple[TestClient, Path]) -
     assert len(bare_git(root, "rev-list", "--parents", "-n", "1", landed).split()) == 2  # linear, no merge commit
 
 
-def test_rebase_merge_of_an_up_to_date_head_still_rewrites(world: tuple[TestClient, Path]) -> None:
-    client, _ = world
-    pull = open_pull(client, "ahead")
-    resp = client.put(f"/repos/{REPO}/pulls/{pull['number']}/merge", json={"merge_method": "rebase"})
-    assert resp.status_code == 200
-    assert resp.json()["sha"] != pull["head"]["sha"]
-    assert sha_of(client, "main") == resp.json()["sha"]
+def test_rebase_merge_can_reproduce_the_head_sha(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+    with forge(tmp_path) as client:
+        date = bare_git(tmp_path, "show", "-s", "--format=%cI", "ahead")
+        monkeypatch.setattr(
+            git_backend,
+            "_MERGE_IDENTITY",
+            {"GIT_COMMITTER_NAME": "seed", "GIT_COMMITTER_EMAIL": "seed@t", "GIT_COMMITTER_DATE": date},
+        )
+        pull = open_pull(client, "ahead")
+        resp = client.put(f"/repos/{REPO}/pulls/{pull['number']}/merge", json={"merge_method": "rebase"})
+        assert resp.status_code == 200
+        assert resp.json()["sha"] == pull["head"]["sha"]
+        assert sha_of(client, "main") == resp.json()["sha"]
 
 
 def test_closed_pull_with_deleted_head_still_lists(world: tuple[TestClient, Path]) -> None:

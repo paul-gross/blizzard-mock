@@ -7,6 +7,7 @@ nested ``user``/``owner`` objects, and ``mergeable_state`` are built against
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
 from typing import Any
 
@@ -87,9 +88,14 @@ def comment_json(repo_full: str, number: int, comment: Comment, base_url: str) -
     }
 
 
+def pull_node_id(repo_full: str, number: int) -> str:
+    return base64.b64encode(f"PullRequest:{repo_full}#{number}".encode()).decode()
+
+
 def pull_json(repo_full: str, view: PullView, base_url: str) -> dict[str, Any]:
     pull = view.pull
     return {
+        "node_id": pull_node_id(repo_full, pull.number),
         "number": pull.number,
         "title": pull.title,
         "body": pull.body,
@@ -122,6 +128,7 @@ def commit_json(repo_full: str, commit: GitCommit, base_url: str) -> dict[str, A
         "html_url": f"{base_url}/{repo_full}/commit/{commit.sha}",
         "commit": {
             "message": commit.message,
+            "tree": {"sha": commit.tree},
             "author": {
                 "name": commit.author.name,
                 "email": commit.author.email,
@@ -196,6 +203,7 @@ def lever_json(lever: Lever) -> dict[str, Any]:
         "message": lever.message,
         "branch": lever.branch,
         "pattern": lever.pattern,
+        "method": lever.method.value if lever.method is not None else None,
         "state": lever.state.value if lever.state is not None else None,
         "seconds": lever.seconds,
     }

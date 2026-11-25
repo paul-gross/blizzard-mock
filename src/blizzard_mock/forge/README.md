@@ -55,7 +55,7 @@ armed.
 
 | Method + path | Purpose |
 |---------------|---------|
-| `GET /repos/{owner}/{repo}` | Repo, with `default_branch` read from bare `HEAD` |
+| `GET /repos/{owner}/{repo}` | Repo, with `default_branch` read from bare `HEAD` and `allow_merge_commit`, `allow_rebase_merge`, `allow_squash_merge` |
 | `GET /repos/{o}/{r}/issues?state=&labels=` | List issues; `labels=` is a comma-separated AND filter, composes with `state=all` |
 | `GET /repos/{o}/{r}/issues/{n}` | Get issue (body) |
 | `POST /repos/{o}/{r}/issues` | Create issue |
@@ -71,7 +71,7 @@ armed.
 | `POST /repos/{o}/{r}/pulls` | Create PR (`head`/`base` branches); 422 if an open PR already exists for the same `head`/`base` |
 | `GET /repos/{o}/{r}/pulls/{n}` | Get PR — live `mergeable`/`mergeable_state`, `merged` |
 | `PATCH /repos/{o}/{r}/pulls/{n}` | Close a PR without merge (D-065 terminal) |
-| `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base` by `merge_method` — a merge commit, one squash commit on the base tip, or a rebase that always lands new commits; 405 conflict, 409 stale-sha |
+| `PUT /repos/{o}/{r}/pulls/{n}/merge` | Real merge into `base` by `merge_method` — a merge commit, one squash commit on the base tip, or a forced rebase; 405 conflict, 409 stale-sha |
 | `PUT /repos/{o}/{r}/pulls/{n}/update-branch` | Merge `base` into head (advances `head.sha`), clears `stale_branch` → 202; 409 stale `expected_head_sha` |
 | `GET /repos/{o}/{r}/pulls/{n}/merge` | Merged-check → 204 / 404 |
 | `GET /repos/{o}/{r}/commits/{ref}` | Resolve a commit |
@@ -81,6 +81,9 @@ armed.
 | `GET /repos/{o}/{r}/commits/{ref}/status?page=&per_page=` | Combined status: latest entry per context, `pending` for an empty history; paged with a `Link` header and a total over all contexts |
 | `GET /repos/{o}/{r}/commits/{ref}/check-runs?page=&per_page=` | List check runs against `ref` — `{"total_count": N, "check_runs": [...]}`; paged with a `Link` header and a total over all runs. The runs `ref_checks` armed against its revision, else derived live from the lever set |
 | `GET /repos/{o}/{r}/compare/{base}...{head}` | Compare two refs (slashed branch names allowed) — `status` (`identical`/`ahead`/`behind`/`diverged`), `ahead_by`, `behind_by`, `merge_base_commit`, `commits` (`base..head`, oldest first, with `parents`), `files` (merge base → head diff: `filename`, `status`, `sha`, `additions`, `deletions`, `patch`, `previous_filename` on rename); 404 if either side does not resolve |
+| `GET /repos/{o}/{r}/git/commits/{sha}` | Immutable commit, tree SHA, parents, author and message |
+| `GET /repos/{o}/{r}/git/trees/{sha}?recursive=1` | Tree entries, including modes, object types, SHA and sizes; `truncated: false` |
+| `GET /repos/{o}/{r}/git/blobs/{sha}` | Immutable blob with base64 content |
 | `GET /repos/{o}/{r}/git/ref/{ref}` | Resolve a ref (e.g. `heads/main`) → sha |
 | `POST /repos/{o}/{r}/git/refs` | Create a branch (`{"ref": "refs/heads/x", "sha"}`) → 201; 422 `Reference already exists` |
 | `PATCH /repos/{o}/{r}/git/refs/{ref}` | Fast-forward a ref (`force` skips the check); 422 when not a fast-forward |
@@ -199,7 +202,7 @@ clear one it armed.
 
 | Lever | Shape | Effect |
 |-------|-------|--------|
-| `externally_merged` | action (repo, number, `method`) | Real merge of head→base outside the PR flow by `method` (`merge` by default, `squash`, or `rebase` — each lands a revision that is neither the head nor, for squash and rebase, a merge of it); marks PR `merged_by: external` — the direct push a polling delivery flow must detect (D-065) |
+| `externally_merged` | action (repo, number, `method`) | Real merge of head→base outside the PR flow by `method` (`merge` by default, `squash`, or `rebase`); marks PR `merged_by: external` — the direct push a polling delivery flow must detect (D-065) |
 | `comment_midflight` | action (repo, number, body) | Appends a comment to a live thread (D-074) |
 | `merge_conflict` | state (per PR) | `mergeable=false`/`dirty`; merge → 405 |
 | `merge_rejected` | state (per PR) | Merge → 405 with an optional `message` (branch policy) |
@@ -212,7 +215,9 @@ clear one it armed.
 | `status_read_error` | action (repo, ref, status_code) | Status reads for the resolved revision return 401, 403, 500, or 503; null clears the error. Other revisions and check-run reads are unaffected. |
 | `branch_protected` | state (repo, branch) | `PATCH git/refs` on the branch → 422 `Protected branch update failed…`. Scoped by branch, so several coexist; clear with `?branch=` |
 | `ruleset` | state (repo, pattern) | `POST git/refs` and `POST /merges` (by base) on a branch matching the glob → 422 `Repository rule violations found…`. Scoped by pattern; clear with `?pattern=` |
-| `merge_commits_disallowed` | state (per repo) | `PUT .../merge` with the `merge` method → 405 `Merge commits are not allowed on this repository`; `squash` and `rebase` are admitted |
+| `rebase_merge_disallowed`, `squash_merge_disallowed` | state (per repo) | Disable the respective method in repository settings and merge enforcement |
+| `merge_method_refused` | state (repo, optional number, `method`, optional `message`) | Refuse only that otherwise enabled method; clear all methods for the scope with DELETE |
+| `merge_commits_disallowed` | state (per repo) | Repository settings report `allow_merge_commit: false`; `PUT .../merge` with the `merge` method → 405 `Merge commits are not allowed on this repository`; `squash` and `rebase` are admitted |
 | `rate_budget` | action (token?, remaining?, reset?) | Sets a token's rate window — `reset` in epoch seconds, as the header; with no `token`, every bucket, present and future |
 | `rate_limited` | state (global/repo) | 403 + `X-RateLimit-*` headers, `Remaining: 0` and the bucket's window `Reset`; optional `remaining` self-expiry |
 | `secondary_rate_limited` | state (global/repo) | 403 whose message names a secondary rate limit, with `Retry-After` and the bucket's live `Remaining` untouched; optional `remaining` self-expiry |
@@ -246,10 +251,11 @@ requests. The journal holds the latest 10,000 entries (`JOURNAL_CAPACITY`); past
 - **A closed pull freezes its head.** Closing, merging, or deleting the head branch pins
   the pull's `head.sha`, so a pull whose branch is gone still lists; deleting a branch
   closes the open pulls it heads or is based on.
-- **Every merge method rewrites.** A rebase always lands new commits, even when the head
-  already descends from the base, and a squash is one commit whose only parent is the
-  base tip.
-- **`/graphql` parses one restricted shape** rather than running a GraphQL engine: it reads the
+- **Rebase and squash landings.** The mock forces a rebase replay even when the head already descends from the base.
+  Unlike GitHub's rebase-and-merge, which always creates new commit SHAs, Git can reproduce the same SHA in the mock
+  when a replayed commit's content and metadata are identical. A squash is one commit whose only parent is the base tip.
+- **GraphQL branch updates** accept `updatePullRequestBranch` with `input` variables `pullRequestId`, `expectedHeadOid`, and `updateMethod` (`REBASE` or `MERGE`). Pull node IDs appear as REST `node_id` or in `repository { pullRequest(number:) { id } }`. Rebase updates the head ref only, guarded by the expected head; REST update continues to merge.
+- **`/graphql` parses a restricted shape** rather than running a GraphQL engine: it reads the
   `owner` and `name` variables and the aliased `issueOrPullRequest(number:)` fields by pattern, and
   returns `comments` only when the query text selects them. Any other query answers an `errors` entry,
   so a client drifting from the shape fails loudly instead of being guessed at.

@@ -26,6 +26,16 @@ class GitCommit:
     message: str
     author: GitAuthor
     parents: list[str] = field(default_factory=list[str])
+    tree: str = ""
+
+
+@dataclass(frozen=True)
+class GitTreeEntry:
+    path: str
+    mode: str
+    type: str
+    sha: str
+    size: int | None
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,10 @@ class IReadGitBackend(Protocol):
 
     def get_commit(self, repo: Repo, ref: str) -> GitCommit: ...
 
+    def tree(self, repo: Repo, sha: str, *, recursive: bool) -> list[GitTreeEntry]: ...
+
+    def blob(self, repo: Repo, sha: str) -> bytes: ...
+
     def compare(self, repo: Repo, base: str, head: str) -> GitCompare:
         """Compare ``base...head``. Raises ``BranchNotFound`` when either side
         does not resolve."""
@@ -102,11 +116,12 @@ class IWriteGitBackend(IReadGitBackend, Protocol):
         ...
 
     def rebase(self, repo: Repo, base: str, head: str, message: str) -> str:
-        """Replay ``head``'s commits onto ``base`` as new commits and advance
-        ``base`` to the new tip, leaving ``head`` untouched — GitHub's
-        rebase-merge. Always rewrites: even a head already descending from ``base`` lands
-        as new commits. Raises ``NotMergeable`` on real conflict."""
+        """Force replay of ``head``'s commits onto ``base`` and advance ``base``
+        to the resulting tip, leaving ``head`` untouched. Identical commit content
+        and metadata can yield the same SHA. Raises ``NotMergeable`` on real conflict."""
         ...
+
+    def rebase_update(self, repo: Repo, base: str, head: str, expected_sha: str) -> str: ...
 
     def squash(self, repo: Repo, base: str, head: str, message: str) -> str:
         """Land ``head``'s changes on ``base`` as one new commit whose only parent is
