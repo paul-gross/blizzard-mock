@@ -38,11 +38,7 @@ class FakeWinterCli:
     """Records winter invocations and simulates ``ws init`` cheaply."""
 
     def __init__(self) -> None:
-        self.ready: list[Path] = []
         self.runs: list[tuple[Path, list[str]]] = []
-
-    def ensure_ready(self, workspace: Path) -> None:
-        self.ready.append(workspace)
 
     def run(self, workspace: Path, args: Sequence[str]) -> None:
         self.runs.append((workspace, list(args)))
@@ -155,8 +151,7 @@ def test_mint_materializes_bare_origins_and_workspace(tmp_path: Path) -> None:
     assert f"file://{layout.origin_path('toy-api')}" in config
     assert (layout.workspace / "tools" / "winter-cli").is_dir()
 
-    # winter was driven: prepared once, then `ws init`.
-    assert winter.ready == [layout.workspace]
+    # winter was driven: `ws init`, and nothing else.
     assert winter.runs == [(layout.workspace, ["ws", "init"])]
 
     # Manifest records provenance for the forge + downstream tooling.
