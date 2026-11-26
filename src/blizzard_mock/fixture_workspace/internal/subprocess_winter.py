@@ -1,6 +1,6 @@
 """Run the real winter CLI against a fixture — the ``IWinterCli`` adapter.
 
-Invokes the fixture's own ``tools/winter-cli`` via ``mise exec -- uv run``, CWD
+Invokes the fixture's own ``tools/winter-cli`` via ``uv run``, CWD
 pinned there so winter's root-walk resolves the fixture rather than the outer
 workspace (pinned by ``tests/test_pin_mock.py``).
 """
@@ -19,17 +19,11 @@ log = structlog.get_logger(__name__)
 
 
 class SubprocessWinterCli:
-    """``IWinterCli`` over the fixture's own ``tools/winter-cli`` (mise + uv)."""
-
-    def ensure_ready(self, workspace: Path) -> None:
-        cli = self._cli_dir(workspace)
-        # Trust the freshly cloned mise config so `mise exec` will run it.
-        self._run(["mise", "trust", "--quiet", str(cli / "mise.toml")], cwd=cli, what="mise trust")
-        log.debug("fixture.winter.ready", workspace=str(workspace))
+    """``IWinterCli`` over the fixture's own ``tools/winter-cli`` (uv)."""
 
     def run(self, workspace: Path, args: Sequence[str]) -> None:
         cli = self._cli_dir(workspace)
-        cmd = ["mise", "-C", str(cli), "exec", "--", "uv", "run", "--project", str(cli), "winter", *args]
+        cmd = ["uv", "run", "--project", str(cli), "winter", *args]
         self._run(cmd, cwd=cli, what=f"winter {' '.join(args)}")
         log.info("fixture.winter.run", workspace=str(workspace), args=list(args))
 

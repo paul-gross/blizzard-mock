@@ -86,20 +86,19 @@ def test_the_winter_cli_subprocess_runs_with_cwd_pinned_to_the_fixtures_own_cli(
     own root-walk resolves the fixture rather than any enclosing workspace."""
     workspace = tmp_path / "fixture"
     (workspace / "tools" / "winter-cli").mkdir(parents=True)
-    recorded: list[str | None] = []
+    recorded: list[tuple[list[str], str | None]] = []
 
     def _fake_run(cmd: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        recorded.append(kwargs.get("cwd"))
+        recorded.append((list(cmd), kwargs.get("cwd")))
         return subprocess.CompletedProcess(list(cmd), 0, "", "")
 
     monkeypatch.setattr(subprocess_winter.subprocess, "run", _fake_run)
 
     cli = subprocess_winter.SubprocessWinterCli()
-    cli.ensure_ready(workspace)
     cli.run(workspace, ["ws", "init"])
 
     expected = str(workspace / "tools" / "winter-cli")
-    assert recorded == [expected, expected]
+    assert recorded == [(["uv", "run", "--project", expected, "winter", "ws", "init"], expected)]
 
 
 # --------------------------------------------------------------------------- #

@@ -39,10 +39,6 @@ class IGit(Protocol):
 class IWinterCli(Protocol):
     """The real winter CLI, run against the fixture — ``internal/subprocess_winter.py``."""
 
-    def ensure_ready(self, workspace: Path) -> None:
-        """One-time preparation so ``run`` works against a freshly cloned framework."""
-        ...
-
     def run(self, workspace: Path, args: Sequence[str]) -> None:
         """Run ``winter <args>`` with ``workspace`` as the resolved workspace root."""
         ...
@@ -114,7 +110,6 @@ class FixtureWorkspaceService:
             self._git.clone_local(winter_source, layout.workspace)
             self._write_config(layout)
             assert self._winter is not None
-            self._winter.ensure_ready(layout.workspace)
             self._winter.run(layout.workspace, ["ws", "init"])
 
         self._write_manifest(layout)
