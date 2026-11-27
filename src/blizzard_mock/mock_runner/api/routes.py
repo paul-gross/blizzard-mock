@@ -111,6 +111,7 @@ def drive_complete(body: CompleteBody, service: Annotated[MockRunnerService, Dep
         body.chunk_id,
         choice=body.choice,
         reason=body.reason,
+        reason_truncated=body.reason_truncated,
         artifacts=body.artifacts,
         check_results=body.check_results,
     )

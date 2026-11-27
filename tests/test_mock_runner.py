@@ -511,6 +511,37 @@ def test_completion_reason_is_preserved_on_replay(stack: tuple[TestClient, TestC
     )
 
 
+@pytest.mark.parametrize(
+    ("reason", "flag", "expected"),
+    [
+        ("x" * 1999 + " ", True, "x" * 1999 + " "),
+        ("x" * 1999 + " ", None, "x" * 1999),
+        ("  raw reason  ", False, "raw reason"),
+        ("  raw reason  ", True, "raw reason"),
+        ("   ", True, None),
+    ],
+)
+def test_completion_reason_normalization_and_replay(
+    stack: tuple[TestClient, TestClient], reason: str, flag: bool | None, expected: str | None
+) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    runner.post("/_levers/replay", json={"chunk_id": chunk_id})
+    payload: dict[str, Any] = {"chunk_id": chunk_id, "choice": "pass", "reason": reason}
+    if flag is not None:
+        payload["reason_truncated"] = flag
+    result = runner.post("/_drive/complete", json=payload).json()
+    assert result["response"]["outcome"] == "next"
+    assert result["replayed"]["response"]["outcome"] == "next"
+    held = _held(runner, chunk_id)
+    assert held is not None
+    assert held.last_submission["reason_truncated"] is (flag or False)
+    history = hub.get(f"/api/fleet/chunks/{chunk_id}").json()["history"]
+    assert len(history) == 1
+    assert history[0]["reason"] == expected
+
+
 def test_rejected_completion_does_not_add_history(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
     chunk_id = _seed(hub)

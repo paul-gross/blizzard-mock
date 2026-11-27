@@ -299,6 +299,31 @@ def test_rekey_refuses_foreign_runner_without_rotating(client: TestClient) -> No
 # --- happy path -------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("reason", "flag", "expected"),
+    [
+        ("x" * 1999 + " ", True, "x" * 1999 + " "),
+        ("x" * 1999 + " ", None, "x" * 1999),
+        ("  raw reason  ", True, "raw reason"),
+    ],
+)
+def test_completion_reason_on_fresh_apply_and_replay(
+    client: TestClient, reason: str, flag: bool | None, expected: str
+) -> None:
+    chunk_id = _seed(client)
+    assert _claim(client, {"chunk_id": chunk_id, "runner_id": "r1"}).status_code == 201
+    path = f"/api/fleet/chunks/{chunk_id}/completions"
+    payload: dict[str, object] = {"choice": "pass", "epoch": 1, "from_node_id": "build", "reason": reason}
+    if flag is not None:
+        payload["reason_truncated"] = flag
+    assert client.post(path, json=payload).json()["outcome"] == "next"
+    payload["reason"] = "different on replay"
+    assert client.post(path, json=payload).json()["outcome"] == "next"
+    history = client.get(f"/api/fleet/chunks/{chunk_id}").json()["history"]
+    assert len(history) == 1
+    assert history[0]["reason"] == expected
+
+
 def test_happy_path_ingest_to_done(client: TestClient) -> None:
     chunk_id = _seed(client)
     queue: _Queue = client.get("/api/fleet/queue/peek").json()

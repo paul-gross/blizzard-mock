@@ -67,6 +67,9 @@ def test_reason_wire_fields_match_real_models() -> None:
         }
         assert "reason" in names
         assert "reason" in model.model_fields
+        if class_name == "CompletionSubmission":
+            assert "reason_truncated" in names
+            assert model.model_fields["reason_truncated"].default is False
 
 
 def _sibling(path: Path) -> str:

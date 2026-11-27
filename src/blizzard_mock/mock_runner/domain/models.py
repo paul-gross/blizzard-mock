@@ -80,6 +80,7 @@ class CompleteBody(BaseModel):
     chunk_id: str
     choice: str
     reason: str | None = None
+    reason_truncated: bool = False
     artifacts: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     check_results: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
 

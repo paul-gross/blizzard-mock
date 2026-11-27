@@ -512,6 +512,14 @@ class UnknownProjects(Exception):
         self.entries = tuple(entries)
 
 
+def _normalize_transition_reason(reason: str | None, *, truncated: bool) -> str | None:
+    if reason is None:
+        return None
+    if truncated and len(reason) == 2000 and reason == reason.lstrip():
+        return reason if reason.strip() else None
+    return reason.strip()[:2000] or None
+
+
 class MockHubService:
     """The composition-root-wired service every mock-hub route delegates to."""
 
@@ -1443,7 +1451,14 @@ class MockHubService:
     # -- completion apply --------------------------------------------------
 
     def apply_completion(
-        self, chunk_id: str, *, epoch: int, from_node_id: str, choice: str, reason: str | None = None
+        self,
+        chunk_id: str,
+        *,
+        epoch: int,
+        from_node_id: str,
+        choice: str,
+        reason: str | None = None,
+        reason_truncated: bool = False,
     ) -> ApplyResponse:
         """Advance the chunk on a node-step completion — epoch-fenced and idempotent."""
         chunk = self._require(chunk_id)
@@ -1486,7 +1501,7 @@ class MockHubService:
                 recorded_at=self._clock.now().isoformat(),
                 graph_id=chunk.graph_id,
                 graph_name=chunk.graph_name,
-                reason=reason.strip() or None if reason is not None else None,
+                reason=_normalize_transition_reason(reason, truncated=reason_truncated),
             )
         )
         chunk.applied[key] = response.outcome
