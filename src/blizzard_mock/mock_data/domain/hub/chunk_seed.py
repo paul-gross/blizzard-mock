@@ -81,15 +81,20 @@ def compose_chunk(
     mirrored: bool = False,
     escalation_cause: str | None = None,
     escalation_detail: str | None = None,
+    judged_transition_reason: str | None = None,
 ) -> ChunkSeed:
     """Compose one chunk minted onto ``graph``, landing at ``status``. Raises
     :class:`ChunkCompositionError` for an unknown status, an unresolvable node name,
     or an unreachable ``--node``/``--status`` pairing. ``mirrored=True`` adds a live
-    ``route_created`` — valid only for :data:`MIRRORED_STATUSES`."""
+    ``route_created`` — valid only for :data:`MIRRORED_STATUSES`.
+    ``judged_transition_reason`` supplies the done path's build-to-deliver reason;
+    the target store must support the reason column."""
     if status not in STATUSES:
         raise ChunkCompositionError(f"unknown status {status!r} — one of {STATUSES}")
     if (escalation_cause is not None or escalation_detail is not None) and status != NEEDS_HUMAN:
         raise ChunkCompositionError(f"an escalation cause/detail needs --status {NEEDS_HUMAN}, not {status!r}")
+    if judged_transition_reason is not None and status != DONE:
+        raise ChunkCompositionError("a judged transition reason requires the done build-to-deliver transition")
 
     minted_chunk_id = chunk_id or ids.mint(ids.CHUNK_PREFIX, clock, rng)
     now = clock.now()
@@ -122,7 +127,12 @@ def compose_chunk(
         return FactRow(table="chunk_promoted", values={"chunk_id": minted_chunk_id, "promoted_at": at(offset_seconds)})
 
     def transition(
-        *, offset_seconds: int, to_node_id: str, from_node_id: str | None = None, choice_name: str | None = None
+        *,
+        offset_seconds: int,
+        to_node_id: str,
+        from_node_id: str | None = None,
+        choice_name: str | None = None,
+        reason: str | None = None,
     ) -> FactRow:
         return FactRow(
             table="transitions",
@@ -137,6 +147,7 @@ def compose_chunk(
                 "epoch": epoch,
                 "runner_id": runner_id,
                 "recorded_at": at(offset_seconds),
+                **({"reason": reason} if reason is not None else {}),
             },
         )
 
@@ -188,6 +199,8 @@ def compose_chunk(
         # reserved terminal — one epoch, two node-steps.
         build_node = graph.node(BUILD_NODE_NAME)
         deliver_node = graph.node(node_name or DELIVER_NODE_NAME)
+        if judged_transition_reason is not None and deliver_node.node_id == build_node.node_id:
+            raise ChunkCompositionError("a judged transition reason requires the done build-to-deliver transition")
         # A terminal hop already leaving ``build`` has no predecessor: no graph carries a self-edge.
         if deliver_node.node_id != build_node.node_id:
             rows.append(
@@ -196,6 +209,7 @@ def compose_chunk(
                     from_node_id=build_node.node_id,
                     to_node_id=deliver_node.node_id,
                     choice_name="approved",
+                    reason=judged_transition_reason,
                 )
             )
         rows.append(

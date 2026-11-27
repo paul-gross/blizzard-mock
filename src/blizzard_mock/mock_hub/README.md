@@ -212,6 +212,8 @@ to either a sample or a miss.
   run. `status` seeds the chunk at a status with no live route — `ready` by default, or
   `not_ready`, `paused`, `needs_human`, `delivering`, `done`, or `stopped` for a chunk no
   runner may claim; `running` is refused, since only a claim reaches it.
+  `history` seeds accepted transition records, including optional `reason`;
+  accepted completions append one record, while refusals and replays leave history unchanged.
   `garden_answered_findings` (each mirroring the real hub's `FindingView` fields in
   full, carrying its own `routine_name`/`scope_slug`) seeds the findings the chunk's own
   accepted, minted garden proposal answers — an independent lever from `garden_run`/

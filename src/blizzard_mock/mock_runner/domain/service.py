@@ -205,6 +205,8 @@ class MockRunnerService:
         chunk_id: str,
         *,
         choice: str,
+        reason: str | None = None,
+        reason_truncated: bool = False,
         artifacts: list[dict[str, Any]] | None = None,
         check_results: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -241,6 +243,8 @@ class MockRunnerService:
             "choice": choice,
             "epoch": epoch,
             "from_node_id": from_node,
+            "reason": reason,
+            "reason_truncated": reason_truncated,
             "check_results": check_results or [],
             "artifacts": artifacts or [],
         }

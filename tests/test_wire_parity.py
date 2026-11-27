@@ -37,6 +37,7 @@ from blizzard_mock.mock_data.domain.seeding import HUB_GLOBAL_TABLES
 from blizzard_mock.mock_hub.api import deps
 from blizzard_mock.mock_hub.domain import service as hub_service
 from blizzard_mock.mock_hub.domain import state as hub_state
+from blizzard_mock.mock_hub.domain.models import TransitionRecord
 from blizzard_mock.mock_runner.domain import gateway as runner_gateway
 from blizzard_mock.mock_runner.domain import service as runner_service
 
@@ -51,6 +52,24 @@ _EVENT_LOG_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "event_log.p
 _HUB_EVENTS_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "domain" / "observability" / "hub_events.py"
 _HUB_SCHEMA_SOURCE = _BLIZZARD / "src" / "blizzard" / "hub" / "store" / "schema.py"
 _CLAIM_DENIALS_SOURCE = _BLIZZARD / "src" / "blizzard" / "foundation" / "claim_denials.py"
+
+
+@needs_blizzard
+def test_reason_wire_fields_match_real_models() -> None:
+    for relative, class_name, model in (
+        ("src/blizzard/wire/completion.py", "CompletionSubmission", deps.CompletionBody),
+        ("src/blizzard/wire/chunk.py", "TransitionView", TransitionRecord),
+    ):
+        module = ast.parse(_sibling(_BLIZZARD / relative))
+        cls = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == class_name)
+        names = {
+            node.target.id for node in cls.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        assert "reason" in names
+        assert "reason" in model.model_fields
+        if class_name == "CompletionSubmission":
+            assert "reason_truncated" in names
+            assert model.model_fields["reason_truncated"].default is False
 
 
 def _sibling(path: Path) -> str:
@@ -375,7 +394,6 @@ _MIRRORED: dict[str, tuple[str, frozenset[str]]] = {
                 "flow_record",
                 "graph_created_at",
                 "graph_name",
-                "history",
                 "intended_migration",
                 "landed",
                 "landed_repos",

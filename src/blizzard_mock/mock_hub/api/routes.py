@@ -771,7 +771,12 @@ def submit_completion(
 ) -> object:
     try:
         response = service.apply_completion(
-            chunk_id, epoch=body.epoch, from_node_id=body.from_node_id, choice=body.choice
+            chunk_id,
+            epoch=body.epoch,
+            from_node_id=body.from_node_id,
+            choice=body.choice,
+            reason=body.reason,
+            reason_truncated=body.reason_truncated,
         )
     except ChunkNotFound as exc:
         return read_refusal(service, chunk_id, "chunk-not-found", "Chunk not found", str(exc), request)

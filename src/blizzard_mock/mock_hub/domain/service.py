@@ -49,6 +49,7 @@ from blizzard_mock.mock_hub.domain.models import (
     RoutineProposalState,
     ScopeSpec,
     SystemArtifactSpec,
+    TransitionRecord,
     WorkRefSpec,
     finding_exit,
     ships_from_lease_holder,
@@ -511,6 +512,14 @@ class UnknownProjects(Exception):
         self.entries = tuple(entries)
 
 
+def _normalize_transition_reason(reason: str | None, *, truncated: bool) -> str | None:
+    if reason is None:
+        return None
+    if truncated and len(reason) == 2000 and reason == reason.lstrip():
+        return reason if reason.strip() else None
+    return reason.strip()[:2000] or None
+
+
 class MockHubService:
     """The composition-root-wired service every mock-hub route delegates to."""
 
@@ -583,6 +592,7 @@ class MockHubService:
             analytics=spec.analytics,
             status=spec.status,
             cost=spec.cost,
+            history=list(spec.history),
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -946,6 +956,7 @@ class MockHubService:
             terminal=status in TERMINAL_STATUSES,
             current_node_terminal=chunk.current_node_id == TERMINAL,
             latest_epoch=chunk.latest_epoch or None,
+            history=[entry.model_dump() for entry in chunk.history],
             work_refs=[p.model_dump() for p in chunk.work_refs],
             default_model=list(chunk.default_model),
             default_effort=chunk.default_effort,
@@ -1439,7 +1450,16 @@ class MockHubService:
 
     # -- completion apply --------------------------------------------------
 
-    def apply_completion(self, chunk_id: str, *, epoch: int, from_node_id: str, choice: str) -> ApplyResponse:
+    def apply_completion(
+        self,
+        chunk_id: str,
+        *,
+        epoch: int,
+        from_node_id: str,
+        choice: str,
+        reason: str | None = None,
+        reason_truncated: bool = False,
+    ) -> ApplyResponse:
         """Advance the chunk on a node-step completion — epoch-fenced and idempotent."""
         chunk = self._require(chunk_id)
         self._check_pinned_graph(chunk_id)
@@ -1470,6 +1490,20 @@ class MockHubService:
             return self._fail(chunk, f"unknown choice {choice!r} at {from_node_id!r}")
 
         response = self._advance(chunk, target)
+        if response.outcome is ApplyOutcome.FAILURE:
+            return response
+        chunk.history.append(
+            TransitionRecord(
+                from_node_id=from_node_id,
+                to_node_id=target,
+                choice_name=choice,
+                epoch=epoch,
+                recorded_at=self._clock.now().isoformat(),
+                graph_id=chunk.graph_id,
+                graph_name=chunk.graph_name,
+                reason=_normalize_transition_reason(reason, truncated=reason_truncated),
+            )
+        )
         chunk.applied[key] = response.outcome
         chunk.last_response = response
         self._state.put_chunk(chunk)

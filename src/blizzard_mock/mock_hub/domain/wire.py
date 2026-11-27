@@ -192,6 +192,7 @@ class ChunkDetail(BaseModel):
     status: str
     current_node_id: str | None
     latest_epoch: int | None
+    history: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
     work_refs: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
     # The chunk's default model preference and effort, mirrored
     # so a real runner's wire model deserializes the mock's replies unchanged.

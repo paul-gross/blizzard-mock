@@ -108,7 +108,12 @@ def drive_claim_next(
 @drive_router.post("/complete")
 def drive_complete(body: CompleteBody, service: Annotated[MockRunnerService, Depends(get_service)]) -> dict[str, Any]:
     return service.complete(
-        body.chunk_id, choice=body.choice, artifacts=body.artifacts, check_results=body.check_results
+        body.chunk_id,
+        choice=body.choice,
+        reason=body.reason,
+        reason_truncated=body.reason_truncated,
+        artifacts=body.artifacts,
+        check_results=body.check_results,
     )
 
 
