@@ -17,11 +17,14 @@ from datetime import UTC, datetime
 from typing import cast
 
 import pytest
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, select
 
 from blizzard_mock.clock import FixedClock
 from blizzard_mock.mock_data.domain.facts import FactRow
 from blizzard_mock.mock_data.domain.hub.chunk_seed import ChunkCompositionError, ChunkSeed, compose_chunk
 from blizzard_mock.mock_data.domain.hub.graph_seed import GraphCompositionError, GraphContext, NodeRef
+from blizzard_mock.mock_data.domain.schema_contract import SchemaDriftError
+from blizzard_mock.mock_data.internal.reflected_store import ReflectedStore
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -109,6 +112,85 @@ def test_done_landing_from_build_lands_one_hop_not_a_self_edge() -> None:
     transitions = [row for row in seed.rows if row.table == "transitions"]
     assert len(transitions) == 1
     assert (transitions[0].values["from_node_id"], transitions[0].values["to_node_id"]) == ("nd_build", "done")
+
+
+def test_done_judged_transition_preserves_supplied_reason_only() -> None:
+    seed = compose_chunk(
+        status="done",
+        graph=_graph(),
+        clock=FixedClock(_NOW),
+        rng=random.Random(1),
+        judged_transition_reason="Tests passed",
+    )
+    transitions = [row for row in seed.rows if row.table == "transitions"]
+    assert transitions[0].values["reason"] == "Tests passed"
+    assert "reason" not in transitions[1].values
+    assert all("reason" not in row.values for row in _compose("done").rows if row.table == "transitions")
+
+
+@pytest.mark.parametrize(("status", "node_name"), [("running", None), ("done", "build")])
+def test_reason_requires_judged_transition(status: str, node_name: str | None) -> None:
+    with pytest.raises(ChunkCompositionError, match="judged transition reason"):
+        compose_chunk(
+            status=status,
+            graph=_graph(),
+            clock=FixedClock(_NOW),
+            rng=random.Random(1),
+            node_name=node_name,
+            judged_transition_reason="Tests passed",
+        )
+
+
+@pytest.mark.parametrize("has_reason", [False, True])
+def test_transition_reason_against_reflected_store(has_reason: bool) -> None:
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    columns = [
+        Column(name, String)
+        for name in (
+            "transition_id",
+            "chunk_id",
+            "graph_id",
+            "from_node_id",
+            "to_node_id",
+            "choice_name",
+            "decision_id",
+            "runner_id",
+        )
+    ]
+    if has_reason:
+        columns.append(Column("reason", String))
+    transitions_table = Table(
+        "transitions", metadata, *columns, Column("epoch", Integer), Column("recorded_at", DateTime)
+    )
+    metadata.create_all(engine)
+    store = ReflectedStore(engine)
+    default_rows = [row for row in _compose("done").rows if row.table == "transitions"]
+    store.write(default_rows)
+    with engine.connect() as conn:
+        records = conn.execute(select(transitions_table)).mappings().all()
+    if has_reason:
+        assert [record["reason"] for record in records] == [None, None]
+
+    reason_rows = [
+        row
+        for row in compose_chunk(
+            status="done",
+            graph=_graph(),
+            clock=FixedClock(_NOW),
+            rng=random.Random(2),
+            judged_transition_reason="Tests passed",
+        ).rows
+        if row.table == "transitions"
+    ]
+    if has_reason:
+        store.write(reason_rows)
+        with engine.connect() as conn:
+            records = conn.execute(select(transitions_table)).mappings().all()
+        assert [record["reason"] for record in records] == [None, None, "Tests passed", None]
+    else:
+        with pytest.raises(SchemaDriftError, match="reason"):
+            store.write(reason_rows)
 
 
 def test_needs_human_lands_an_escalation_and_no_route_or_terminal() -> None:
