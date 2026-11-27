@@ -230,6 +230,7 @@ class ArtifactCheckBody(MirroredWireBody):
 
 class CompletionBody(BaseModel):
     choice: str
+    reason: str | None = Field(default=None, max_length=2000)
     epoch: int
     from_node_id: str
     check_results: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])

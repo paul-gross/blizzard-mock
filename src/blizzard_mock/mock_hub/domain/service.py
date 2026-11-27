@@ -49,6 +49,7 @@ from blizzard_mock.mock_hub.domain.models import (
     RoutineProposalState,
     ScopeSpec,
     SystemArtifactSpec,
+    TransitionRecord,
     WorkRefSpec,
     finding_exit,
     ships_from_lease_holder,
@@ -583,6 +584,7 @@ class MockHubService:
             analytics=spec.analytics,
             status=spec.status,
             cost=spec.cost,
+            history=list(spec.history),
         )
         self._state.put_chunk(chunk)
         return chunk
@@ -946,6 +948,7 @@ class MockHubService:
             terminal=status in TERMINAL_STATUSES,
             current_node_terminal=chunk.current_node_id == TERMINAL,
             latest_epoch=chunk.latest_epoch or None,
+            history=[entry.model_dump() for entry in chunk.history],
             work_refs=[p.model_dump() for p in chunk.work_refs],
             default_model=list(chunk.default_model),
             default_effort=chunk.default_effort,
@@ -1439,7 +1442,9 @@ class MockHubService:
 
     # -- completion apply --------------------------------------------------
 
-    def apply_completion(self, chunk_id: str, *, epoch: int, from_node_id: str, choice: str) -> ApplyResponse:
+    def apply_completion(
+        self, chunk_id: str, *, epoch: int, from_node_id: str, choice: str, reason: str | None = None
+    ) -> ApplyResponse:
         """Advance the chunk on a node-step completion — epoch-fenced and idempotent."""
         chunk = self._require(chunk_id)
         self._check_pinned_graph(chunk_id)
@@ -1470,6 +1475,20 @@ class MockHubService:
             return self._fail(chunk, f"unknown choice {choice!r} at {from_node_id!r}")
 
         response = self._advance(chunk, target)
+        if response.outcome is ApplyOutcome.FAILURE:
+            return response
+        chunk.history.append(
+            TransitionRecord(
+                from_node_id=from_node_id,
+                to_node_id=target,
+                choice_name=choice,
+                epoch=epoch,
+                recorded_at=self._clock.now().isoformat(),
+                graph_id=chunk.graph_id,
+                graph_name=chunk.graph_name,
+                reason=reason.strip() or None if reason is not None else None,
+            )
+        )
         chunk.applied[key] = response.outcome
         chunk.last_response = response
         self._state.put_chunk(chunk)

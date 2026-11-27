@@ -489,6 +489,56 @@ def test_lever_replay_is_applied_once_by_the_hub(stack: tuple[TestClient, TestCl
     assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["current_node_id"] == "review"  # advanced exactly once
 
 
+def test_completion_reason_is_preserved_on_replay(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    runner.post("/_levers/replay", json={"chunk_id": chunk_id})
+    result = runner.post(
+        "/_drive/complete", json={"chunk_id": chunk_id, "choice": "pass", "reason": "ready to review"}
+    ).json()
+    assert result["response"]["outcome"] == "next"
+    held = _held(runner, chunk_id)
+    assert held is not None
+    assert held.last_submission["reason"] == "ready to review"
+    history = hub.get(f"/api/fleet/chunks/{chunk_id}").json()["history"]
+    assert len(history) == 1
+    assert history[0]["reason"] == "ready to review"
+    assert (history[0]["from_node_id"], history[0]["to_node_id"], history[0]["choice_name"]) == (
+        "build",
+        "review",
+        "pass",
+    )
+
+
+def test_rejected_completion_does_not_add_history(stack: tuple[TestClient, TestClient]) -> None:
+    hub, runner = stack
+    chunk_id = _seed(hub)
+    _claim(runner, chunk_id)
+    runner.post("/_levers/stale_epoch", json={"chunk_id": chunk_id})
+    result = runner.post("/_drive/complete", json={"chunk_id": chunk_id, "choice": "pass", "reason": "too late"}).json()
+    assert result["response"]["outcome"] == "failure"
+    assert hub.get(f"/api/fleet/chunks/{chunk_id}").json()["history"] == []
+
+
+def test_seeded_transition_history_is_served(stack: tuple[TestClient, TestClient]) -> None:
+    hub, _runner = stack
+    history = [
+        {
+            "from_node_id": "build",
+            "to_node_id": "review",
+            "choice_name": "pass",
+            "epoch": 1,
+            "recorded_at": "2026-07-13T00:00:00+00:00",
+            "reason": "seeded",
+        }
+    ]
+    chunk_id = hub.post("/_seed/chunk", json={**_SPEC, "history": history}).json()["chunk_id"]
+    result = hub.get(f"/api/fleet/chunks/{chunk_id}").json()["history"]
+    assert len(result) == 1
+    assert result[0]["reason"] == "seeded"
+
+
 def test_lever_unreachable_leaves_a_claimed_but_unfinished_chunk(stack: tuple[TestClient, TestClient]) -> None:
     hub, runner = stack
     chunk_id = _seed(hub)

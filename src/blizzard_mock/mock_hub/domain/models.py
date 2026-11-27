@@ -430,6 +430,19 @@ DEFAULT_PROJECT_SLUG = "default"
 DEFAULT_PROJECT_NAME = "Default"
 
 
+class TransitionRecord(BaseModel):
+    from_node_id: str | None
+    from_node_name: str | None = None
+    to_node_id: str
+    to_node_name: str | None = None
+    choice_name: str | None
+    epoch: int
+    recorded_at: str
+    graph_id: str | None = None
+    graph_name: str | None = None
+    reason: str | None = None
+
+
 class ChunkSpec(BaseModel):
     """A seeded chunk: its scripted node graph plus work refs (POST /_seed/chunk)."""
 
@@ -468,6 +481,7 @@ class ChunkSpec(BaseModel):
     status: ChunkStatus = ChunkStatus.READY
     #: The chunk's derived cost total; ``None`` serves the real hub's zero total.
     cost: ChunkCostSpec | None = None
+    history: list[TransitionRecord] = Field(default_factory=list[TransitionRecord])
 
     @field_validator("status")
     @classmethod
@@ -504,6 +518,7 @@ class ChunkState(BaseModel):
     garden_proposals: list[GardenProposalSpec] = Field(default_factory=list[GardenProposalSpec])
     analytics: AnalyticsSpec = Field(default_factory=AnalyticsSpec)
     cost: ChunkCostSpec | None = None
+    history: list[TransitionRecord] = Field(default_factory=list[TransitionRecord])
     #: ``None`` until claimed; then the node the chunk is being worked at.
     current_node_id: str | None = None
     status: ChunkStatus = ChunkStatus.READY
